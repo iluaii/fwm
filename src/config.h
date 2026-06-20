@@ -1,0 +1,18 @@
+#ifndef FWM_CONFIG_H
+#define FWM_CONFIG_H
+
+#define PHYSICS_TICK_RATE 60.0
+
+#define FRICTION 0.97
+
+#define THROW_SPEED_MULTIPLIER 2.5
+
+#define STOP_SPEED_THRESHOLD 1.0
+
+#define DRAG_MARGIN 5
+
+#define PHYSICS_MARGIN 67
+
+#define RESTITUTION 0.75
+
+#endif /* FWM_CONFIG_H */
