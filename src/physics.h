@@ -24,6 +24,8 @@ PhysicsBody *physics_sync_body(PhysicsWorld *world, Window win, int x, int y, in
 void physics_stop_body(PhysicsWorld *world, Window win);
 void physics_throw_body(PhysicsWorld *world, Window win, double vx, double vy);
 void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int screen_height,
-                  Window skip_a, Window skip_b, double dt);
+                  Window skip_a, Window skip_b, Window dragged_win, double dt);
+
+void physics_set_velocity(PhysicsWorld *world, Window win, double vx, double vy);
 
 #endif /* FWM_PHYSICS_H */

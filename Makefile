@@ -1,9 +1,11 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -g -MMD -MP
-LDLIBS  = -lX11 -lm
+LDLIBS  = -lX11 -lm -lXft -lXext
 TARGET  = fwm
-SRC     = src/main.c src/physics.c src/window.c src/wm.c
 BUILD   = build
+
+SRC     = $(shell find src -name '*.c')
+
 OBJ     = $(SRC:src/%.c=$(BUILD)/%.o)
 DEP     = $(OBJ:.o=.d)
 
@@ -17,16 +19,16 @@ $(TARGET): $(OBJ)
 	$(CC) $(CFLAGS) $(OBJ) -o $(TARGET) $(LDLIBS)
 
 $(BUILD)/%.o: src/%.c
-	@mkdir -p $(BUILD)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 run: $(TARGET)
 	@if ! xdpyinfo -display $(XEPHYR_DISPLAY) >/dev/null 2>&1; then \
-		echo "Поднимаю Xephyr на $(XEPHYR_DISPLAY)..."; \
+		echo "Xephyr $(XEPHYR_DISPLAY)..."; \
 		Xephyr $(XEPHYR_DISPLAY) -screen 1280x800 & \
 		sleep 1; \
 	else \
-		echo "Xephyr на $(XEPHYR_DISPLAY) уже запущен."; \
+		echo "Xephyr $(XEPHYR_DISPLAY)"; \
 	fi
 	DISPLAY=$(XEPHYR_DISPLAY) ./$(TARGET)
 

@@ -5,6 +5,7 @@
 #include <string.h>
 #include "config.h"
 #include "window.h"
+#include "ui/decorations.h"
 
 static int xerror_handler(Display *dpy, XErrorEvent *event) {
     char msg[256];
@@ -22,11 +23,19 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
 
 static void handle_button_press(Fwm *wm, XButtonEvent *event) {
     if (event->subwindow == None) return;
-
+    if (event->subwindow == wm->tray_win) return;
+    
     WindowGeometry geometry;
     if (!window_get_geometry(wm->dpy, event->subwindow, &geometry)) {
         return;
     }
+
+    if (wm->last_touched_win != None && wm->last_touched_win != event->subwindow) {
+        decorations_draw_border(wm->dpy, wm->last_touched_win, 0);
+    }
+
+    wm->last_touched_win = event->subwindow;
+    decorations_draw_border(wm->dpy, event->subwindow, 1);
 
     physics_sync_body(&wm->physics, event->subwindow, geometry.x, geometry.y,
                       geometry.width, geometry.height);
@@ -34,7 +43,9 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
 
     if (event->button == Button1) {
         wm->drag.dragging = 1;
+        wm->drag.hist_count = 0;
         wm->drag.win = event->subwindow;
+        wm->drag.collision_disabled = (event->state & ShiftMask) ? 1 : 0;
         wm->drag.start_x = event->x_root;
         wm->drag.start_y = event->y_root;
         wm->drag.last_x = event->x_root;
@@ -46,7 +57,6 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
         wm->drag.win_start_y = geometry.y;
         wm->drag.win_width = geometry.width;
         wm->drag.win_height = geometry.height;
-
         XRaiseWindow(wm->dpy, wm->drag.win);
     } else if (event->button == Button3) {
         wm->resize.resizing = 1;
@@ -57,7 +67,6 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
         wm->resize.win_y = geometry.y;
         wm->resize.win_start_width = geometry.width;
         wm->resize.win_start_height = geometry.height;
-
         XRaiseWindow(wm->dpy, wm->resize.win);
     }
 }
@@ -81,17 +90,27 @@ static void handle_drag_motion(Fwm *wm, XMotionEvent *event) {
     if (new_y < min_y) new_y = min_y;
     if (new_y > max_y) new_y = max_y;
 
-    double dt = (event->time > wm->drag.last_time)
-              ? (double)(event->time - wm->drag.last_time) / 1000.0
-              : 1.0 / PHYSICS_TICK_RATE;
-    wm->drag.vx = (event->x_root - wm->drag.last_x) / dt;
-    wm->drag.vy = (event->y_root - wm->drag.last_y) / dt;
+    for (int i = 0; i < VELOCITY_HISTORY - 1; i++) {
+        wm->drag.hist_x[i] = wm->drag.hist_x[i + 1];
+        wm->drag.hist_y[i] = wm->drag.hist_y[i + 1];
+        wm->drag.hist_time[i] = wm->drag.hist_time[i + 1];
+    }
+    wm->drag.hist_x[VELOCITY_HISTORY - 1] = event->x_root;
+    wm->drag.hist_y[VELOCITY_HISTORY - 1] = event->y_root;
+    wm->drag.hist_time[VELOCITY_HISTORY - 1] = event->time;
+    if (wm->drag.hist_count < VELOCITY_HISTORY) wm->drag.hist_count++;
 
-    wm->drag.last_x = event->x_root;
-    wm->drag.last_y = event->y_root;
-    wm->drag.last_time = event->time;
+    if (wm->drag.hist_count >= 2) {
+        int oldest = VELOCITY_HISTORY - wm->drag.hist_count;
+        double dt = (double)(event->time - wm->drag.hist_time[oldest]) / 1000.0;
+        if (dt > 0.001) {
+            wm->drag.vx = (event->x_root - wm->drag.hist_x[oldest]) / dt;
+            wm->drag.vy = (event->y_root - wm->drag.hist_y[oldest]) / dt;
+        }
+    }
 
     XMoveWindow(wm->dpy, wm->drag.win, new_x, new_y);
+    decorations_draw_border(wm->dpy, wm->drag.win, 1);
     physics_sync_body(&wm->physics, wm->drag.win, new_x, new_y,
                       wm->drag.win_width, wm->drag.win_height);
 }
@@ -159,6 +178,10 @@ void fwm_init(Fwm *wm, Display *dpy) {
                 ButtonPressMask | ButtonReleaseMask | ButtonMotionMask,
                 GrabModeAsync, GrabModeAsync, None, None);
 
+    XGrabButton(dpy, Button1, MOD_KEY | ShiftMask, wm->root, True,
+            ButtonPressMask | ButtonReleaseMask | ButtonMotionMask,
+            GrabModeAsync, GrabModeAsync, None, None);
+
     XGrabButton(dpy, Button3, MOD_KEY, wm->root, True,
                 ButtonPressMask | ButtonReleaseMask | ButtonMotionMask,
                 GrabModeAsync, GrabModeAsync, None, None);
@@ -190,10 +213,15 @@ void fwm_handle_event(Fwm *wm, XEvent *event) {
 }
 
 void fwm_tick(Fwm *wm, double dt) {
-    Window drag_window = wm->drag.dragging ? wm->drag.win : None;
+    Window drag_window = (wm->drag.dragging && wm->drag.collision_disabled) ? wm->drag.win : None;
     Window resize_window = wm->resize.resizing ? wm->resize.win : None;
+    Window dragged_win = wm->drag.dragging ? wm->drag.win : None;
+
+    if (wm->drag.dragging) {
+        physics_set_velocity(&wm->physics, wm->drag.win, wm->drag.vx, wm->drag.vy);
+    }
 
     physics_step(&wm->physics, wm->dpy, wm->screen_width, wm->screen_height,
-                 drag_window, resize_window, dt);
+                 drag_window, resize_window, dragged_win, dt);
     XFlush(wm->dpy);
 }

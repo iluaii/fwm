@@ -1,6 +1,7 @@
 #include "physics.h"
 
 #include <math.h>
+#include <stdio.h>
 
 static double calc_mass(int width, int height) {
     return (double)(width * height) * MASS_DENSITY;
@@ -137,13 +138,70 @@ void physics_throw_body(PhysicsWorld *world, Window win, double vx, double vy) {
             body->vx = vx * THROW_SPEED_MULTIPLIER;
             body->vy = vy * THROW_SPEED_MULTIPLIER;
             clamp_velocity(&body->vx, &body->vy, MAX_THROW_SPEED);
+
+            double angle_deg = atan2(body->vy, body->vx) * 180.0 / M_PI;
+            fprintf(stderr, "fwm: throw vx=%.1f vy=%.1f angle=%.1f\n",
+                    body->vx, body->vy, angle_deg);
+            fflush(stderr);
+
+            return;
+        }
+    }
+}
+
+static void clamp_to_screen(PhysicsBody *body, int screen_width, int screen_height) {
+    double min_x = -(body->width - PHYSICS_MARGIN);
+    double max_x = screen_width - PHYSICS_MARGIN - body->width;
+    double min_y = -(body->height - PHYSICS_MARGIN);
+    double max_y = screen_height - PHYSICS_MARGIN - body->height;
+
+    if (body->x < min_x) body->x = min_x;
+    if (body->x > max_x) body->x = max_x;
+    if (body->y < min_y) body->y = min_y;
+    if (body->y > max_y) body->y = max_y;
+}
+
+static void push_out_single(PhysicsBody *fixed, PhysicsBody *moving) {
+    double fx2 = fixed->x + fixed->width;
+    double fy2 = fixed->y + fixed->height;
+    double mx2 = moving->x + moving->width;
+    double my2 = moving->y + moving->height;
+
+    double overlap_left = fx2 - moving->x;
+    double overlap_right = mx2 - fixed->x;
+    double overlap_top = fy2 - moving->y;
+    double overlap_bottom = my2 - fixed->y;
+
+    double overlap_x = overlap_left < overlap_right ? overlap_left : overlap_right;
+    double overlap_y = overlap_top < overlap_bottom ? overlap_top : overlap_bottom;
+
+    if (overlap_x < overlap_y) {
+        if (moving->x < fixed->x) {
+            moving->x -= overlap_x + 1.0;
+        } else {
+            moving->x += overlap_x + 1.0;
+        }
+    } else {
+        if (moving->y < fixed->y) {
+            moving->y -= overlap_y + 1.0;
+        } else {
+            moving->y += overlap_y + 1.0;
+        }
+    }
+}
+
+void physics_set_velocity(PhysicsWorld *world, Window win, double vx, double vy) {
+    for (int i = 0; i < world->body_count; i++) {
+        if (world->bodies[i].active && world->bodies[i].win == win) {
+            world->bodies[i].vx = vx;
+            world->bodies[i].vy = vy;
             return;
         }
     }
 }
 
 void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int screen_height,
-                  Window skip_a, Window skip_b, double dt) {
+                  Window skip_a, Window skip_b, Window dragged_win, double dt) {
     for (int i = 0; i < world->body_count; i++) {
         PhysicsBody *body = &world->bodies[i];
         if (!body->active || !body->flying) continue;
@@ -183,22 +241,41 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
         for (int j = i + 1; j < world->body_count; j++) {
             PhysicsBody *b = &world->bodies[j];
             if (!b->active) continue;
-            if (!a->flying && !b->flying) continue;
             if (should_skip_collision(skip_a, skip_b, a->win) ||
                 should_skip_collision(skip_a, skip_b, b->win)) {
                 continue;
-            }
+                }
 
             if (!rects_overlap((int)lround(a->x), (int)lround(a->y), a->width, a->height,
                                (int)lround(b->x), (int)lround(b->y), b->width, b->height)) {
                 continue;
             }
 
-            separate_bodies(a, b);
-            resolve_collision(a, b);
+            int a_is_dragged = (a->win == dragged_win);
+            int b_is_dragged = (b->win == dragged_win);
 
-            XMoveWindow(dpy, a->win, (int)lround(a->x), (int)lround(a->y));
-            XMoveWindow(dpy, b->win, (int)lround(b->x), (int)lround(b->y));
+            if (a_is_dragged) {
+                push_out_single(a, b);
+                b->vx = a->vx * RESTITUTION;
+                b->vy = a->vy * RESTITUTION;
+                b->flying = 1;
+                clamp_to_screen(b, screen_width, screen_height);
+                XMoveWindow(dpy, b->win, (int)lround(b->x), (int)lround(b->y));
+            } else if (b_is_dragged) {
+                push_out_single(b, a);
+                a->vx = b->vx * RESTITUTION;
+                a->vy = b->vy * RESTITUTION;
+                a->flying = 1;
+                clamp_to_screen(a, screen_width, screen_height);
+                XMoveWindow(dpy, a->win, (int)lround(a->x), (int)lround(a->y));
+            } else {
+                resolve_collision(a, b);
+                separate_bodies(a, b);
+                clamp_to_screen(a, screen_width, screen_height);
+                clamp_to_screen(b, screen_width, screen_height);
+                XMoveWindow(dpy, a->win, (int)lround(a->x), (int)lround(a->y));
+                XMoveWindow(dpy, b->win, (int)lround(b->x), (int)lround(b->y));
+            }
         }
     }
 }

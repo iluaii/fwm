@@ -4,6 +4,8 @@
 #include <time.h>
 #include "config.h"
 #include "wm.h"
+#include "ui/decorations.h"
+#include "ui/tray.h"
 
 static double elapsed_seconds(struct timespec start, struct timespec end) {
     return (end.tv_sec - start.tv_sec)
@@ -19,6 +21,9 @@ int main(void) {
 
     Fwm wm;
     fwm_init(&wm, dpy);
+    decorations_init(dpy);
+    Window tray = tray_init(dpy, wm.root, wm.screen_width);
+    wm.tray_win = tray;
 
     int xfd = ConnectionNumber(dpy);
     fprintf(stderr, "fwm: init done, entering event loop\n");
@@ -54,6 +59,7 @@ int main(void) {
         last_tick = now;
 
         fwm_tick(&wm, dt);
+        tray_redraw(dpy, tray, wm.screen_width);
     }
 
     XCloseDisplay(dpy);

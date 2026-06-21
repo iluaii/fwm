@@ -19,7 +19,7 @@
 
 #define DRAG_MARGIN 5
 
-#define PHYSICS_MARGIN 67
+#define PHYSICS_MARGIN 3
 
 #define RESTITUTION 0.75
 
