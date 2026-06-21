@@ -1,8 +1,11 @@
 CC      = gcc
-CFLAGS  = -Wall -Wextra -g
-LDLIBS  = -lX11
+CFLAGS  = -Wall -Wextra -g -MMD -MP
+LDLIBS  = -lX11 -lm
 TARGET  = fwm
-SRC     = src/main.c
+SRC     = src/main.c src/physics.c src/window.c src/wm.c
+BUILD   = build
+OBJ     = $(SRC:src/%.c=$(BUILD)/%.o)
+DEP     = $(OBJ:.o=.d)
 
 XEPHYR_DISPLAY = :1
 
@@ -10,8 +13,12 @@ XEPHYR_DISPLAY = :1
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
-	$(CC) $(CFLAGS) $(SRC) -o $(TARGET) $(LDLIBS)
+$(TARGET): $(OBJ)
+	$(CC) $(CFLAGS) $(OBJ) -o $(TARGET) $(LDLIBS)
+
+$(BUILD)/%.o: src/%.c
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 run: $(TARGET)
 	@if ! xdpyinfo -display $(XEPHYR_DISPLAY) >/dev/null 2>&1; then \
@@ -27,4 +34,6 @@ stop:
 	-pkill -f "Xephyr $(XEPHYR_DISPLAY)"
 
 clean:
-	rm -f $(TARGET)
+	rm -rf $(TARGET) $(BUILD)
+
+-include $(DEP)
