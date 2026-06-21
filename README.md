@@ -2,7 +2,7 @@
 
 `fwm` is a lightweight X11 window manager written in C where windows are treated as physical objects. Instead of strict, pixel-perfect tiling, windows here possess **mass, momentum, inertia, and velocity**. You can throw them, push them, and let them slide.
 
-> ⚠️ **Status:** Early development. Basic window physics and screen edge bouncing are implemented. Window-to-window collisions are coming soon.
+> ⚠️ **Status:** Early development. 
 
 ---
 
