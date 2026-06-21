@@ -1,8 +1,40 @@
-//
-// Created by ilu on 6/20/26.
-//
+#ifndef FWM_WM_H
+#define FWM_WM_H
 
-#ifndef CODEPROJECTS_WM_H
-#define CODEPROJECTS_WM_H
+#include <X11/Xlib.h>
+#include "physics.h"
 
-#endif //CODEPROJECTS_WM_H
+typedef struct {
+    int dragging;
+    Window win;
+    int start_x, start_y;
+    int win_start_x, win_start_y;
+    int win_width, win_height;
+    int last_x, last_y;
+    Time last_time;
+    double vx, vy;
+} DragState;
+
+typedef struct {
+    int resizing;
+    Window win;
+    int start_x, start_y;
+    int win_x, win_y;
+    int win_start_width, win_start_height;
+} ResizeState;
+
+typedef struct {
+    Display *dpy;
+    Window root;
+    int screen_width;
+    int screen_height;
+    DragState drag;
+    ResizeState resize;
+    PhysicsWorld physics;
+} Fwm;
+
+void fwm_init(Fwm *wm, Display *dpy);
+void fwm_handle_event(Fwm *wm, XEvent *ev);
+void fwm_tick(Fwm *wm, double dt);
+
+#endif /* FWM_WM_H */

@@ -1,11 +1,19 @@
 #ifndef FWM_CONFIG_H
 #define FWM_CONFIG_H
 
+#include <X11/X.h>
+
 #define PHYSICS_TICK_RATE 60.0
+
+#define MAX_WINDOWS 32
+
+#define MASS_DENSITY 0.0005
 
 #define FRICTION 0.97
 
-#define THROW_SPEED_MULTIPLIER 2.5
+#define THROW_SPEED_MULTIPLIER 0.65
+
+#define MAX_THROW_SPEED 1800.0
 
 #define STOP_SPEED_THRESHOLD 1.0
 
@@ -14,5 +22,7 @@
 #define PHYSICS_MARGIN 67
 
 #define RESTITUTION 0.75
+
+#define MOD_KEY Mod4Mask
 
 #endif /* FWM_CONFIG_H */

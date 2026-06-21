@@ -1,8 +1,17 @@
-//
-// Created by ilu on 6/20/26.
-//
+#ifndef FWM_WINDOW_H
+#define FWM_WINDOW_H
 
-#ifndef CODEPROJECTS_WINDOW_H
-#define CODEPROJECTS_WINDOW_H
+#include <X11/Xlib.h>
 
-#endif //CODEPROJECTS_WINDOW_H
+typedef struct {
+    int x, y;
+    int width, height;
+} WindowGeometry;
+
+int window_get_geometry(Display *dpy, Window win, WindowGeometry *geometry);
+WindowGeometry window_center_geometry(int screen_width, int screen_height);
+void window_map_centered(Display *dpy, Window win, int screen_width, int screen_height,
+                         WindowGeometry *geometry);
+void window_spawn_terminal(void);
+
+#endif /* FWM_WINDOW_H */
