@@ -1,6 +1,7 @@
 #ifndef FWM_WM_H
 #define FWM_WM_H
 #define VELOCITY_HISTORY 4
+#define BLOCKEDWINDOWS 1
 
 #include <X11/Xlib.h>
 #include "physics.h"

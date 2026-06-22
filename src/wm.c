@@ -19,6 +19,8 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
     window_map_centered(wm->dpy, event->window, wm->screen_width, wm->screen_height, &geometry);
     physics_sync_body(&wm->physics, event->window, geometry.x, geometry.y,
                       geometry.width, geometry.height);
+
+    XSelectInput(wm->dpy, event->window, EnterWindowMask);
 }
 
 static void handle_button_press(Fwm *wm, XButtonEvent *event) {
@@ -189,6 +191,17 @@ void fwm_init(Fwm *wm, Display *dpy) {
     XSync(dpy, False);
 }
 
+static void handle_enter_notify(Fwm *wm, XCrossingEvent *event) {
+    if (event->window == wm->tray_win) return;
+    XSetInputFocus(wm->dpy, event->window, RevertToPointerRoot, CurrentTime);
+
+    if (wm->last_touched_win != None && wm->last_touched_win != event->window) {
+        decorations_draw_border(wm->dpy, wm->last_touched_win, 0);
+    }
+    wm->last_touched_win = event->window;
+    decorations_draw_border(wm->dpy, event->window, 1);
+}
+
 void fwm_handle_event(Fwm *wm, XEvent *event) {
     switch (event->type) {
         case MapRequest:
@@ -206,6 +219,9 @@ void fwm_handle_event(Fwm *wm, XEvent *event) {
             break;
         case KeyPress:
             handle_key_press(wm, &event->xkey);
+            break;
+        case EnterNotify:
+            handle_enter_notify(wm, &event->xcrossing);
             break;
         default:
             break;
