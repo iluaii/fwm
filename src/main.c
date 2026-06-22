@@ -1,3 +1,4 @@
+#include <math.h>
 #include <X11/Xlib.h>
 #include <stdio.h>
 #include <sys/select.h>
@@ -59,7 +60,18 @@ int main(void) {
         last_tick = now;
 
         fwm_tick(&wm, dt);
-        tray_redraw(dpy, tray, wm.screen_width);
+        TrayData tray_data = {0};
+        if (wm.last_touched_win != None) {
+            PhysicsBody *b = physics_find_body(&wm.physics, wm.last_touched_win);
+            if (b) {
+                tray_data.win_name = "kitty";
+                tray_data.speed = hypot(b->vx, b->vy);
+                tray_data.angle = atan2(b->vy, b->vx) * 180.0 / M_PI;
+                tray_data.mass = b->mass;
+                tray_data.flying = b->flying;
+            }
+        }
+        tray_redraw(dpy, tray, &tray_data);
     }
 
     XCloseDisplay(dpy);
