@@ -279,3 +279,12 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
         }
     }
 }
+
+PhysicsBody *physics_find_body(PhysicsWorld *world, Window win) {
+    for (int i = 0; i < world->body_count; i++) {
+        if (world->bodies[i].active && world->bodies[i].win == win) {
+            return &world->bodies[i];
+        }
+    }
+    return NULL;
+}

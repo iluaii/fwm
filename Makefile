@@ -8,6 +8,8 @@ SRC     = $(shell find src -name '*.c')
 
 OBJ     = $(SRC:src/%.c=$(BUILD)/%.o)
 DEP     = $(OBJ:.o=.d)
+CFLAGS += $(shell pkg-config --cflags x11 xft freetype2)
+LDFLAGS += $(shell pkg-config --libs x11 xft freetype2)
 
 XEPHYR_DISPLAY = :1
 

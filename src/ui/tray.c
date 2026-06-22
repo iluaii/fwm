@@ -1,8 +1,17 @@
 #include "tray.h"
+
+#include <stdio.h>
+#include <string.h>
 #include <X11/extensions/shape.h>
+#include <X11/Xft/Xft.h>
 
 static GC tray_gc;
 static unsigned long bg_color;
+static XftFont *font;
+static XftDraw *xft_draw;
+static XftColor text_primary;
+static XftColor text_secondary;
+static int tray_width_stored;
 
 static void apply_hexagon_shape(Display *dpy, Window tray, int width, int height) {
     int cut = height / 2;
@@ -40,7 +49,18 @@ Window tray_init(Display *dpy, Window root, int screen_width) {
 
     tray_gc = XCreateGC(dpy, tray, 0, NULL);
 
+
+    Visual *visual = DefaultVisual(dpy, screen);
     Colormap cmap = XDefaultColormap(dpy, screen);
+
+    font = XftFontOpenName(dpy, screen, "monospace:size=10");
+    xft_draw = XftDrawCreate(dpy, tray, visual, cmap);
+
+    XftColorAllocName(dpy, visual, cmap, "#eceff4", &text_primary);
+    XftColorAllocName(dpy, visual, cmap, "#9099aa", &text_secondary);
+
+    tray_width_stored = tray_width;
+
     XColor color;
     XParseColor(dpy, cmap, "#2e3440", &color);
     XAllocColor(dpy, cmap, &color);
@@ -54,9 +74,40 @@ Window tray_init(Display *dpy, Window root, int screen_width) {
     return tray;
 }
 
-void tray_redraw(Display *dpy, Window tray_win, int screen_width) {
+void tray_redraw(Display *dpy, Window tray_win, const TrayData *data) {
     XRaiseWindow(dpy, tray_win);
 
     XSetForeground(dpy, tray_gc, bg_color);
-    XFillRectangle(dpy, tray_win, tray_gc, 0, 0, screen_width, TRAY_HEIGHT);
+    XFillRectangle(dpy, tray_win, tray_gc, 0, 0, tray_width_stored, TRAY_HEIGHT);
+
+    if (!data || !data->win_name) return;
+
+    int text_y = (TRAY_HEIGHT + font->ascent - font->descent) / 2;
+
+    int margin_x = TRAY_HEIGHT / 2 + 8;
+    XftDrawStringUtf8(xft_draw, &text_primary, font,
+                      margin_x, text_y,
+                      (const FcChar8 *)data->win_name,
+                      strlen(data->win_name));
+
+    char params[128];
+    if (data->flying) {
+        snprintf(params, sizeof(params),
+                 "spd: %.0f  ang: %.0f°  mass: %.1f",
+                 data->speed, data->angle, data->mass);
+    } else {
+        snprintf(params, sizeof(params),
+                 "mass: %.1f  idle",
+                 data->mass);
+    }
+
+    XGlyphInfo extents;
+    XftTextExtentsUtf8(dpy, font,
+                       (const FcChar8 *)data->win_name,
+                       strlen(data->win_name), &extents);
+
+    XftDrawStringUtf8(xft_draw, &text_secondary, font,
+                      margin_x + extents.xOff + 8, text_y,
+                      (const FcChar8 *)params,
+                      strlen(params));
 }
