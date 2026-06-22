@@ -80,34 +80,54 @@ void tray_redraw(Display *dpy, Window tray_win, const TrayData *data) {
     XSetForeground(dpy, tray_gc, bg_color);
     XFillRectangle(dpy, tray_win, tray_gc, 0, 0, tray_width_stored, TRAY_HEIGHT);
 
-    if (!data || !data->win_name) return;
+    if (!data) return;
 
     int text_y = (TRAY_HEIGHT + font->ascent - font->descent) / 2;
-
     int margin_x = TRAY_HEIGHT / 2 + 8;
-    XftDrawStringUtf8(xft_draw, &text_primary, font,
-                      margin_x, text_y,
-                      (const FcChar8 *)data->win_name,
-                      strlen(data->win_name));
 
-    char params[128];
-    if (data->flying) {
-        snprintf(params, sizeof(params),
-                 "spd: %.0f  ang: %.0f°  mass: %.1f",
-                 data->speed, data->angle, data->mass);
-    } else {
-        snprintf(params, sizeof(params),
-                 "mass: %.1f  idle",
-                 data->mass);
+    // 1. Draw 10 desktop indicators
+    int dot_spacing = 20;
+    for (int i = 0; i < 10; i++) {
+        char buf[16];
+        int count = data->desktop_window_counts[i];
+        if (count > 0) {
+            snprintf(buf, sizeof(buf), "%d", count);
+        } else {
+            strcpy(buf, "•");
+        }
+
+        XftColor *color = (i == data->active_desktop) ? &text_primary : &text_secondary;
+        XftDrawStringUtf8(xft_draw, color, font,
+                          margin_x + i * dot_spacing, text_y,
+                          (const FcChar8 *)buf, strlen(buf));
     }
 
-    XGlyphInfo extents;
-    XftTextExtentsUtf8(dpy, font,
-                       (const FcChar8 *)data->win_name,
-                       strlen(data->win_name), &extents);
+    int win_info_x = margin_x + 10 * dot_spacing + 15;
+    if (data->win_name) {
+        XftDrawStringUtf8(xft_draw, &text_primary, font,
+                          win_info_x, text_y,
+                          (const FcChar8 *)data->win_name,
+                          strlen(data->win_name));
 
-    XftDrawStringUtf8(xft_draw, &text_secondary, font,
-                      margin_x + extents.xOff + 8, text_y,
-                      (const FcChar8 *)params,
-                      strlen(params));
+        char params[128];
+        if (data->flying) {
+            snprintf(params, sizeof(params),
+                     "spd: %.0f  ang: %.0f°  mass: %.1f",
+                     data->speed, data->angle, data->mass);
+        } else {
+            snprintf(params, sizeof(params),
+                     "mass: %.1f  idle",
+                     data->mass);
+        }
+
+        XGlyphInfo extents;
+        XftTextExtentsUtf8(dpy, font,
+                           (const FcChar8 *)data->win_name,
+                           strlen(data->win_name), &extents);
+
+        XftDrawStringUtf8(xft_draw, &text_secondary, font,
+                          win_info_x + extents.xOff + 8, text_y,
+                          (const FcChar8 *)params,
+                          strlen(params));
+    }
 }

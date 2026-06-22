@@ -96,10 +96,14 @@ void physics_init(PhysicsWorld *world) {
     world->body_count = 0;
 }
 
-PhysicsBody *physics_sync_body(PhysicsWorld *world, Window win, int x, int y, int width, int height) {
+PhysicsBody *physics_sync_body(PhysicsWorld *world, Window win, int x, int y, int width, int height, int screen_width) {
     for (int i = 0; i < world->body_count; i++) {
         if (world->bodies[i].active && world->bodies[i].win == win) {
             update_body_geometry(&world->bodies[i], x, y, width, height);
+            int d = (int)((world->bodies[i].x + world->bodies[i].width / 2.0) / screen_width);
+            if (d < 0) d = 0;
+            if (d >= 10) d = 9;
+            world->bodies[i].desktop_id = d;
             return &world->bodies[i];
         }
     }
@@ -115,6 +119,12 @@ PhysicsBody *physics_sync_body(PhysicsWorld *world, Window win, int x, int y, in
     body->vx = 0;
     body->vy = 0;
     update_body_geometry(body, x, y, width, height);
+    
+    int d = (int)((body->x + body->width / 2.0) / screen_width);
+    if (d < 0) d = 0;
+    if (d >= 10) d = 9;
+    body->desktop_id = d;
+
     return body;
 }
 
@@ -149,9 +159,10 @@ void physics_throw_body(PhysicsWorld *world, Window win, double vx, double vy) {
     }
 }
 
-static void clamp_to_screen(PhysicsBody *body, int screen_width, int screen_height) {
+static void clamp_body_bounds(PhysicsBody *body, int screen_width, int screen_height) {
     double min_x = -(body->width - PHYSICS_MARGIN);
-    double max_x = screen_width - PHYSICS_MARGIN - body->width;
+    double max_x = 10 * screen_width - PHYSICS_MARGIN - body->width;
+
     double min_y = -(body->height - PHYSICS_MARGIN);
     double max_y = screen_height - PHYSICS_MARGIN - body->height;
 
@@ -201,6 +212,7 @@ void physics_set_velocity(PhysicsWorld *world, Window win, double vx, double vy)
 }
 
 void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int screen_height,
+                  int camera_x,
                   Window skip_a, Window skip_b, Window dragged_win, double dt) {
     for (int i = 0; i < world->body_count; i++) {
         PhysicsBody *body = &world->bodies[i];
@@ -219,7 +231,7 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
         }
 
         double min_x = -(body->width - PHYSICS_MARGIN);
-        double max_x = screen_width - PHYSICS_MARGIN - body->width;
+        double max_x = 10 * screen_width - PHYSICS_MARGIN - body->width;
         double min_y = -(body->height - PHYSICS_MARGIN);
         double max_y = screen_height - PHYSICS_MARGIN - body->height;
 
@@ -231,7 +243,7 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
         body->x = new_x;
         body->y = new_y;
 
-        XMoveWindow(dpy, body->win, (int)lround(new_x), (int)lround(new_y));
+        XMoveWindow(dpy, body->win, (int)lround(new_x - camera_x), (int)lround(new_y));
     }
 
     for (int i = 0; i < world->body_count; i++) {
@@ -259,23 +271,33 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
                 b->vx = a->vx * RESTITUTION;
                 b->vy = a->vy * RESTITUTION;
                 b->flying = 1;
-                clamp_to_screen(b, screen_width, screen_height);
-                XMoveWindow(dpy, b->win, (int)lround(b->x), (int)lround(b->y));
+                clamp_body_bounds(b, screen_width, screen_height);
+                XMoveWindow(dpy, b->win, (int)lround(b->x - camera_x), (int)lround(b->y));
             } else if (b_is_dragged) {
                 push_out_single(b, a);
                 a->vx = b->vx * RESTITUTION;
                 a->vy = b->vy * RESTITUTION;
                 a->flying = 1;
-                clamp_to_screen(a, screen_width, screen_height);
-                XMoveWindow(dpy, a->win, (int)lround(a->x), (int)lround(a->y));
+                clamp_body_bounds(a, screen_width, screen_height);
+                XMoveWindow(dpy, a->win, (int)lround(a->x - camera_x), (int)lround(a->y));
             } else {
                 resolve_collision(a, b);
                 separate_bodies(a, b);
-                clamp_to_screen(a, screen_width, screen_height);
-                clamp_to_screen(b, screen_width, screen_height);
-                XMoveWindow(dpy, a->win, (int)lround(a->x), (int)lround(a->y));
-                XMoveWindow(dpy, b->win, (int)lround(b->x), (int)lround(b->y));
+                clamp_body_bounds(a, screen_width, screen_height);
+                clamp_body_bounds(b, screen_width, screen_height);
+                XMoveWindow(dpy, a->win, (int)lround(a->x - camera_x), (int)lround(a->y));
+                XMoveWindow(dpy, b->win, (int)lround(b->x - camera_x), (int)lround(b->y));
             }
+        }
+    }
+
+    for (int i = 0; i < world->body_count; i++) {
+        PhysicsBody *body = &world->bodies[i];
+        if (body->active) {
+            int d = (int)((body->x + body->width / 2.0) / screen_width);
+            if (d < 0) d = 0;
+            if (d >= 10) d = 9;
+            body->desktop_id = d;
         }
     }
 }

@@ -13,6 +13,8 @@ typedef struct {
     double angle;
     double mass;
     int flying;
+    int desktop_window_counts[10];
+    int active_desktop;
 } TrayData;
 
 Window tray_init(Display *dpy, Window root, int screen_width);
