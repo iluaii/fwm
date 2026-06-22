@@ -2,7 +2,9 @@
 
 #include <X11/keysym.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "config.h"
 #include "window.h"
 #include "ui/decorations.h"
@@ -17,8 +19,8 @@ static int xerror_handler(Display *dpy, XErrorEvent *event) {
 static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
     WindowGeometry geometry;
     window_map_centered(wm->dpy, event->window, wm->screen_width, wm->screen_height, &geometry);
-    physics_sync_body(&wm->physics, event->window, geometry.x, geometry.y,
-                      geometry.width, geometry.height);
+    physics_sync_body(&wm->physics, event->window, geometry.x + wm->camera_x, geometry.y,
+                      geometry.width, geometry.height, wm->screen_width);
 
     XSelectInput(wm->dpy, event->window, EnterWindowMask);
 }
@@ -41,8 +43,8 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
 
     XSetInputFocus(wm->dpy, event->subwindow, RevertToPointerRoot, CurrentTime);
 
-    physics_sync_body(&wm->physics, event->subwindow, geometry.x, geometry.y,
-                      geometry.width, geometry.height);
+    physics_sync_body(&wm->physics, event->subwindow, geometry.x + wm->camera_x, geometry.y,
+                      geometry.width, geometry.height, wm->screen_width);
     physics_stop_body(&wm->physics, event->subwindow);
 
     if (event->button == Button1) {
@@ -78,21 +80,34 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
 static void handle_drag_motion(Fwm *wm, XMotionEvent *event) {
     if (!wm->drag.dragging) return;
 
+    if (wm->camera_x == wm->target_camera_x) {
+        int current_d = wm->target_camera_x / wm->screen_width;
+        if (event->x_root >= wm->screen_width - 10 && current_d < 9) {
+            wm->target_camera_x = (current_d + 1) * wm->screen_width;
+        } else if (event->x_root <= 10 && current_d > 0) {
+            wm->target_camera_x = (current_d - 1) * wm->screen_width;
+        }
+    }
+
     int dx = event->x_root - wm->drag.start_x;
     int dy = event->y_root - wm->drag.start_y;
 
-    int new_x = wm->drag.win_start_x + dx;
-    int new_y = wm->drag.win_start_y + dy;
+    int min_world_x = -(wm->drag.win_width - DRAG_MARGIN);
+    int max_world_x = 10 * wm->screen_width - DRAG_MARGIN - wm->drag.win_width;
 
-    int min_x = -(wm->drag.win_width - DRAG_MARGIN);
-    int max_x = wm->screen_width - DRAG_MARGIN - wm->drag.win_width;
+    int target_world_x = wm->drag.win_start_x + wm->camera_x + dx;
+    int target_world_y = wm->drag.win_start_y + dy;
+
+    if (target_world_x < min_world_x) target_world_x = min_world_x;
+    if (target_world_x > max_world_x) target_world_x = max_world_x;
+
     int min_y = -(wm->drag.win_height - DRAG_MARGIN);
     int max_y = wm->screen_height - DRAG_MARGIN - wm->drag.win_height;
+    if (target_world_y < min_y) target_world_y = min_y;
+    if (target_world_y > max_y) target_world_y = max_y;
 
-    if (new_x < min_x) new_x = min_x;
-    if (new_x > max_x) new_x = max_x;
-    if (new_y < min_y) new_y = min_y;
-    if (new_y > max_y) new_y = max_y;
+    int new_x = target_world_x - wm->camera_x;
+    int new_y = target_world_y;
 
     for (int i = 0; i < VELOCITY_HISTORY - 1; i++) {
         wm->drag.hist_x[i] = wm->drag.hist_x[i + 1];
@@ -115,8 +130,8 @@ static void handle_drag_motion(Fwm *wm, XMotionEvent *event) {
 
     XMoveWindow(wm->dpy, wm->drag.win, new_x, new_y);
     decorations_draw_border(wm->dpy, wm->drag.win, 1);
-    physics_sync_body(&wm->physics, wm->drag.win, new_x, new_y,
-                      wm->drag.win_width, wm->drag.win_height);
+    physics_sync_body(&wm->physics, wm->drag.win, target_world_x, new_y,
+                      wm->drag.win_width, wm->drag.win_height, wm->screen_width);
 }
 
 static void handle_resize_motion(Fwm *wm, XMotionEvent *event) {
@@ -139,16 +154,15 @@ static void handle_resize_motion(Fwm *wm, XMotionEvent *event) {
     }
 
     XResizeWindow(wm->dpy, wm->resize.win, new_w, new_h);
-    physics_sync_body(&wm->physics, wm->resize.win, wm->resize.win_x, wm->resize.win_y,
-                      new_w, new_h);
+    physics_sync_body(&wm->physics, wm->resize.win, wm->resize.win_x + wm->camera_x, wm->resize.win_y,
+                      new_w, new_h, wm->screen_width);
 }
-
 static void handle_button_release(Fwm *wm) {
     if (wm->drag.dragging) {
         WindowGeometry geometry;
         if (window_get_geometry(wm->dpy, wm->drag.win, &geometry)) {
-            physics_sync_body(&wm->physics, wm->drag.win, geometry.x, geometry.y,
-                              geometry.width, geometry.height);
+            physics_sync_body(&wm->physics, wm->drag.win, geometry.x + wm->camera_x, geometry.y,
+                              geometry.width, geometry.height, wm->screen_width);
             physics_throw_body(&wm->physics, wm->drag.win, wm->drag.vx, wm->drag.vy);
         }
     }
@@ -161,6 +175,19 @@ static void handle_key_press(Fwm *wm, XKeyEvent *event) {
     KeyCode return_key = XKeysymToKeycode(wm->dpy, XK_Return);
     if (event->keycode == return_key && (event->state & MOD_KEY)) {
         window_spawn_terminal();
+        return;
+    }
+
+    // Desktop keys
+    KeySym desktop_keys[10] = {XK_1, XK_2, XK_3, XK_4, XK_5, XK_6, XK_7, XK_8, XK_9, XK_0};
+    for (int i = 0; i < 10; i++) {
+        KeyCode code = XKeysymToKeycode(wm->dpy, desktop_keys[i]);
+        if (event->keycode == code && (event->state & MOD_KEY)) {
+            wm->target_camera_x = i * wm->screen_width;
+            fprintf(stderr, "fwm: switch to desktop %d (target_x = %d)\n", i, wm->target_camera_x);
+            fflush(stderr);
+            return;
+        }
     }
 }
 
@@ -172,11 +199,22 @@ void fwm_init(Fwm *wm, Display *dpy) {
     wm->screen_height = DisplayHeight(dpy, DefaultScreen(dpy));
     physics_init(&wm->physics);
 
+    wm->camera_x = 0;
+    wm->target_camera_x = 0;
+    wm->total_desktops = 10;
+
     XSetErrorHandler(xerror_handler);
     XSelectInput(dpy, wm->root, SubstructureRedirectMask | StructureNotifyMask);
 
     KeyCode return_key = XKeysymToKeycode(dpy, XK_Return);
     XGrabKey(dpy, return_key, MOD_KEY, wm->root, True, GrabModeAsync, GrabModeAsync);
+
+    // Grab Desktop keys (1 to 9, and 0)
+    KeySym desktop_keys[10] = {XK_1, XK_2, XK_3, XK_4, XK_5, XK_6, XK_7, XK_8, XK_9, XK_0};
+    for (int i = 0; i < 10; i++) {
+        KeyCode code = XKeysymToKeycode(dpy, desktop_keys[i]);
+        XGrabKey(dpy, code, MOD_KEY, wm->root, True, GrabModeAsync, GrabModeAsync);
+    }
 
     XGrabButton(dpy, Button1, MOD_KEY, wm->root, True,
                 ButtonPressMask | ButtonReleaseMask | ButtonMotionMask,
@@ -233,7 +271,28 @@ void fwm_tick(Fwm *wm, double dt) {
         physics_set_velocity(&wm->physics, wm->drag.win, wm->drag.vx, wm->drag.vy);
     }
 
+    if (wm->camera_x != wm->target_camera_x) {
+        double diff = wm->target_camera_x - wm->camera_x;
+        int step = (int)lround(diff * 10.0 * dt);
+        if (step == 0) {
+            step = diff > 0 ? 1 : -1;
+        }
+        if (abs(step) >= fabs(diff)) {
+            wm->camera_x = wm->target_camera_x;
+        } else {
+            wm->camera_x += step;
+        }
+
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *body = &wm->physics.bodies[i];
+            if (body->active && body->win != dragged_win) {
+                XMoveWindow(wm->dpy, body->win, (int)lround(body->x - wm->camera_x), (int)lround(body->y));
+            }
+        }
+    }
+
     physics_step(&wm->physics, wm->dpy, wm->screen_width, wm->screen_height,
+                 wm->camera_x,
                  drag_window, resize_window, dragged_win, dt);
     XFlush(wm->dpy);
 }

@@ -61,6 +61,23 @@ int main(void) {
 
         fwm_tick(&wm, dt);
         TrayData tray_data = {0};
+
+        for (int i = 0; i < 10; i++) {
+            tray_data.desktop_window_counts[i] = 0;
+        }
+        for (int i = 0; i < wm.physics.body_count; i++) {
+            PhysicsBody *body = &wm.physics.bodies[i];
+            if (body->active) {
+                int d = (int)((body->x + body->width / 2.0) / wm.screen_width);
+                if (d >= 0 && d < 10) {
+                    tray_data.desktop_window_counts[d]++;
+                }
+            }
+        }
+
+        tray_data.active_desktop = (wm.camera_x + wm.screen_width / 2) / wm.screen_width;
+        if (tray_data.active_desktop < 0) tray_data.active_desktop = 0;
+        if (tray_data.active_desktop >= 10) tray_data.active_desktop = 9;
         if (wm.last_touched_win != None) {
             PhysicsBody *b = physics_find_body(&wm.physics, wm.last_touched_win);
             if (b) {

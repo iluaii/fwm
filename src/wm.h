@@ -40,6 +40,9 @@ typedef struct {
     PhysicsWorld physics;
     Window last_touched_win;
     Window tray_win;
+    int camera_x;
+    int target_camera_x;
+    int total_desktops;
 } Fwm;
 
 void fwm_init(Fwm *wm, Display *dpy);
