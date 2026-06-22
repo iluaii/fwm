@@ -39,6 +39,8 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
     wm->last_touched_win = event->subwindow;
     decorations_draw_border(wm->dpy, event->subwindow, 1);
 
+    XSetInputFocus(wm->dpy, event->subwindow, RevertToPointerRoot, CurrentTime);
+
     physics_sync_body(&wm->physics, event->subwindow, geometry.x, geometry.y,
                       geometry.width, geometry.height);
     physics_stop_body(&wm->physics, event->subwindow);
@@ -194,12 +196,6 @@ void fwm_init(Fwm *wm, Display *dpy) {
 static void handle_enter_notify(Fwm *wm, XCrossingEvent *event) {
     if (event->window == wm->tray_win) return;
     XSetInputFocus(wm->dpy, event->window, RevertToPointerRoot, CurrentTime);
-
-    if (wm->last_touched_win != None && wm->last_touched_win != event->window) {
-        decorations_draw_border(wm->dpy, wm->last_touched_win, 0);
-    }
-    wm->last_touched_win = event->window;
-    decorations_draw_border(wm->dpy, event->window, 1);
 }
 
 void fwm_handle_event(Fwm *wm, XEvent *event) {
