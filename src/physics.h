@@ -2,7 +2,7 @@
 #define FWM_PHYSICS_H
 
 #include <X11/Xlib.h>
-#include "config.h"
+#include "defines.h"
 
 typedef struct {
     Window win;
@@ -13,6 +13,10 @@ typedef struct {
     double x, y;
     int width, height;
     int desktop_id;
+    int fullscreen;
+    int shaped;
+    double sav_x, sav_y;
+    int sav_w, sav_h;
 } PhysicsBody;
 
 typedef struct {
@@ -29,5 +33,6 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
                   Window skip_a, Window skip_b, Window dragged_win, double dt);
 void physics_set_velocity(PhysicsWorld *world, Window win, double vx, double vy);
 PhysicsBody *physics_find_body(PhysicsWorld *world, Window win);
+void physics_remove_body(PhysicsWorld *world, Window win);
 
 #endif /* FWM_PHYSICS_H */

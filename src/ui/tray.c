@@ -8,7 +8,10 @@
 static GC tray_gc;
 static unsigned long bg_color;
 static XftFont *font;
+
+static Pixmap back_buf;
 static XftDraw *xft_draw;
+
 static XftColor text_primary;
 static XftColor text_secondary;
 static int tray_width_stored;
@@ -45,16 +48,14 @@ Window tray_init(Display *dpy, Window root, int screen_width) {
     int tray_x = (screen_width - tray_width) / 2;
     int tray_y = 8;
 
-    Window tray = XCreateSimpleWindow(dpy, root, tray_x, tray_y, tray_width, TRAY_HEIGHT, 0,0, BlackPixel(dpy, screen));
+    Window tray = XCreateSimpleWindow(dpy, root, tray_x, tray_y, tray_width, TRAY_HEIGHT, 0, 0, BlackPixel(dpy, screen));
 
     tray_gc = XCreateGC(dpy, tray, 0, NULL);
-
 
     Visual *visual = DefaultVisual(dpy, screen);
     Colormap cmap = XDefaultColormap(dpy, screen);
 
     font = XftFontOpenName(dpy, screen, "monospace:size=10");
-    xft_draw = XftDrawCreate(dpy, tray, visual, cmap);
 
     XftColorAllocName(dpy, visual, cmap, "#eceff4", &text_primary);
     XftColorAllocName(dpy, visual, cmap, "#9099aa", &text_secondary);
@@ -68,6 +69,10 @@ Window tray_init(Display *dpy, Window root, int screen_width) {
 
     XSetWindowBackground(dpy, tray, bg_color);
 
+    back_buf = XCreatePixmap(dpy, tray, tray_width, TRAY_HEIGHT,
+                             DefaultDepth(dpy, screen));
+    xft_draw = XftDrawCreate(dpy, back_buf, visual, cmap);
+
     apply_hexagon_shape(dpy, tray, tray_width, TRAY_HEIGHT);
     XMapRaised(dpy, tray);
 
@@ -75,17 +80,14 @@ Window tray_init(Display *dpy, Window root, int screen_width) {
 }
 
 void tray_redraw(Display *dpy, Window tray_win, const TrayData *data) {
-    XRaiseWindow(dpy, tray_win);
-
     XSetForeground(dpy, tray_gc, bg_color);
-    XFillRectangle(dpy, tray_win, tray_gc, 0, 0, tray_width_stored, TRAY_HEIGHT);
+    XFillRectangle(dpy, back_buf, tray_gc, 0, 0, tray_width_stored, TRAY_HEIGHT);
 
-    if (!data) return;
+    if (!data) goto blit;
 
     int text_y = (TRAY_HEIGHT + font->ascent - font->descent) / 2;
     int margin_x = TRAY_HEIGHT / 2 + 8;
 
-    // 1. Draw 10 desktop indicators
     int dot_spacing = 20;
     for (int i = 0; i < 10; i++) {
         char buf[16];
@@ -130,4 +132,8 @@ void tray_redraw(Display *dpy, Window tray_win, const TrayData *data) {
                           (const FcChar8 *)params,
                           strlen(params));
     }
+
+blit:
+    XCopyArea(dpy, back_buf, tray_win, tray_gc,
+              0, 0, tray_width_stored, TRAY_HEIGHT, 0, 0);
 }

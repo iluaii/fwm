@@ -30,6 +30,11 @@ typedef struct {
     int win_start_width, win_start_height;
 } ResizeState;
 
+typedef enum {
+    DESKTOP_MODE_PHYSICS,
+    DESKTOP_MODE_TILING,
+    DESKTOP_MODE_NORMAL,
+} DesktopMode;
 typedef struct {
     Display *dpy;
     Window root;
@@ -39,10 +44,15 @@ typedef struct {
     ResizeState resize;
     PhysicsWorld physics;
     Window last_touched_win;
+    Window focused_win;
     Window tray_win;
     int camera_x;
     int target_camera_x;
     int total_desktops;
+    DesktopMode desktop_mode[10];
+    double master_ratio;
+    Atom net_wm_state;
+    Atom net_wm_state_fullscreen;
 } Fwm;
 
 void fwm_init(Fwm *wm, Display *dpy);
