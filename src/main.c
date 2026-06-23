@@ -1,12 +1,13 @@
 #include <math.h>
 #include <X11/Xlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/select.h>
 #include <time.h>
-#include "config.h"
 #include "wm.h"
 #include "ui/decorations.h"
 #include "ui/tray.h"
+#include "defines.h"
 
 static double elapsed_seconds(struct timespec start, struct timespec end) {
     return (end.tv_sec - start.tv_sec)
@@ -78,17 +79,34 @@ int main(void) {
         tray_data.active_desktop = (wm.camera_x + wm.screen_width / 2) / wm.screen_width;
         if (tray_data.active_desktop < 0) tray_data.active_desktop = 0;
         if (tray_data.active_desktop >= 10) tray_data.active_desktop = 9;
+        char *win_name = NULL;
+
         if (wm.last_touched_win != None) {
             PhysicsBody *b = physics_find_body(&wm.physics, wm.last_touched_win);
             if (b) {
-                tray_data.win_name = "kitty";
+                if (!XFetchName(dpy, wm.last_touched_win, &win_name) || !win_name) {
+                    win_name = "Window";
+                }
+
+                tray_data.win_name = win_name;
                 tray_data.speed = hypot(b->vx, b->vy);
                 tray_data.angle = atan2(b->vy, b->vx) * 180.0 / M_PI;
                 tray_data.mass = b->mass;
                 tray_data.flying = b->flying;
             }
         }
-        tray_redraw(dpy, tray, &tray_data);
+
+        static TrayData prev_tray_data;
+        static int tray_drawn = 0;
+        if (!tray_drawn || memcmp(&tray_data, &prev_tray_data, sizeof(TrayData)) != 0) {
+            tray_redraw(dpy, tray, &tray_data);
+            prev_tray_data = tray_data;
+            tray_drawn = 1;
+        }
+
+        if (win_name && strcmp(win_name, "Window") != 0) {
+            XFree(win_name);
+        }
     }
 
     XCloseDisplay(dpy);

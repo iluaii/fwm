@@ -211,11 +211,22 @@ void physics_set_velocity(PhysicsWorld *world, Window win, double vx, double vy)
     }
 }
 
+void physics_remove_body(PhysicsWorld *world, Window win) {
+    for (int i = 0; i < world->body_count; i++) {
+        if (world->bodies[i].win == win) {
+            world->bodies[i].active = 0;
+            world->bodies[i].win = None;
+            return;
+        }
+    }
+}
+
 void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int screen_height,
                   int camera_x,
                   Window skip_a, Window skip_b, Window dragged_win, double dt) {
     for (int i = 0; i < world->body_count; i++) {
         PhysicsBody *body = &world->bodies[i];
+        if (body->win == skip_b) continue;
         if (!body->active || !body->flying) continue;
 
         double new_x = body->x + body->vx * dt;
@@ -242,17 +253,16 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
 
         body->x = new_x;
         body->y = new_y;
-
         XMoveWindow(dpy, body->win, (int)lround(new_x - camera_x), (int)lround(new_y));
     }
 
     for (int i = 0; i < world->body_count; i++) {
         PhysicsBody *a = &world->bodies[i];
-        if (!a->active) continue;
+        if (!a->active || a->fullscreen) continue;
 
         for (int j = i + 1; j < world->body_count; j++) {
             PhysicsBody *b = &world->bodies[j];
-            if (!b->active) continue;
+            if (!b->active || b->fullscreen) continue;
             if (should_skip_collision(skip_a, skip_b, a->win) ||
                 should_skip_collision(skip_a, skip_b, b->win)) {
                 continue;

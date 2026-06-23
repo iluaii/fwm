@@ -36,10 +36,10 @@ void window_map_centered(Display *dpy, Window win, int screen_width, int screen_
     }
 }
 
-void window_spawn_terminal(void) {
+void window_spawn(const char **cmd) {
     if (fork() == 0) {
-        execlp("kitty", "kitty", "-o", "background_opacity=1.0", NULL);
-        perror("fwm: execlp failed");
+        execvp(cmd[0], (char *const *)cmd);
+        perror("fwm: execvp failed");
         _exit(1);
     }
 }
