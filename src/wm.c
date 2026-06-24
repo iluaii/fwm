@@ -109,7 +109,7 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
     }
 
     wm->last_touched_win = target;
-    decorations_draw_border(wm->dpy, target, 1);
+    //decorations_draw_border(wm->dpy, target, 1);
 
     XRaiseWindow(wm->dpy, target);
 
@@ -406,7 +406,7 @@ static void apply_fullscreen(Fwm *wm, int mode) {
 
     int cx = d * wm->screen_width;
     if (mode == 1) {
-        b->x = cx; b->y = TRAY_HEIGHT;
+        b->x = cx; b->y = TRAY_HEIGHT + 20;
         b->width = wm->screen_width;
         b->height = wm->screen_height - TRAY_HEIGHT;
     } else {
@@ -551,12 +551,12 @@ static void handle_client_message(Fwm *wm, XClientMessageEvent *event) {
     int want_fs;
     if (action == 1) want_fs = 1;
     else if (action == 0) want_fs = 0;
-    else want_fs = !is_fs; // toggle
+    else want_fs = !is_fs;
 
     if (want_fs && !is_fs)
-        apply_fullscreen(wm, 2); // войти в real fullscreen
+        apply_fullscreen(wm, 2);
     else if (!want_fs && is_fs)
-        apply_fullscreen(wm, b->fullscreen); // передаём текущий mode — сработает b->fullscreen == mode
+        apply_fullscreen(wm, b->fullscreen);
 }
 void fwm_handle_event(Fwm *wm, XEvent *event) {
     switch (event->type) {
@@ -604,12 +604,17 @@ void fwm_handle_event(Fwm *wm, XEvent *event) {
 
 void fwm_tick(Fwm *wm, double dt) {
     Window drag_window = (wm->drag.dragging && wm->drag.collision_disabled) ? wm->drag.win : None;
-    Window resize_window = wm->resize.resizing ? wm->resize.win : None;
+    //Window resize_window = wm->resize.resizing ? wm->resize.win : None;
     Window dragged_win = wm->drag.dragging ? wm->drag.win : None;
 
-    if (wm->resize.resizing) {
+    /*if (wm->resize.resizing) {
         XFlush(wm->dpy);
         return;
+    }*/
+
+    if (wm->resize.resizing) {
+        PhysicsBody *rb = physics_find_body(&wm->physics, wm->resize.win);
+        if (rb) { rb->flying = 0; rb->vx = 0; rb->vy = 0; }
     }
 
     if (wm->drag.dragging) {
@@ -637,8 +642,8 @@ void fwm_tick(Fwm *wm, double dt) {
     }
 
     physics_step(&wm->physics, wm->dpy, wm->screen_width, wm->screen_height,
-                 wm->camera_x,
-                 drag_window, resize_window, dragged_win, dt);
+             wm->camera_x,
+             drag_window, None, dragged_win, dt);
 
     for (int i = 0; i < wm->physics.body_count; i++) {
         PhysicsBody *body = &wm->physics.bodies[i];
