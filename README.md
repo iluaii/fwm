@@ -1,11 +1,18 @@
 # fwm — Physics Window Manager
 
-A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls, and collide with other windows.
+A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls, and collide with other windows like real objects.
 
 ---
 ## 🎬 Demonstration
 
-<iframe width="100%" height="480" src="https://drive.google.com/file/d/14zxA9xeAa8wHVvjgvlzwjNPMm89Qmvj_/view?usp=drive_link" frameborder="0" allow="autoplay"></iframe>
+<div align="center">
+
+<iframe width="100%" height="480" src="https://drive.google.com/file/d/14zxA9xeAa8wHVvjgvlzwjNPMm89Qmvj_/preview" frameborder="0" allow="autoplay"></iframe>
+
+**[Watch on Google Drive](https://drive.google.com/file/d/14zxA9xeAa8wHVvjgvlzwjNPMm89Qmvj_/view?usp=drive_link)** (if embedded player doesn't work)
+
+</div>
+
 ---
 
 ## Features
