@@ -94,6 +94,7 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
 }
 
 static void handle_button_press(Fwm *wm, XButtonEvent *event) {
+    XAllowEvents(wm->dpy, ReplayPointer, event->time);
     Window target = event->subwindow != None ? event->subwindow : event->window;
     if (target == None) return;
     if (target == wm->tray_win) return;
@@ -105,7 +106,7 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
     }
 
     if (wm->last_touched_win != None && wm->last_touched_win != target) {
-        decorations_draw_border(wm->dpy, wm->last_touched_win, 0);
+        //decorations_draw_border(wm->dpy, wm->last_touched_win, 0);
     }
 
     wm->last_touched_win = target;
@@ -464,7 +465,8 @@ void fwm_init(Fwm *wm, Display *dpy) {
 
     XSetErrorHandler(xerror_handler);
     XSelectInput(dpy, wm->root,
-                 SubstructureRedirectMask | SubstructureNotifyMask | StructureNotifyMask);
+             SubstructureRedirectMask | SubstructureNotifyMask |
+             StructureNotifyMask | EnterWindowMask);
 
     for (size_t i = 0; i < LENGTH(keys); i++) {
         KeyCode code = XKeysymToKeycode(dpy, keys[i].key);
@@ -479,12 +481,15 @@ void fwm_init(Fwm *wm, Display *dpy) {
 }
 
 static void handle_enter_notify(Fwm *wm, XCrossingEvent *event) {
-    if (event->window == wm->tray_win) return;
+    Window target = event->window;
+    if (target == wm->root) target = event->subwindow;
+    if (target == None || target == wm->root) return;
+    if (target == wm->tray_win) return;
     if (event->mode != NotifyNormal || event->detail == NotifyInferior) return;
     if (wm->drag.dragging || wm->resize.resizing) return;
 
-    wm->focused_win = event->window;
-    XSetInputFocus(wm->dpy, event->window, RevertToPointerRoot, CurrentTime);
+    wm->focused_win = target;
+    XSetInputFocus(wm->dpy, target, RevertToPointerRoot, CurrentTime);
 }
 
 static void handle_unmap_notify(Fwm *wm, XUnmapEvent *event) {
@@ -653,6 +658,16 @@ void fwm_tick(Fwm *wm, double dt) {
             body->flying = 0;
         }
     }
-
+    if (!wm->drag.dragging && !wm->resize.resizing) {
+        Window root_ret, child;
+        int root_x, root_y, win_x, win_y;
+        unsigned int mask;
+        XQueryPointer(wm->dpy, wm->root, &root_ret, &child,
+                      &root_x, &root_y, &win_x, &win_y, &mask);
+        if (child != None && child != wm->tray_win && child != wm->focused_win) {
+            wm->focused_win = child;
+            XSetInputFocus(wm->dpy, child, RevertToPointerRoot, CurrentTime);
+        }
+    }
     XFlush(wm->dpy);
 }
