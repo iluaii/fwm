@@ -8,6 +8,7 @@
 #include "ui/decorations.h"
 #include "ui/tray.h"
 #include "defines.h"
+#include <X11/cursorfont.h>
 
 static double elapsed_seconds(struct timespec start, struct timespec end) {
     return (end.tv_sec - start.tv_sec)
@@ -23,6 +24,11 @@ int main(void) {
 
     Fwm wm;
     fwm_init(&wm, dpy);
+
+    Cursor cursor = XCreateFontCursor(dpy, XC_left_ptr);
+    XDefineCursor(dpy, wm.root, cursor);
+    XFreeCursor(dpy, cursor);
+
     decorations_init(dpy);
     Window tray = tray_init(dpy, wm.root, wm.screen_width);
     wm.tray_win = tray;
