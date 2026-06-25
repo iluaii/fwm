@@ -72,6 +72,7 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
                                               x + wm->camera_x, y,
                                               g.width, g.height, wm->screen_width);
         XSelectInput(wm->dpy, event->window, EnterWindowMask | ButtonPressMask);
+        //XSelectInput(wm->dpy, event->window, EnterWindowMask);
         if (body) body->shaped = 1;
 
         decorations_apply_chamfer(wm->dpy, event->window, g.width, g.height,
@@ -86,7 +87,7 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
                                           geometry.x + wm->camera_x, geometry.y,
                                           geometry.width, geometry.height, wm->screen_width);
     XSelectInput(wm->dpy, event->window, EnterWindowMask | ButtonPressMask);
-
+    //XSelectInput(wm->dpy, event->window, EnterWindowMask);
     if (body && wm->desktop_mode[body->desktop_id] == DESKTOP_MODE_TILING)
         apply_tiling(wm, body->desktop_id);
 
@@ -488,6 +489,14 @@ static void handle_enter_notify(Fwm *wm, XCrossingEvent *event) {
     if (event->mode != NotifyNormal || event->detail == NotifyInferior) return;
     if (wm->drag.dragging || wm->resize.resizing) return;
 
+    XWindowAttributes attrs;
+    if (XGetWindowAttributes(wm->dpy, target, &attrs)) {
+        if (attrs.override_redirect) return;
+        if (attrs.class == InputOnly) return;
+    }
+
+    if (!physics_find_body(&wm->physics, target)) return;
+
     wm->focused_win = target;
     XSetInputFocus(wm->dpy, target, RevertToPointerRoot, CurrentTime);
 }
@@ -665,8 +674,10 @@ void fwm_tick(Fwm *wm, double dt) {
         XQueryPointer(wm->dpy, wm->root, &root_ret, &child,
                       &root_x, &root_y, &win_x, &win_y, &mask);
         if (child != None && child != wm->tray_win && child != wm->focused_win) {
-            wm->focused_win = child;
-            XSetInputFocus(wm->dpy, child, RevertToPointerRoot, CurrentTime);
+            if (physics_find_body(&wm->physics, child)) {
+                wm->focused_win = child;
+                XSetInputFocus(wm->dpy, child, RevertToPointerRoot, CurrentTime);
+            }
         }
     }
     XFlush(wm->dpy);
