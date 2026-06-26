@@ -27,10 +27,10 @@ typedef struct {
 static void spawn(Fwm *wm, const Arg *arg);
 static void killclient(Fwm *wm, const Arg *arg);
 static void toggle_tiling(Fwm *wm, const Arg *arg);
-static void setmaster(Fwm *wm, const Arg *arg);
 static void view(Fwm *wm, const Arg *arg);
 static void fake_fullscreen(Fwm *wm, const Arg *arg);
 static void real_fullscreen(Fwm *wm, const Arg *arg);
+static void move_camera(Fwm *wm, const Arg *arg);
 
 static const char *termcmd[] = { "kitty", "-o", "background_opacity=1.0", NULL };
 static const char *menucmd[] = { "rofi", "-show", "drun", "-normal-window", NULL };
@@ -40,10 +40,10 @@ static Key keys[] = {
     { MOD_KEY, XK_space,  spawn,           { .v = menucmd } },
     { MOD_KEY, XK_q,      killclient,      { 0 } },
     { MOD_KEY, XK_t,      toggle_tiling,   { 0 } },
-    { MOD_KEY, XK_l,      setmaster,       { .f =  0.05 } },
-    { MOD_KEY, XK_h,      setmaster,       { .f = -0.05 } },
     { MOD_KEY, XK_d,      fake_fullscreen, { 0 } },
     { MOD_KEY, XK_f,      real_fullscreen, { 0 } },
+    { MOD_KEY, XK_h, move_camera, {.i = -50} },
+    { MOD_KEY, XK_l, move_camera, {.i =  50} },
     { MOD_KEY, XK_1,      view,            { .i = 0 } },
     { MOD_KEY, XK_2,      view,            { .i = 1 } },
     { MOD_KEY, XK_3,      view,            { .i = 2 } },

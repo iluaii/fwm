@@ -4,6 +4,8 @@
 #define BLOCKEDWINDOWS 1
 
 #include <X11/Xlib.h>
+
+#include "bsp.h"
 #include "physics.h"
 
 typedef struct {
@@ -35,6 +37,38 @@ typedef enum {
     DESKTOP_MODE_TILING,
     DESKTOP_MODE_NORMAL,
 } DesktopMode;
+
+typedef struct BspNode {
+    struct BspNode *parent;
+    struct BspNode *left;
+    struct BspNode *right;
+    Window win;
+    int x, y, w, h;
+    int split_h;
+    float ratio;
+} BspNode;
+
+typedef struct {
+    BspNode *node;
+    float start_ratio;
+    int start_x, start_y;
+    int active;
+} BspDragState;
+
+typedef struct {
+    int active;
+    Window win;
+    int start_x, start_y;
+    int cur_x, cur_y;
+} SwapDragState;
+
+typedef struct {
+    int active;
+    BspNode *node;
+    float start_ratio;
+    int start_x, start_y;
+} BspResizeState;
+
 typedef struct {
     Display *dpy;
     Window root;
@@ -50,10 +84,14 @@ typedef struct {
     int target_camera_x;
     int total_desktops;
     DesktopMode desktop_mode[10];
-    double master_ratio;
     Atom net_wm_state;
     Atom net_wm_state_fullscreen;
+    BspNode *bsp_roots[10];
+    BspDragState bsp_drag;
+    SwapDragState swap_drag;
+    BspResizeState bsp_resize;
 } Fwm;
+
 
 void fwm_init(Fwm *wm, Display *dpy);
 void fwm_handle_event(Fwm *wm, XEvent *ev);

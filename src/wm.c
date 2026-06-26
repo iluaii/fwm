@@ -8,10 +8,17 @@
 #include "window.h"
 #include "ui/decorations.h"
 #include "ui/tray.h"
-#include "config.h"
 #include <X11/Xatom.h>
+#include "config.h"
 
 #define LOCK_MASKS (Mod2Mask | LockMask | Mod5Mask)
+
+static void move_camera(Fwm *wm, const Arg *arg) {
+    int new_target = wm->target_camera_x + arg->i;
+    if (new_target < 0) new_target = 0;
+    if (new_target > 9 * wm->screen_width) new_target = 9 * wm->screen_width;
+    wm->target_camera_x = new_target;
+}
 
 static int xerror_handler(Display *dpy, XErrorEvent *event) {
     char msg[256];
@@ -72,7 +79,6 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
                                               x + wm->camera_x, y,
                                               g.width, g.height, wm->screen_width);
         XSelectInput(wm->dpy, event->window, EnterWindowMask | ButtonPressMask);
-        //XSelectInput(wm->dpy, event->window, EnterWindowMask);
         if (body) body->shaped = 1;
 
         decorations_apply_chamfer(wm->dpy, event->window, g.width, g.height,
@@ -86,15 +92,28 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
     PhysicsBody *body = physics_sync_body(&wm->physics, event->window,
                                           geometry.x + wm->camera_x, geometry.y,
                                           geometry.width, geometry.height, wm->screen_width);
+    XMapWindow(wm->dpy, event->window);
     XSelectInput(wm->dpy, event->window, EnterWindowMask | ButtonPressMask);
-    //XSelectInput(wm->dpy, event->window, EnterWindowMask);
-    if (body && wm->desktop_mode[body->desktop_id] == DESKTOP_MODE_TILING)
+
+    if (body && wm->desktop_mode[body->desktop_id] == DESKTOP_MODE_TILING) {
+        bsp_insert(&wm->bsp_roots[body->desktop_id], wm->focused_win, event->window);
         apply_tiling(wm, body->desktop_id);
+    }
 
     if (wm->tray_win != None) XRaiseWindow(wm->dpy, wm->tray_win);
 }
 
 static void handle_button_press(Fwm *wm, XButtonEvent *event) {
+    if (event->button == Button4) {
+        int d = wm->target_camera_x / wm->screen_width;
+        if (d > 0) wm->target_camera_x = (d - 1) * wm->screen_width;
+        return;
+    }
+    if (event->button == Button5) {
+        int d = wm->target_camera_x / wm->screen_width;
+        if (d < 9) wm->target_camera_x = (d + 1) * wm->screen_width;
+        return;
+    }
     XAllowEvents(wm->dpy, ReplayPointer, event->time);
     Window target = event->subwindow != None ? event->subwindow : event->window;
     if (target == None) return;
@@ -123,7 +142,22 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
 
     if (event->button == Button1) {
         PhysicsBody *pb = physics_find_body(&wm->physics, target);
-        if (pb && wm->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) return;
+        if (pb && wm->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
+            wm->swap_drag.active = 1;
+            wm->swap_drag.win = target;
+            wm->swap_drag.start_x = event->x_root;
+            wm->swap_drag.start_y = event->y_root;
+            return;
+        }
+        if (pb && wm->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
+            if (event->state & ShiftMask) {
+                wm->swap_drag.active = 1;
+                wm->swap_drag.win = target;
+                wm->swap_drag.start_x = event->x_root;
+                wm->swap_drag.start_y = event->y_root;
+            }
+            return;
+        }
 
         wm->drag.dragging = 1;
         wm->drag.hist_count = 0;
@@ -142,8 +176,20 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
         wm->drag.win_height = geometry.height;
     } else if (event->button == Button3) {
         PhysicsBody *pb = physics_find_body(&wm->physics, target);
-        if (pb && wm->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) return;
-
+        if (pb && wm->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
+            int d = pb->desktop_id;
+            BspNode *node = bsp_find_border(wm->bsp_roots[d],
+                                            event->x_root + wm->camera_x,
+                                            event->y_root, 40);
+            if (node) {
+                wm->bsp_resize.active = 1;
+                wm->bsp_resize.node = node;
+                wm->bsp_resize.start_ratio = node->ratio;
+                wm->bsp_resize.start_x = event->x_root;
+                wm->bsp_resize.start_y = event->y_root;
+            }
+            return;
+        }
         wm->resize.resizing = 1;
         wm->resize.win = target;
         wm->resize.start_x = event->x_root;
@@ -158,6 +204,25 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
 }
 
 static void handle_drag_motion(Fwm *wm, XMotionEvent *event) {
+    if (wm->swap_drag.active) {
+        wm->swap_drag.cur_x = event->x_root;
+        wm->swap_drag.cur_y = event->y_root;
+        return;
+    }
+    if (wm->bsp_resize.active) {
+        BspNode *n = wm->bsp_resize.node;
+        float delta;
+        if (!n->split_h)
+            delta = (float)(event->x_root - wm->bsp_resize.start_x) / n->w;
+        else
+            delta = (float)(event->y_root - wm->bsp_resize.start_y) / n->h;
+        n->ratio = wm->bsp_resize.start_ratio + delta;
+        if (n->ratio < 0.1f) n->ratio = 0.1f;
+        if (n->ratio > 0.9f) n->ratio = 0.9f;
+        int d = wm->target_camera_x / wm->screen_width;
+        apply_tiling(wm, d);
+        return;
+    }
     if (!wm->drag.dragging) return;
 
     if (wm->camera_x == wm->target_camera_x) {
@@ -263,6 +328,41 @@ static void handle_button_release(Fwm *wm) {
         }
     }
 
+    if (wm->swap_drag.active) {
+        Window root_ret, child;
+        int root_x, root_y, win_x, win_y;
+        unsigned int mask;
+        XQueryPointer(wm->dpy, wm->root, &root_ret, &child,
+                      &root_x, &root_y, &win_x, &win_y, &mask);
+
+        if (child == None) {
+            for (int i = 0; i < wm->physics.body_count; i++) {
+                PhysicsBody *b = &wm->physics.bodies[i];
+                if (!b->active) continue;
+                int wx = (int)(b->x - wm->camera_x);
+                if (root_x >= wx && root_x <= wx + b->width &&
+                    root_y >= b->y && root_y <= b->y + b->height) {
+                    child = b->win;
+                    break;
+                    }
+            }
+        }
+
+        PhysicsBody *pb = physics_find_body(&wm->physics, wm->swap_drag.win);
+        if (child != None && child != wm->swap_drag.win && pb) {
+            bsp_swap(wm->bsp_roots[pb->desktop_id], wm->swap_drag.win, child);
+            apply_tiling(wm, pb->desktop_id);
+        }
+
+        if (wm->bsp_resize.active) {
+            wm->bsp_resize.active = 0;
+            wm->bsp_resize.node = NULL;
+        }
+
+        wm->swap_drag.active = 0;
+        wm->swap_drag.win = None;
+    }
+
     wm->drag.dragging = 0;
     wm->resize.resizing = 0;
 }
@@ -286,13 +386,39 @@ static void killclient(Fwm *wm, const Arg *arg) {
 
 static void forget_window(Fwm *wm, Window win) {
     PhysicsBody *pb = physics_find_body(&wm->physics, win);
-    if (!pb) return;
-    int desktop = pb->desktop_id;
-    int was_tiling = (wm->desktop_mode[desktop] == DESKTOP_MODE_TILING);
-    physics_remove_body(&wm->physics, win);
+    int desktop = -1;
+    int was_tiling = 0;
+
+    if (pb) {
+        desktop = pb->desktop_id;
+        was_tiling = (wm->desktop_mode[desktop] == DESKTOP_MODE_TILING);
+        physics_remove_body(&wm->physics, win);
+    } else {
+        for (int i = 0; i < wm->total_desktops; i++) {
+            if (bsp_find(wm->bsp_roots[i], win)) {
+                desktop = i;
+                was_tiling = (wm->desktop_mode[i] == DESKTOP_MODE_TILING);
+                break;
+            }
+        }
+    }
+
     if (win == wm->focused_win) wm->focused_win = None;
     if (win == wm->last_touched_win) wm->last_touched_win = None;
-    if (was_tiling) apply_tiling(wm, desktop);
+
+    for (int i = 0; i < wm->total_desktops; i++)
+        bsp_remove(&wm->bsp_roots[i], win);
+
+    if (was_tiling && desktop >= 0) {
+        bsp_free(wm->bsp_roots[desktop]);
+        wm->bsp_roots[desktop] = NULL;
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (b->active && !b->shaped && !b->fullscreen && b->desktop_id == desktop)
+                bsp_insert(&wm->bsp_roots[desktop], None, b->win);
+        }
+        apply_tiling(wm, desktop);
+    }
 }
 
 static void apply_tiling(Fwm *wm, int desktop) {
@@ -302,53 +428,25 @@ static void apply_tiling(Fwm *wm, int desktop) {
     int usable_h = wm->screen_height - top - gap;
     int usable_w = wm->screen_width - gap * 2;
 
-    PhysicsBody *tiles[MAX_WINDOWS];
-    int n = 0;
-    for (int i = 0; i < wm->physics.body_count; i++) {
-        PhysicsBody *b = &wm->physics.bodies[i];
-        if (b->active && !b->fullscreen && !b->shaped && b->desktop_id == desktop)
-            tiles[n++] = b;
+    bsp_recalc(wm->bsp_roots[desktop], wm->dpy, wm->camera_x,
+               cx + gap, top, usable_w, usable_h);
+
+    BspNode *leaves[MAX_WINDOWS];
+    int count = 0;
+    bsp_collect_leaves(wm->bsp_roots[desktop], leaves, &count);
+
+    for (int i = 0; i < count; i++) {
+        BspNode *n = leaves[i];
+        PhysicsBody *pb = physics_find_body(&wm->physics, n->win);
+        if (!pb) continue;
+        pb->x = n->x;
+        pb->y = n->y;
+        pb->width = n->w;
+        pb->height = n->h;
+        pb->vx = 0;
+        pb->vy = 0;
+        pb->flying = 0;
     }
-    if (n == 0) return;
-
-    if (n == 1) {
-        int x = cx + gap, y = top, w = usable_w, h = usable_h;
-        tiles[0]->x = x; tiles[0]->y = y;
-        tiles[0]->width = w; tiles[0]->height = h;
-        tiles[0]->vx = 0; tiles[0]->vy = 0; tiles[0]->flying = 0;
-        XMoveResizeWindow(wm->dpy, tiles[0]->win,
-                          x - wm->camera_x, y, w, h);
-    } else {
-        int master_w = (int)(usable_w * wm->master_ratio) - gap / 2;
-        int stack_w  = usable_w - master_w - gap;
-        int stack_x  = cx + gap + master_w + gap;
-        int stack_count = n - 1;
-        int slot_h = (usable_h - gap * (stack_count - 1)) / stack_count;
-        if (slot_h < 50) slot_h = 50;
-
-        tiles[0]->x = cx + gap; tiles[0]->y = top;
-        tiles[0]->width = master_w; tiles[0]->height = usable_h;
-        tiles[0]->vx = 0; tiles[0]->vy = 0; tiles[0]->flying = 0;
-        XMoveResizeWindow(wm->dpy, tiles[0]->win,
-                          (cx + gap) - wm->camera_x, top, master_w, usable_h);
-
-        for (int i = 1; i < n; i++) {
-            int sy = top + (i - 1) * (slot_h + gap);
-            tiles[i]->x = stack_x; tiles[i]->y = sy;
-            tiles[i]->width = stack_w; tiles[i]->height = slot_h;
-            tiles[i]->vx = 0; tiles[i]->vy = 0; tiles[i]->flying = 0;
-            XMoveResizeWindow(wm->dpy, tiles[i]->win,
-                              stack_x - wm->camera_x, sy, stack_w, slot_h);
-        }
-    }
-}
-
-static void setmaster(Fwm *wm, const Arg *arg) {
-    int d = wm->target_camera_x / wm->screen_width;
-    wm->master_ratio += arg->f;
-    if (wm->master_ratio > 0.85) wm->master_ratio = 0.85;
-    if (wm->master_ratio < 0.15) wm->master_ratio = 0.15;
-    if (wm->desktop_mode[d] == DESKTOP_MODE_TILING) apply_tiling(wm, d);
 }
 
 static void view(Fwm *wm, const Arg *arg) {
@@ -361,6 +459,15 @@ static void toggle_tiling(Fwm *wm, const Arg *arg) {
     int d = wm->target_camera_x / wm->screen_width;
     if (wm->desktop_mode[d] == DESKTOP_MODE_PHYSICS) {
         wm->desktop_mode[d] = DESKTOP_MODE_TILING;
+
+        bsp_free(wm->bsp_roots[d]);
+        wm->bsp_roots[d] = NULL;
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (b->active && !b->shaped && !b->fullscreen && b->desktop_id == d)
+                bsp_insert(&wm->bsp_roots[d], None, b->win);
+        }
+
         apply_tiling(wm, d);
     } else {
         wm->desktop_mode[d] = DESKTOP_MODE_PHYSICS;
@@ -462,7 +569,6 @@ void fwm_init(Fwm *wm, Display *dpy) {
     wm->camera_x = 0;
     wm->target_camera_x = 0;
     wm->total_desktops = 10;
-    wm->master_ratio = 0.5;
 
     XSetErrorHandler(xerror_handler);
     XSelectInput(dpy, wm->root,
@@ -477,6 +583,8 @@ void fwm_init(Fwm *wm, Display *dpy) {
     grab_button(dpy, wm->root, Button1, MOD_KEY);
     grab_button(dpy, wm->root, Button1, MOD_KEY | ShiftMask);
     grab_button(dpy, wm->root, Button3, MOD_KEY);
+    grab_button(dpy, wm->root, Button4, MOD_KEY);
+    grab_button(dpy, wm->root, Button5, MOD_KEY);
 
     XSync(dpy, False);
 }
@@ -618,14 +726,7 @@ void fwm_handle_event(Fwm *wm, XEvent *event) {
 
 void fwm_tick(Fwm *wm, double dt) {
     Window drag_window = (wm->drag.dragging && wm->drag.collision_disabled) ? wm->drag.win : None;
-    //Window resize_window = wm->resize.resizing ? wm->resize.win : None;
     Window dragged_win = wm->drag.dragging ? wm->drag.win : None;
-
-    /*if (wm->resize.resizing) {
-        XFlush(wm->dpy);
-        return;
-    }*/
-
     if (wm->resize.resizing) {
         PhysicsBody *rb = physics_find_body(&wm->physics, wm->resize.win);
         if (rb) { rb->flying = 0; rb->vx = 0; rb->vy = 0; }
@@ -677,6 +778,29 @@ void fwm_tick(Fwm *wm, double dt) {
             if (physics_find_body(&wm->physics, child)) {
                 wm->focused_win = child;
                 XSetInputFocus(wm->dpy, child, RevertToPointerRoot, CurrentTime);
+            }
+        }
+    }
+    {
+        char keys_down[32];
+        XQueryKeymap(wm->dpy, keys_down);
+
+        KeyCode left  = XKeysymToKeycode(wm->dpy, XK_Left);
+        KeyCode right = XKeysymToKeycode(wm->dpy, XK_Right);
+        KeyCode super = XKeysymToKeycode(wm->dpy, XK_Super_L);
+
+        int mod_down = keys_down[super / 8] & (1 << (super % 8));
+
+        if (mod_down) {
+            if (keys_down[left / 8] & (1 << (left % 8))) {
+                int n = wm->target_camera_x - 20;
+                if (n < 0) n = 0;
+                wm->target_camera_x = n;
+            }
+            if (keys_down[right / 8] & (1 << (right % 8))) {
+                int n = wm->target_camera_x + 20;
+                if (n > 9 * wm->screen_width) n = 9 * wm->screen_width;
+                wm->target_camera_x = n;
             }
         }
     }
