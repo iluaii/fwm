@@ -1,6 +1,6 @@
 # fwm — Physics Window Manager
 
-A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls, and collide with other windows like real objects.
+A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls[...]
 
 ---
 ## 🎬 Demonstration
@@ -15,9 +15,11 @@ A lightweight X11 window manager written in C where windows behave as physical o
 - **Elastic collisions** — windows bounce off each other and off screen edges with configurable restitution.
 - **Drag to throw** — velocity is sampled over the last few frames so a quick flick sends windows flying naturally.
 - **Shift-drag** — hold `Shift` while dragging to pass through other windows without collision.
-- **10 virtual desktops** — the world is 10 screen widths wide. Drag a window to the edge or press `Super+1`…`0` to slide the camera to any desktop. Windows keep their absolute position in the world.
-- **Per-desktop tiling mode** — toggle `Super+T` to switch the current desktop between physics and master-stack tiling layout.
-- **Adjustable master ratio** — `Super+L` / `Super+H` grow or shrink the master column in tiling mode.
+- **10 virtual desktops** — the world is 10 screen widths wide. Drag a window to the edge or press `Super+1`…`0` to slide the camera to any desktop. Windows keep their absolute position in the[...]
+- **Per-desktop tiling mode** — toggle `Super+T` to switch the current desktop between physics and BSP tiling layout.
+- **Per-window pin** — press `Super+P` to freeze a window's position.
+- **Collision disable** — press `Super+N` to temporarily disable collisions for the focused window.
+- **Calm all** — press `Super+Shift+C` to stop all flying windows.
 - **Fake fullscreen** (`Super+D`) and **real fullscreen** (`Super+F`).
 - **Chamfered window corners** via the X Shape extension.
 - **Status tray** — a hexagon-shaped overlay showing desktop occupancy, the focused window's name, speed, angle, and mass.
@@ -90,7 +92,10 @@ All bindings use `Super` (Win key) as the modifier. Edit `src/config.h` to chang
 | `Super+Space` | Launch app launcher (`rofi -show drun`) |
 | `Super+Q` | Close focused window |
 | `Super+T` | Toggle tiling mode on current desktop |
-| `Super+L` / `Super+H` | Increase / decrease master column width |
+| `Super+H` / `Super+L` | Scroll camera left / right (10 virtual desktops) |
+| `Super+P` | Pin focused window (freeze position) |
+| `Super+N` | Disable collisions for focused window |
+| `Super+Shift+C` | Stop all flying windows |
 | `Super+D` | Fake fullscreen (fills screen, keeps physics) |
 | `Super+F` | Real fullscreen (EWMH `_NET_WM_STATE_FULLSCREEN`) |
 | `Super+1` … `Super+0` | Switch to desktop 1–10 |
@@ -141,11 +146,12 @@ src/
   wm.c / wm.h     — core WM: event handling, drag/resize, keybindings
   physics.c / .h  — physics world: bodies, step, collisions, throw
   window.c / .h   — geometry helpers, window spawning
+  bsp.c / bsp.h   — binary space partition tiling
   ui/
     tray.c / .h       — status bar (hexagon overlay, Xft rendering)
     decorations.c / .h — borders and chamfered corners (Shape extension)
-config.h          — keybindings and launch commands
-defines.h         — tunable physics and layout constants
+  config.h        — keybindings and launch commands
+  defines.h       — tunable physics and layout constants
 ```
 
 ---
