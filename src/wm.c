@@ -95,6 +95,9 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
     XMapWindow(wm->dpy, event->window);
     XSelectInput(wm->dpy, event->window, EnterWindowMask | ButtonPressMask);
 
+    if (body && wm->desktop_mode[body->desktop_id] == DESKTOP_MODE_PHYSICS)
+        physics_push_overlapping(&wm->physics, event->window, 300.0);
+
     if (body && wm->desktop_mode[body->desktop_id] == DESKTOP_MODE_TILING) {
         bsp_insert(&wm->bsp_roots[body->desktop_id], wm->focused_win, event->window);
         apply_tiling(wm, body->desktop_id);
@@ -338,6 +341,7 @@ static void handle_button_release(Fwm *wm) {
             if (pb && wm->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
                 apply_tiling(wm, pb->desktop_id);
             } else {
+                physics_push_overlapping(&wm->physics, wm->drag.win, 280.0);
                 physics_throw_body(&wm->physics, wm->drag.win, wm->drag.vx, wm->drag.vy);
             }
         }
@@ -484,6 +488,16 @@ static void toggle_tiling(Fwm *wm, const Arg *arg) {
     if (wm->desktop_mode[d] == DESKTOP_MODE_PHYSICS) {
         wm->desktop_mode[d] = DESKTOP_MODE_TILING;
 
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (!b->active || b->desktop_id != d) continue;
+            if (!b->tiling_saved) {
+                b->sav_x = b->x; b->sav_y = b->y;
+                b->sav_w = b->width; b->sav_h = b->height;
+                b->tiling_saved = 1;
+            }
+        }
+
         bsp_free(wm->bsp_roots[d]);
         wm->bsp_roots[d] = NULL;
         for (int i = 0; i < wm->physics.body_count; i++) {
@@ -491,10 +505,36 @@ static void toggle_tiling(Fwm *wm, const Arg *arg) {
             if (b->active && !b->shaped && !b->fullscreen && b->desktop_id == d)
                 bsp_insert(&wm->bsp_roots[d], None, b->win);
         }
-
         apply_tiling(wm, d);
     } else {
         wm->desktop_mode[d] = DESKTOP_MODE_PHYSICS;
+
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (!b->active || b->desktop_id != d) continue;
+            if (b->tiling_saved) {
+                b->x = b->sav_x; b->y = b->sav_y;
+                b->width = b->sav_w; b->height = b->sav_h;
+                b->tiling_saved = 0;
+            } else {
+                b->width = 800; b->height = 600;
+                b->x = d * wm->screen_width + (wm->screen_width - b->width) / 2;
+                b->y = (wm->screen_height - b->height) / 2;
+            }
+            b->vx = 0; b->vy = 0; b->flying = 0;
+            XMoveResizeWindow(wm->dpy, b->win,
+                              (int)lround(b->x - wm->camera_x), (int)lround(b->y),
+                              b->width, b->height);
+        }
+
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (!b->active || b->desktop_id != d) continue;
+            double angle = ((double)(b->win % 628)) / 100.0;
+            b->vx = cos(angle) * 200.0;
+            b->vy = sin(angle) * 200.0;
+            b->flying = 1;
+        }
     }
 }
 

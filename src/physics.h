@@ -19,7 +19,12 @@ typedef struct {
     int sav_w, sav_h;
     int pinned;    
     int no_collide;
+    double tile_sav_x, tile_sav_y;
+    int tile_sav_w, tile_sav_h;
+    int tiling_saved;
 } PhysicsBody;
+
+
 
 typedef struct {
     PhysicsBody bodies[MAX_WINDOWS];
@@ -36,5 +41,7 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
 void physics_set_velocity(PhysicsWorld *world, Window win, double vx, double vy);
 PhysicsBody *physics_find_body(PhysicsWorld *world, Window win);
 void physics_remove_body(PhysicsWorld *world, Window win);
+void physics_push_away(PhysicsWorld *world, Window pushed, Window pusher, double speed);
+void physics_push_overlapping(PhysicsWorld *world, Window pusher, double speed);
 
 #endif /* FWM_PHYSICS_H */
