@@ -118,6 +118,8 @@ PhysicsBody *physics_sync_body(PhysicsWorld *world, Window win, int x, int y, in
     body->flying = 0;
     body->vx = 0;
     body->vy = 0;
+    body->pinned = 0;
+    body->no_collide = 0;
     update_body_geometry(body, x, y, width, height);
     
     int d = (int)((body->x + body->width / 2.0) / screen_width);
@@ -228,6 +230,7 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
         PhysicsBody *body = &world->bodies[i];
         if (body->win == skip_b) continue;
         if (!body->active || !body->flying) continue;
+        if (body->pinned) { body->vx = 0; body->vy = 0; body->flying = 0; continue; }
 
         double new_x = body->x + body->vx * dt;
         double new_y = body->y + body->vy * dt;
@@ -266,7 +269,8 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
             if (should_skip_collision(skip_a, skip_b, a->win) ||
                 should_skip_collision(skip_a, skip_b, b->win)) {
                 continue;
-                }
+            }
+            if (a->no_collide || b->no_collide) continue;
 
             if (!rects_overlap((int)lround(a->x), (int)lround(a->y), a->width, a->height,
                                (int)lround(b->x), (int)lround(b->y), b->width, b->height)) {

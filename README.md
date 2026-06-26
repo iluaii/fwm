@@ -1,6 +1,6 @@
 # fwm — Physics Window Manager
 
-A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls...
+A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls, and collide with other windows like real objects.
 
 ---
 ## 🎬 Demonstration
@@ -15,9 +15,9 @@ A lightweight X11 window manager written in C where windows behave as physical o
 - **Elastic collisions** — windows bounce off each other and off screen edges with configurable restitution.
 - **Drag to throw** — velocity is sampled over the last few frames so a quick flick sends windows flying naturally.
 - **Shift-drag** — hold `Shift` while dragging to pass through other windows without collision.
-- **10 virtual desktops** — the world is 10 screen widths wide. Drag a window to the edge or press `Super+1`…`0` to slide the camera to any desktop. Windows keep their absolute position in the...
+- **10 virtual desktops** — the world is 10 screen widths wide. Drag a window to the edge or press `Super+1`…`0` to slide the camera to any desktop. Windows keep their absolute position in the world.
 - **Per-desktop tiling mode** — toggle `Super+T` to switch the current desktop between physics and master-stack tiling layout.
-- **Camera navigation** — `Super+H` / `Super+L` scroll left/right across desktops.
+- **Adjustable master ratio** — `Super+L` / `Super+H` grow or shrink the master column in tiling mode.
 - **Fake fullscreen** (`Super+D`) and **real fullscreen** (`Super+F`).
 - **Chamfered window corners** via the X Shape extension.
 - **Status tray** — a hexagon-shaped overlay showing desktop occupancy, the focused window's name, speed, angle, and mass.
@@ -90,7 +90,7 @@ All bindings use `Super` (Win key) as the modifier. Edit `src/config.h` to chang
 | `Super+Space` | Launch app launcher (`rofi -show drun`) |
 | `Super+Q` | Close focused window |
 | `Super+T` | Toggle tiling mode on current desktop |
-| `Super+H` / `Super+L` | Scroll camera left / right |
+| `Super+L` / `Super+H` | Increase / decrease master column width |
 | `Super+D` | Fake fullscreen (fills screen, keeps physics) |
 | `Super+F` | Real fullscreen (EWMH `_NET_WM_STATE_FULLSCREEN`) |
 | `Super+1` … `Super+0` | Switch to desktop 1–10 |

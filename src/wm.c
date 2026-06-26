@@ -102,7 +102,31 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
 
     if (wm->tray_win != None) XRaiseWindow(wm->dpy, wm->tray_win);
 }
+static void pin_window(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    if (wm->focused_win == None) return;
+    PhysicsBody *pb = physics_find_body(&wm->physics, wm->focused_win);
+    if (!pb) return;
+    pb->pinned ^= 1;
+    pb->vx = 0; pb->vy = 0; pb->flying = 0;
+}
 
+static void toggle_nocollide(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    if (wm->focused_win == None) return;
+    PhysicsBody *pb = physics_find_body(&wm->physics, wm->focused_win);
+    if (!pb) return;
+    pb->no_collide ^= 1;
+}
+
+static void calm_all(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    for (int i = 0; i < wm->physics.body_count; i++) {
+        PhysicsBody *b = &wm->physics.bodies[i];
+        if (!b->active) continue;
+        b->vx = 0; b->vy = 0; b->flying = 0;
+    }
+}
 static void handle_button_press(Fwm *wm, XButtonEvent *event) {
     if (event->button == Button4) {
         int d = wm->target_camera_x / wm->screen_width;
@@ -762,10 +786,8 @@ void fwm_tick(Fwm *wm, double dt) {
 
     for (int i = 0; i < wm->physics.body_count; i++) {
         PhysicsBody *body = &wm->physics.bodies[i];
-        if (body->active && wm->desktop_mode[body->desktop_id] == DESKTOP_MODE_TILING) {
-            body->vx = 0;
-            body->vy = 0;
-            body->flying = 0;
+        if (body->active && body->win != dragged_win && !body->pinned) {
+            XMoveWindow(wm->dpy, body->win, (int)lround(body->x - wm->camera_x), (int)lround(body->y));
         }
     }
     if (!wm->drag.dragging && !wm->resize.resizing) {

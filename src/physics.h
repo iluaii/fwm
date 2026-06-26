@@ -17,6 +17,8 @@ typedef struct {
     int shaped;
     double sav_x, sav_y;
     int sav_w, sav_h;
+    int pinned;    
+    int no_collide;
 } PhysicsBody;
 
 typedef struct {
