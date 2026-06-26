@@ -223,6 +223,50 @@ void physics_remove_body(PhysicsWorld *world, Window win) {
     }
 }
 
+void physics_push_away(PhysicsWorld *world, Window pushed, Window pusher, double speed) {
+    PhysicsBody *a = physics_find_body(world, pusher);
+    PhysicsBody *b = physics_find_body(world, pushed);
+    if (!a || !b) return;
+
+    double ax = a->x + a->width  / 2.0;
+    double ay = a->y + a->height / 2.0;
+    double bx = b->x + b->width  / 2.0;
+    double by = b->y + b->height / 2.0;
+
+    double dx = bx - ax;
+    double dy = by - ay;
+    double len = hypot(dx, dy);
+
+    if (len < 1.0) { dx = 1.0; dy = 0.0; len = 1.0; }
+
+    b->vx = (dx / len) * speed;
+    b->vy = (dy / len) * speed;
+    b->flying = 1;
+}
+
+void physics_push_overlapping(PhysicsWorld *world, Window pusher, double speed) {
+    PhysicsBody *a = physics_find_body(world, pusher);
+    if (!a) return;
+
+    for (int i = 0; i < world->body_count; i++) {
+        PhysicsBody *b = &world->bodies[i];
+        if (!b->active || b->win == pusher || b->no_collide || b->fullscreen || b->shaped) continue;
+        if (b->desktop_id != a->desktop_id) continue;
+
+        if (!rects_overlap((int)a->x, (int)a->y, a->width, a->height,
+                           (int)b->x, (int)b->y, b->width, b->height)) continue;
+
+        double dx = (b->x + b->width/2.0) - (a->x + a->width/2.0);
+        double dy = (b->y + b->height/2.0) - (a->y + a->height/2.0);
+        double len = hypot(dx, dy);
+        if (len < 1.0) { dx = 1.0; dy = 0.0; len = 1.0; }
+
+        b->vx = (dx / len) * speed;
+        b->vy = (dy / len) * speed;
+        b->flying = 1;
+    }
+}
+
 void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int screen_height,
                   int camera_x,
                   Window skip_a, Window skip_b, Window dragged_win, double dt) {
