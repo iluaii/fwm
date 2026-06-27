@@ -14,6 +14,8 @@
 
 #define LOCK_MASKS (Mod2Mask | LockMask | Mod5Mask)
 
+static FwmConfig cfg;
+
 static void move_camera(Fwm *wm, const Arg *arg) {
     int new_target = wm->target_camera_x + arg->i;
     if (new_target < 0) new_target = 0;
@@ -130,6 +132,7 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
 
     if (wm->tray_win != None) XRaiseWindow(wm->dpy, wm->tray_win);
 }
+
 static void pin_window(Fwm *wm, const Arg *arg) {
     (void)arg;
     if (wm->focused_win == None) return;
@@ -155,6 +158,159 @@ static void calm_all(Fwm *wm, const Arg *arg) {
         b->vx = 0; b->vy = 0; b->flying = 0;
     }
 }
+
+static void spawn(Fwm *wm, const Arg *arg) {
+    (void)wm;
+    window_spawn(arg->v);
+}
+
+static void killclient(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    if (wm->focused_win == None) return;
+    PhysicsBody *pb = physics_find_body(&wm->physics, wm->focused_win);
+    int desktop = pb ? pb->desktop_id : -1;
+    physics_remove_body(&wm->physics, wm->focused_win);
+    XKillClient(wm->dpy, wm->focused_win);
+    wm->focused_win = None;
+    if (desktop >= 0 && wm->desktop_mode[desktop] == DESKTOP_MODE_TILING)
+        apply_tiling(wm, desktop);
+}
+
+static void view(Fwm *wm, const Arg *arg) {
+    if (arg->i < 0 || arg->i >= wm->total_desktops) return;
+    wm->target_camera_x = arg->i * wm->screen_width;
+}
+
+static void toggle_tiling(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    int d = wm->target_camera_x / wm->screen_width;
+    if (wm->desktop_mode[d] == DESKTOP_MODE_PHYSICS) {
+        wm->desktop_mode[d] = DESKTOP_MODE_TILING;
+
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (!b->active || b->desktop_id != d) continue;
+            if (!b->tiling_saved) {
+                b->sav_x = b->x; b->sav_y = b->y;
+                b->sav_w = b->width; b->sav_h = b->height;
+                b->tiling_saved = 1;
+            }
+        }
+
+        bsp_free(wm->bsp_roots[d]);
+        wm->bsp_roots[d] = NULL;
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (b->active && !b->shaped && !b->fullscreen && b->desktop_id == d)
+                bsp_insert(&wm->bsp_roots[d], None, b->win);
+        }
+        apply_tiling(wm, d);
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (!b->active || b->desktop_id != d || b->shaped) continue;
+            int mode = (wm->desktop_mode[d] == DESKTOP_MODE_PHYSICS)
+                       ? CORNER_CHAMFER : CORNER_SHARP;
+            decorations_set_corner_mode(wm->dpy, b->win, &b->corner, mode, b->width, b->height);
+        }
+    } else {
+        wm->desktop_mode[d] = DESKTOP_MODE_PHYSICS;
+
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (!b->active || b->desktop_id != d) continue;
+            if (b->tiling_saved) {
+                b->x = b->sav_x; b->y = b->sav_y;
+                b->width = b->sav_w; b->height = b->sav_h;
+                b->tiling_saved = 0;
+            } else {
+                b->width = 800; b->height = 600;
+                b->x = d * wm->screen_width + (wm->screen_width - b->width) / 2;
+                b->y = (wm->screen_height - b->height) / 2;
+            }
+            b->vx = 0; b->vy = 0; b->flying = 0;
+            XMoveResizeWindow(wm->dpy, b->win,
+                              (int)lround(b->x - wm->camera_x), (int)lround(b->y),
+                              b->width, b->height);
+        }
+
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (!b->active || b->desktop_id != d) continue;
+            double angle = ((double)(b->win % 628)) / 100.0;
+            b->vx = cos(angle) * 200.0;
+            b->vy = sin(angle) * 200.0;
+            b->flying = 1;
+        }
+    }
+}
+
+static void apply_fullscreen(Fwm *wm, int mode) {
+    PhysicsBody *b = physics_find_body(&wm->physics, wm->focused_win);
+    if (!b) return;
+    int d = b->desktop_id;
+
+    if (b->fullscreen == mode) {
+        b->x = b->sav_x; b->y = b->sav_y;
+        b->width = b->sav_w; b->height = b->sav_h;
+        b->fullscreen = 0;
+
+        XDeleteProperty(wm->dpy, b->win, wm->net_wm_state);
+
+        XMoveResizeWindow(wm->dpy, b->win,
+                          (int)lround(b->x - wm->camera_x), (int)lround(b->y),
+                          b->width, b->height);
+        if (wm->desktop_mode[d] == DESKTOP_MODE_TILING) apply_tiling(wm, d);
+        if (wm->tray_win != None) XRaiseWindow(wm->dpy, wm->tray_win);
+        return;
+    }
+
+    if (b->fullscreen == 0) {
+        b->sav_x = b->x; b->sav_y = b->y;
+        b->sav_w = b->width; b->sav_h = b->height;
+    }
+
+    b->flying = 0; b->vx = 0; b->vy = 0;
+    b->fullscreen = mode;
+
+    XSizeHints hints = {0};
+    hints.flags = PMinSize | PResizeInc | PBaseSize;
+    hints.min_width = 1; hints.min_height = 1;
+    hints.width_inc = 1; hints.height_inc = 1;
+    XSetNormalHints(wm->dpy, b->win, &hints);
+
+    XChangeProperty(wm->dpy, b->win,
+                    wm->net_wm_state, XA_ATOM, 32,
+                    PropModeReplace,
+                    (unsigned char *)&wm->net_wm_state_fullscreen, 1);
+
+    int cx = d * wm->screen_width;
+    if (mode == 1) {
+        b->x = cx; b->y = TRAY_HEIGHT + 20;
+        b->width = wm->screen_width;
+        b->height = wm->screen_height - TRAY_HEIGHT;
+    } else {
+        b->x = cx; b->y = 0;
+        b->width = wm->screen_width;
+        b->height = wm->screen_height;
+    }
+
+    XMoveResizeWindow(wm->dpy, b->win,
+                      (int)lround(b->x - wm->camera_x), (int)lround(b->y),
+                      b->width, b->height);
+    XRaiseWindow(wm->dpy, b->win);
+    if (mode == 1 && wm->tray_win != None) XRaiseWindow(wm->dpy, wm->tray_win);
+}
+
+static void fake_fullscreen(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    apply_fullscreen(wm, 1);
+}
+
+static void real_fullscreen(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    apply_fullscreen(wm, 2);
+}
+
 static void handle_button_press(Fwm *wm, XButtonEvent *event) {
     if (event->button == Button4) {
         int d = wm->target_camera_x / wm->screen_width;
@@ -177,15 +333,9 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
         return;
     }
 
-    if (wm->last_touched_win != None && wm->last_touched_win != target) {
-        //decorations_draw_border(wm->dpy, wm->last_touched_win, 0);
-    }
-
     wm->last_touched_win = target;
-    //decorations_draw_border(wm->dpy, target, 1);
 
     XRaiseWindow(wm->dpy, target);
-
     XSetInputFocus(wm->dpy, target, RevertToPointerRoot, CurrentTime);
 
     physics_sync_body(&wm->physics, target, geometry.x + wm->camera_x, geometry.y,
@@ -349,6 +499,7 @@ static void handle_resize_motion(Fwm *wm, XMotionEvent *event) {
                       wm->resize.win_x + wm->camera_x, wm->resize.win_y,
                       new_w, new_h, wm->screen_width);
 }
+
 static void handle_button_release(Fwm *wm) {
     if (wm->drag.dragging) {
         WindowGeometry geometry;
@@ -378,7 +529,6 @@ static void handle_button_release(Fwm *wm) {
         int root_x = wm->swap_drag.cur_x;
         int root_y = wm->swap_drag.cur_y;
 
-        // ищем окно под курсором через BSP-листья
         Window target_win = None;
         PhysicsBody *src_pb = physics_find_body(&wm->physics, wm->swap_drag.win);
         if (src_pb) {
@@ -393,7 +543,7 @@ static void handle_button_release(Fwm *wm) {
                     root_y >= n->y && root_y <= n->y + n->h) {
                     target_win = n->win;
                     break;
-                    }
+                }
             }
         }
 
@@ -410,23 +560,6 @@ static void handle_button_release(Fwm *wm) {
     wm->resize.resizing = 0;
     wm->bsp_resize.active = 0;
     wm->bsp_resize.node = NULL;
-}
-
-static void spawn(Fwm *wm, const Arg *arg) {
-    (void)wm;
-    window_spawn(arg->v);
-}
-
-static void killclient(Fwm *wm, const Arg *arg) {
-    (void)arg;
-    if (wm->focused_win == None) return;
-    PhysicsBody *pb = physics_find_body(&wm->physics, wm->focused_win);
-    int desktop = pb ? pb->desktop_id : -1;
-    physics_remove_body(&wm->physics, wm->focused_win);
-    XKillClient(wm->dpy, wm->focused_win);
-    wm->focused_win = None;
-    if (desktop >= 0 && wm->desktop_mode[desktop] == DESKTOP_MODE_TILING)
-        apply_tiling(wm, desktop);
 }
 
 static void forget_window(Fwm *wm, Window win) {
@@ -494,139 +627,39 @@ static void apply_tiling(Fwm *wm, int desktop) {
     }
 }
 
-static void view(Fwm *wm, const Arg *arg) {
-    if (arg->i < 0 || arg->i >= wm->total_desktops) return;
-    wm->target_camera_x = arg->i * wm->screen_width;
-}
-
-static void toggle_tiling(Fwm *wm, const Arg *arg) {
-    (void)arg;
-    int d = wm->target_camera_x / wm->screen_width;
-    if (wm->desktop_mode[d] == DESKTOP_MODE_PHYSICS) {
-        wm->desktop_mode[d] = DESKTOP_MODE_TILING;
-
-        for (int i = 0; i < wm->physics.body_count; i++) {
-            PhysicsBody *b = &wm->physics.bodies[i];
-            if (!b->active || b->desktop_id != d) continue;
-            if (!b->tiling_saved) {
-                b->sav_x = b->x; b->sav_y = b->y;
-                b->sav_w = b->width; b->sav_h = b->height;
-                b->tiling_saved = 1;
-            }
-        }
-
-        bsp_free(wm->bsp_roots[d]);
-        wm->bsp_roots[d] = NULL;
-        for (int i = 0; i < wm->physics.body_count; i++) {
-            PhysicsBody *b = &wm->physics.bodies[i];
-            if (b->active && !b->shaped && !b->fullscreen && b->desktop_id == d)
-                bsp_insert(&wm->bsp_roots[d], None, b->win);
-        }
-        apply_tiling(wm, d);
-        for (int i = 0; i < wm->physics.body_count; i++) {
-            PhysicsBody *b = &wm->physics.bodies[i];
-            if (!b->active || b->desktop_id != d || b->shaped) continue;
-            int mode = (wm->desktop_mode[d] == DESKTOP_MODE_PHYSICS)
-                       ? CORNER_CHAMFER : CORNER_SHARP;
-            decorations_set_corner_mode(wm->dpy, b->win, &b->corner, mode, b->width, b->height);
-        }
-    } else {
-        wm->desktop_mode[d] = DESKTOP_MODE_PHYSICS;
-
-        for (int i = 0; i < wm->physics.body_count; i++) {
-            PhysicsBody *b = &wm->physics.bodies[i];
-            if (!b->active || b->desktop_id != d) continue;
-            if (b->tiling_saved) {
-                b->x = b->sav_x; b->y = b->sav_y;
-                b->width = b->sav_w; b->height = b->sav_h;
-                b->tiling_saved = 0;
-            } else {
-                b->width = 800; b->height = 600;
-                b->x = d * wm->screen_width + (wm->screen_width - b->width) / 2;
-                b->y = (wm->screen_height - b->height) / 2;
-            }
-            b->vx = 0; b->vy = 0; b->flying = 0;
-            XMoveResizeWindow(wm->dpy, b->win,
-                              (int)lround(b->x - wm->camera_x), (int)lround(b->y),
-                              b->width, b->height);
-        }
-
-        for (int i = 0; i < wm->physics.body_count; i++) {
-            PhysicsBody *b = &wm->physics.bodies[i];
-            if (!b->active || b->desktop_id != d) continue;
-            double angle = ((double)(b->win % 628)) / 100.0;
-            b->vx = cos(angle) * 200.0;
-            b->vy = sin(angle) * 200.0;
-            b->flying = 1;
-        }
+static void dispatch_action(Fwm *wm, const char *action) {
+    if (strcmp(action, "killclient") == 0) {
+        killclient(wm, NULL);
+    } else if (strcmp(action, "toggle_tiling") == 0) {
+        toggle_tiling(wm, NULL);
+    } else if (strcmp(action, "EXIT") == 0) {
+        EXIT(wm, NULL);
+    } else if (strcmp(action, "show_hints") == 0) {
+        show_hints(wm, NULL);
+    } else if (strcmp(action, "cycle_gravity") == 0) {
+        cycle_gravity(wm, NULL);
+    } else if (strcmp(action, "pin_window") == 0) {
+        pin_window(wm, NULL);
+    } else if (strcmp(action, "toggle_nocollide") == 0) {
+        toggle_nocollide(wm, NULL);
+    } else if (strcmp(action, "calm_all") == 0) {
+        calm_all(wm, NULL);
+    } else if (strcmp(action, "fake_fullscreen") == 0) {
+        fake_fullscreen(wm, NULL);
+    } else if (strcmp(action, "real_fullscreen") == 0) {
+        real_fullscreen(wm, NULL);
+    } else if (strncmp(action, "spawn:", 6) == 0) {
+        const char *cmd = action + 6;
+        const char *args[] = { "sh", "-c", cmd, NULL };
+        Arg a = { .v = args };
+        spawn(wm, &a);
+    } else if (strncmp(action, "move_camera:", 12) == 0) {
+        Arg a = { .i = atoi(action + 12) };
+        move_camera(wm, &a);
+    } else if (strncmp(action, "view:", 5) == 0) {
+        Arg a = { .i = atoi(action + 5) };
+        view(wm, &a);
     }
-}
-
-static void apply_fullscreen(Fwm *wm, int mode) {
-    PhysicsBody *b = physics_find_body(&wm->physics, wm->focused_win);
-    if (!b) return;
-    int d = b->desktop_id;
-
-    if (b->fullscreen == mode) {
-        b->x = b->sav_x; b->y = b->sav_y;
-        b->width = b->sav_w; b->height = b->sav_h;
-        b->fullscreen = 0;
-
-        XDeleteProperty(wm->dpy, b->win, wm->net_wm_state);
-
-        XMoveResizeWindow(wm->dpy, b->win,
-                          (int)lround(b->x - wm->camera_x), (int)lround(b->y),
-                          b->width, b->height);
-        if (wm->desktop_mode[d] == DESKTOP_MODE_TILING) apply_tiling(wm, d);
-        if (wm->tray_win != None) XRaiseWindow(wm->dpy, wm->tray_win);
-        return;
-    }
-
-    if (b->fullscreen == 0) {
-        b->sav_x = b->x; b->sav_y = b->y;
-        b->sav_w = b->width; b->sav_h = b->height;
-    }
-
-    b->flying = 0; b->vx = 0; b->vy = 0;
-    b->fullscreen = mode;
-
-    XSizeHints hints = {0};
-    hints.flags = PMinSize | PResizeInc | PBaseSize;
-    hints.min_width = 1; hints.min_height = 1;
-    hints.width_inc = 1; hints.height_inc = 1;
-    XSetNormalHints(wm->dpy, b->win, &hints);
-
-    XChangeProperty(wm->dpy, b->win,
-                    wm->net_wm_state, XA_ATOM, 32,
-                    PropModeReplace,
-                    (unsigned char *)&wm->net_wm_state_fullscreen, 1);
-
-    int cx = d * wm->screen_width;
-    if (mode == 1) {
-        b->x = cx; b->y = TRAY_HEIGHT + 20;
-        b->width = wm->screen_width;
-        b->height = wm->screen_height - TRAY_HEIGHT;
-    } else {
-        b->x = cx; b->y = 0;
-        b->width = wm->screen_width;
-        b->height = wm->screen_height;
-    }
-
-    XMoveResizeWindow(wm->dpy, b->win,
-                      (int)lround(b->x - wm->camera_x), (int)lround(b->y),
-                      b->width, b->height);
-    XRaiseWindow(wm->dpy, b->win);
-    if (mode == 1 && wm->tray_win != None) XRaiseWindow(wm->dpy, wm->tray_win);
-}
-
-static void fake_fullscreen(Fwm *wm, const Arg *arg) {
-    (void)arg;
-    apply_fullscreen(wm, 1);
-}
-
-static void real_fullscreen(Fwm *wm, const Arg *arg) {
-    (void)arg;
-    apply_fullscreen(wm, 2);
 }
 
 static void handle_key_press(Fwm *wm, XKeyEvent *event) {
@@ -635,10 +668,10 @@ static void handle_key_press(Fwm *wm, XKeyEvent *event) {
     if (wm->focused_win == None && event->subwindow != None)
         wm->focused_win = event->subwindow;
 
-    for (size_t i = 0; i < LENGTH(keys); i++) {
-        KeyCode code = XKeysymToKeycode(wm->dpy, keys[i].key);
-        if (event->keycode == code && state == keys[i].mod) {
-            keys[i].func(wm, &keys[i].arg);
+    for (int i = 0; i < cfg.key_count; i++) {
+        KeyCode code = XKeysymToKeycode(wm->dpy, cfg.keys[i].key);
+        if (event->keycode == code && state == cfg.keys[i].mod) {
+            dispatch_action(wm, cfg.keys[i].action);
             return;
         }
     }
@@ -652,6 +685,7 @@ void fwm_init(Fwm *wm, Display *dpy) {
     wm->screen_height = DisplayHeight(dpy, DefaultScreen(dpy));
     wm->net_wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
     wm->net_wm_state_fullscreen = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
+
     physics_init(&wm->physics);
 
     wm->camera_x = 0;
@@ -663,16 +697,39 @@ void fwm_init(Fwm *wm, Display *dpy) {
              SubstructureRedirectMask | SubstructureNotifyMask |
              StructureNotifyMask | EnterWindowMask);
 
-    for (size_t i = 0; i < LENGTH(keys); i++) {
-        KeyCode code = XKeysymToKeycode(dpy, keys[i].key);
-        grab_key(dpy, wm->root, code, keys[i].mod);
+    char path[512];
+    const char *home = getenv("HOME");
+    if (home) {
+        snprintf(path, sizeof(path), "%s%s", home, FWM_CONFIG_PATH);
+    } else {
+        snprintf(path, sizeof(path), ".config/fwm/config.toml");
+    }
+    config_load(&cfg, path);
+
+    wm->physics.friction = cfg.physics.friction;
+    wm->physics.mass_density = cfg.physics.mass_density;
+    wm->physics.throw_speed_multiplier = cfg.physics.throw_speed_multiplier;
+    wm->physics.max_throw_speed = cfg.physics.max_throw_speed;
+    wm->physics.stop_speed_threshold = cfg.physics.stop_speed_threshold;
+    wm->physics.restitution = cfg.physics.restitution;
+    wm->physics.gravity = cfg.physics.gravity;
+
+    for (int i = 0; i < cfg.key_count; i++) {
+        KeyCode code = XKeysymToKeycode(dpy, cfg.keys[i].key);
+        grab_key(dpy, wm->root, code, cfg.keys[i].mod);
     }
 
-    grab_button(dpy, wm->root, Button1, MOD_KEY);
-    grab_button(dpy, wm->root, Button1, MOD_KEY | ShiftMask);
-    grab_button(dpy, wm->root, Button3, MOD_KEY);
-    grab_button(dpy, wm->root, Button4, MOD_KEY);
-    grab_button(dpy, wm->root, Button5, MOD_KEY);
+    unsigned int mouse_mod = Mod4Mask;
+    for (int i = 0; i < cfg.key_count; i++) {
+        if (cfg.keys[i].mod & Mod4Mask) { mouse_mod = Mod4Mask; break; }
+        if (cfg.keys[i].mod & Mod1Mask) { mouse_mod = Mod1Mask; break; }
+    }
+
+    grab_button(dpy, wm->root, Button1, mouse_mod);
+    grab_button(dpy, wm->root, Button1, mouse_mod | ShiftMask);
+    grab_button(dpy, wm->root, Button3, mouse_mod);
+    grab_button(dpy, wm->root, Button4, mouse_mod);
+    grab_button(dpy, wm->root, Button5, mouse_mod);
 
     XSync(dpy, False);
 }
@@ -761,6 +818,7 @@ static void handle_configure_request(Fwm *wm, XConfigureRequestEvent *event) {
         }
     }
 }
+
 static void handle_client_message(Fwm *wm, XClientMessageEvent *event) {
     if (event->message_type != wm->net_wm_state) return;
 
@@ -786,6 +844,7 @@ static void handle_client_message(Fwm *wm, XClientMessageEvent *event) {
     else if (!want_fs && is_fs)
         apply_fullscreen(wm, b->fullscreen);
 }
+
 void fwm_handle_event(Fwm *wm, XEvent *event) {
     switch (event->type) {
         case MapRequest:
@@ -872,6 +931,7 @@ void fwm_tick(Fwm *wm, double dt) {
             XMoveWindow(wm->dpy, body->win, (int)lround(body->x - wm->camera_x), (int)lround(body->y));
         }
     }
+
     if (!wm->drag.dragging && !wm->resize.resizing) {
         Window root_ret, child;
         int root_x, root_y, win_x, win_y;
@@ -885,6 +945,7 @@ void fwm_tick(Fwm *wm, double dt) {
             }
         }
     }
+
     {
         char keys_down[32];
         XQueryKeymap(wm->dpy, keys_down);
@@ -908,6 +969,7 @@ void fwm_tick(Fwm *wm, double dt) {
             }
         }
     }
+
     if (!wm->drag.dragging && !wm->resize.resizing) {
         Window root_ret, child;
         int root_x, root_y, win_x, win_y;
