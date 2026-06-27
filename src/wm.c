@@ -10,6 +10,7 @@
 #include "ui/tray.h"
 #include <X11/Xatom.h>
 #include "config.h"
+#include "ui/hints.h"
 
 #define LOCK_MASKS (Mod2Mask | LockMask | Mod5Mask)
 
@@ -63,6 +64,25 @@ static int window_is_rofi(Display *dpy, Window win) {
 static int chamfer_cut(int width, int height) {
     int smaller = width < height ? width : height;
     return smaller / 6;
+}
+
+static void show_hints(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    hints_show(wm->dpy, wm->root, wm->screen_width, wm->screen_height);
+}
+
+static void EXIT(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    (void)wm;
+    running = 0;
+}
+
+static void cycle_gravity(Fwm *wm, const Arg *arg) {
+    (void)arg;
+    double g = wm->physics.gravity_scale;
+    if (g == 0.0)       wm->physics.gravity_scale = 0.15;
+    else if (g == 0.15) wm->physics.gravity_scale = 1.0;
+    else                wm->physics.gravity_scale = 0.0;
 }
 
 static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {

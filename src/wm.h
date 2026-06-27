@@ -8,6 +8,8 @@
 #include "bsp.h"
 #include "physics.h"
 
+extern int running;
+
 typedef struct {
     int dragging;
     Window win;

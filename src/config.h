@@ -34,6 +34,10 @@ static void move_camera(Fwm *wm, const Arg *arg);
 static void pin_window(Fwm *wm, const Arg *arg);
 static void toggle_nocollide(Fwm *wm, const Arg *arg);
 static void calm_all(Fwm *wm, const Arg *arg);
+static void cycle_gravity(Fwm *wm, const Arg *arg);
+static void EXIT(Fwm *wm, const Arg *arg);
+static void show_hints(Fwm *wm, const Arg *arg);
+
 
 static const char *termcmd[] = { "kitty", "-o", "background_opacity=1.0", NULL };
 static const char *menucmd[] = { "rofi", "-show", "drun", "-normal-window", NULL };
@@ -50,6 +54,9 @@ static Key keys[] = {
     { MOD_KEY,             XK_p, pin_window,      { 0 } },
     { MOD_KEY,             XK_n, toggle_nocollide, { 0 } },
     { MOD_KEY | ShiftMask, XK_c, calm_all,         { 0 } },
+    { MOD_KEY, XK_g, cycle_gravity, { 0 } },
+    {MOD_KEY | ShiftMask, XK_Escape, EXIT, {0}},
+    { MOD_KEY, XK_question, show_hints, { 0 } },
     { MOD_KEY, XK_1,      view,            { .i = 0 } },
     { MOD_KEY, XK_2,      view,            { .i = 1 } },
     { MOD_KEY, XK_3,      view,            { .i = 2 } },

@@ -97,7 +97,10 @@ All bindings use `Super` (Win key) as the modifier. Edit `src/config.h` to chang
 | `Super+N` | Disable collisions for focused window |
 | `Super+Shift+C` | Stop all flying windows |
 | `Super+D` | Fake fullscreen (fills screen, keeps physics) |
-| `Super+F` | Real fullscreen (EWMH `_NET_WM_STATE_FULLSCREEN`) |
+| `Super+F` | Real fullscreen (`_NET_WM_STATE_FULLSCREEN`) |
+| `Super+G` | Cycle gravity (off → space → earth) |
+| `Super+?` | Show keybind hints |
+| `Super+Shift+Esc` | Exit fwm |
 | `Super+1` … `Super+0` | Switch to desktop 1–10 |
 
 ---
@@ -150,6 +153,8 @@ src/
   ui/
     tray.c / .h       — status bar (hexagon overlay, Xft rendering)
     decorations.c / .h — borders and chamfered corners (Shape extension)
+    hints.c / .h      — keybind hints overlay
+    welcome.c / .h    — welcome overlay
   config.h        — keybindings and launch commands
   defines.h       — tunable physics and layout constants
 ```
