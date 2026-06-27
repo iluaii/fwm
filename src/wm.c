@@ -375,34 +375,31 @@ static void handle_button_release(Fwm *wm) {
     }
 
     if (wm->swap_drag.active) {
-        Window root_ret, child;
-        int root_x, root_y, win_x, win_y;
-        unsigned int mask;
-        XQueryPointer(wm->dpy, wm->root, &root_ret, &child,
-                      &root_x, &root_y, &win_x, &win_y, &mask);
+        int root_x = wm->swap_drag.cur_x;
+        int root_y = wm->swap_drag.cur_y;
 
-        if (child == None) {
-            for (int i = 0; i < wm->physics.body_count; i++) {
-                PhysicsBody *b = &wm->physics.bodies[i];
-                if (!b->active) continue;
-                int wx = (int)(b->x - wm->camera_x);
-                if (root_x >= wx && root_x <= wx + b->width &&
-                    root_y >= b->y && root_y <= b->y + b->height) {
-                    child = b->win;
+        // ищем окно под курсором через BSP-листья
+        Window target_win = None;
+        PhysicsBody *src_pb = physics_find_body(&wm->physics, wm->swap_drag.win);
+        if (src_pb) {
+            int d = src_pb->desktop_id;
+            BspNode *leaves[MAX_WINDOWS];
+            int count = 0;
+            bsp_collect_leaves(wm->bsp_roots[d], leaves, &count);
+            for (int i = 0; i < count; i++) {
+                BspNode *n = leaves[i];
+                int sx = n->x - wm->camera_x;
+                if (root_x >= sx && root_x <= sx + n->w &&
+                    root_y >= n->y && root_y <= n->y + n->h) {
+                    target_win = n->win;
                     break;
                     }
             }
         }
 
-        PhysicsBody *pb = physics_find_body(&wm->physics, wm->swap_drag.win);
-        if (child != None && child != wm->swap_drag.win && pb) {
-            bsp_swap(wm->bsp_roots[pb->desktop_id], wm->swap_drag.win, child);
-            apply_tiling(wm, pb->desktop_id);
-        }
-
-        if (wm->bsp_resize.active) {
-            wm->bsp_resize.active = 0;
-            wm->bsp_resize.node = NULL;
+        if (target_win != None && target_win != wm->swap_drag.win && src_pb) {
+            bsp_swap(wm->bsp_roots[src_pb->desktop_id], wm->swap_drag.win, target_win);
+            apply_tiling(wm, src_pb->desktop_id);
         }
 
         wm->swap_drag.active = 0;
