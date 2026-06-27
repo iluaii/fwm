@@ -1,6 +1,6 @@
 # fwm — Physics Window Manager
 
-A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls[...]
+A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls, and respond to gravity.
 
 ---
 ## 🎬 Demonstration
@@ -12,17 +12,20 @@ A lightweight X11 window manager written in C where windows behave as physical o
 ## Features
 
 - **Physics simulation** — windows have mass (proportional to their area), velocity, and friction. Release a window mid-drag and it flies across the screen.
+- **Gravity** — toggle between no gravity, space mode, and Earth gravity to affect window movement.
 - **Elastic collisions** — windows bounce off each other and off screen edges with configurable restitution.
 - **Drag to throw** — velocity is sampled over the last few frames so a quick flick sends windows flying naturally.
 - **Shift-drag** — hold `Shift` while dragging to pass through other windows without collision.
-- **10 virtual desktops** — the world is 10 screen widths wide. Drag a window to the edge or press `Super+1`…`0` to slide the camera to any desktop. Windows keep their absolute position in the[...]
+- **Per-window collision disable** — press `Super+N` to temporarily disable collisions for the focused window.
+- **10 virtual desktops** — the world is 10 screen widths wide. Drag a window to the edge or press `Super+1`…`0` to switch to any desktop. Windows keep their absolute position in the world.
+- **Camera movement** — use `Super+H` / `Super+L` to scroll the camera left/right across desktops.
 - **Per-desktop tiling mode** — toggle `Super+T` to switch the current desktop between physics and BSP tiling layout.
 - **Per-window pin** — press `Super+P` to freeze a window's position.
-- **Collision disable** — press `Super+N` to temporarily disable collisions for the focused window.
 - **Calm all** — press `Super+Shift+C` to stop all flying windows.
 - **Fake fullscreen** (`Super+D`) and **real fullscreen** (`Super+F`).
 - **Chamfered window corners** via the X Shape extension.
 - **Status tray** — a hexagon-shaped overlay showing desktop occupancy, the focused window's name, speed, angle, and mass.
+- **Keybind hints** — press `Super+?` to display available keybinds.
 - **Focus-follows-mouse** with `EnterNotify`.
 - **Rofi** is handled as a special floating overlay centered on screen.
 
@@ -92,7 +95,8 @@ All bindings use `Super` (Win key) as the modifier. Edit `src/config.h` to chang
 | `Super+Space` | Launch app launcher (`rofi -show drun`) |
 | `Super+Q` | Close focused window |
 | `Super+T` | Toggle tiling mode on current desktop |
-| `Super+H` / `Super+L` | Scroll camera left / right (10 virtual desktops) |
+| `Super+H` | Scroll camera left (10 virtual desktops) |
+| `Super+L` | Scroll camera right (10 virtual desktops) |
 | `Super+P` | Pin focused window (freeze position) |
 | `Super+N` | Disable collisions for focused window |
 | `Super+Shift+C` | Stop all flying windows |
@@ -123,21 +127,24 @@ Edit `src/config.h` before building. Key options:
 ```c
 #define MOD_KEY  Mod4Mask          // modifier key (Super by default)
 static const char *termcmd[] = { "kitty", ... };
-static const char *menucmd[] = { "rofi", ... };
+static const char *menucmd[] = { "rofi", "-show", "drun", "-normal-window", ... };
 ```
 
 Physics constants live in `src/defines.h`:
 
 | Constant | Default | Effect |
 |---|---|---|
-| `MASS_DENSITY` | `0.0005` | Mass per pixel² |
+| `MASS_DENSITY` | `0.0085` | Mass per pixel² |
 | `FRICTION` | `0.97` | Velocity decay per tick |
 | `RESTITUTION` | `0.75` | Elasticity of collisions / wall bounces |
 | `THROW_SPEED_MULTIPLIER` | `0.65` | Scales drag velocity on release |
 | `MAX_THROW_SPEED` | `1800.0` | Hard cap on throw velocity (px/s) |
 | `STOP_SPEED_THRESHOLD` | `1.0` | Speed² below which a window stops flying |
 | `PHYSICS_TICK_RATE` | `60.0` | Simulation steps per second |
+| `GRAVITY` | `200.0` | Gravitational acceleration (px/s²) when enabled |
 | `MAX_WINDOWS` | `32` | Maximum tracked windows |
+| `DRAG_MARGIN` | `5` | Margin for window drag detection |
+| `PHYSICS_MARGIN` | `3` | Margin for physics calculations |
 
 ---
 
@@ -147,7 +154,7 @@ Physics constants live in `src/defines.h`:
 src/
   main.c          — event loop, tray data aggregation
   wm.c / wm.h     — core WM: event handling, drag/resize, keybindings
-  physics.c / .h  — physics world: bodies, step, collisions, throw
+  physics.c / .h  — physics world: bodies, step, collisions, throw, gravity
   window.c / .h   — geometry helpers, window spawning
   bsp.c / bsp.h   — binary space partition tiling
   ui/
