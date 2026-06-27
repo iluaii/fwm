@@ -3,6 +3,7 @@
 
 #include <X11/Xlib.h>
 #include "defines.h"
+#include "ui/decorations.h"
 
 typedef struct {
     Window win;
@@ -22,6 +23,7 @@ typedef struct {
     double tile_sav_x, tile_sav_y;
     int tile_sav_w, tile_sav_h;
     int tiling_saved;
+    CornerState corner;
 } PhysicsBody;
 
 typedef struct {

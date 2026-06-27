@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 static double calc_mass(int width, int height) {
     return (double)(width * height) * MASS_DENSITY;
@@ -114,6 +115,7 @@ PhysicsBody *physics_sync_body(PhysicsWorld *world, Window win, int x, int y, in
     }
 
     PhysicsBody *body = &world->bodies[world->body_count++];
+    memset(body, 0, sizeof(PhysicsBody));
     body->win = win;
     body->active = 1;
     body->flying = 0;

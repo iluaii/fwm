@@ -90,7 +90,10 @@ void bsp_recalc(BspNode *node, Display *dpy, int camera_x,
     if (!node->left && !node->right) return;
 
     int gap = 6;
-
+    int left_w = (int)((w - gap) * node->ratio);
+    if (left_w < 1) left_w = 1;
+    int right_w = w - left_w - gap;
+    if (right_w < 1) right_w = 1;
     if (!node->split_h) {
         int left_w = (int)((w - gap) * node->ratio);
         int right_w = w - left_w - gap;

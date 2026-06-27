@@ -112,6 +112,11 @@ static void handle_map_request(Fwm *wm, XMapRequestEvent *event) {
     PhysicsBody *body = physics_sync_body(&wm->physics, event->window,
                                           geometry.x + wm->camera_x, geometry.y,
                                           geometry.width, geometry.height, wm->screen_width);
+    if (body) {
+        int mode = (wm->desktop_mode[body->desktop_id] == DESKTOP_MODE_PHYSICS)
+                   ? CORNER_CHAMFER : CORNER_SHARP;
+        decorations_set_corner_mode(wm->dpy, body->win, &body->corner, mode, body->width, body->height);
+    }
     XMapWindow(wm->dpy, event->window);
     XSelectInput(wm->dpy, event->window, EnterWindowMask | ButtonPressMask);
 
@@ -189,13 +194,6 @@ static void handle_button_press(Fwm *wm, XButtonEvent *event) {
 
     if (event->button == Button1) {
         PhysicsBody *pb = physics_find_body(&wm->physics, target);
-        if (pb && wm->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
-            wm->swap_drag.active = 1;
-            wm->swap_drag.win = target;
-            wm->swap_drag.start_x = event->x_root;
-            wm->swap_drag.start_y = event->y_root;
-            return;
-        }
         if (pb && wm->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
             if (event->state & ShiftMask) {
                 wm->swap_drag.active = 1;
@@ -413,6 +411,8 @@ static void handle_button_release(Fwm *wm) {
 
     wm->drag.dragging = 0;
     wm->resize.resizing = 0;
+    wm->bsp_resize.active = 0;
+    wm->bsp_resize.node = NULL;
 }
 
 static void spawn(Fwm *wm, const Arg *arg) {
@@ -526,6 +526,13 @@ static void toggle_tiling(Fwm *wm, const Arg *arg) {
                 bsp_insert(&wm->bsp_roots[d], None, b->win);
         }
         apply_tiling(wm, d);
+        for (int i = 0; i < wm->physics.body_count; i++) {
+            PhysicsBody *b = &wm->physics.bodies[i];
+            if (!b->active || b->desktop_id != d || b->shaped) continue;
+            int mode = (wm->desktop_mode[d] == DESKTOP_MODE_PHYSICS)
+                       ? CORNER_CHAMFER : CORNER_SHARP;
+            decorations_set_corner_mode(wm->dpy, b->win, &b->corner, mode, b->width, b->height);
+        }
     } else {
         wm->desktop_mode[d] = DESKTOP_MODE_PHYSICS;
 
@@ -689,8 +696,21 @@ static void handle_enter_notify(Fwm *wm, XCrossingEvent *event) {
 
     if (!physics_find_body(&wm->physics, target)) return;
 
+    Window prev_focused = wm->focused_win;
     wm->focused_win = target;
     XSetInputFocus(wm->dpy, target, RevertToPointerRoot, CurrentTime);
+    PhysicsBody *pb = physics_find_body(&wm->physics, target);
+    if (pb) {
+        decorations_set_corner_mode(wm->dpy, pb->win, &pb->corner, CORNER_ROUND, pb->width, pb->height);
+        if (prev_focused != None && prev_focused != target) {
+            PhysicsBody *old = physics_find_body(&wm->physics, prev_focused);
+            if (old) {
+                int mode = (wm->desktop_mode[old->desktop_id] == DESKTOP_MODE_PHYSICS)
+                           ? CORNER_CHAMFER : CORNER_SHARP;
+                decorations_set_corner_mode(wm->dpy, old->win, &old->corner, mode, old->width, old->height);
+            }
+        }
+    }
 }
 
 static void handle_unmap_notify(Fwm *wm, XUnmapEvent *event) {
@@ -734,9 +754,14 @@ static void handle_configure_request(Fwm *wm, XConfigureRequestEvent *event) {
     if (pb) {
         if (event->value_mask & CWWidth) pb->width = event->width;
         if (event->value_mask & CWHeight) pb->height = event->height;
-        if (pb->shaped)
+
+        if (pb->shaped) {
             decorations_apply_chamfer(wm->dpy, event->window, pb->width, pb->height,
                                       chamfer_cut(pb->width, pb->height));
+        } else {
+            decorations_set_corner_mode(wm->dpy, event->window, &pb->corner,
+                                        pb->corner.mode, pb->width, pb->height);
+        }
     }
 }
 static void handle_client_message(Fwm *wm, XClientMessageEvent *event) {
@@ -883,6 +908,30 @@ void fwm_tick(Fwm *wm, double dt) {
                 int n = wm->target_camera_x + 20;
                 if (n > 9 * wm->screen_width) n = 9 * wm->screen_width;
                 wm->target_camera_x = n;
+            }
+        }
+    }
+    if (!wm->drag.dragging && !wm->resize.resizing) {
+        Window root_ret, child;
+        int root_x, root_y, win_x, win_y;
+        unsigned int mask;
+        XQueryPointer(wm->dpy, wm->root, &root_ret, &child,
+                      &root_x, &root_y, &win_x, &win_y, &mask);
+        if (child != None && child != wm->tray_win && child != wm->focused_win) {
+            PhysicsBody *nb = physics_find_body(&wm->physics, child);
+            if (nb) {
+                Window prev = wm->focused_win;
+                wm->focused_win = child;
+                XSetInputFocus(wm->dpy, child, RevertToPointerRoot, CurrentTime);
+                decorations_set_corner_mode(wm->dpy, nb->win, &nb->corner, CORNER_ROUND, nb->width, nb->height);
+                if (prev != None) {
+                    PhysicsBody *ob = physics_find_body(&wm->physics, prev);
+                    if (ob && !ob->shaped) {
+                        int mode = (wm->desktop_mode[ob->desktop_id] == DESKTOP_MODE_PHYSICS)
+                                   ? CORNER_CHAMFER : CORNER_SHARP;
+                        decorations_set_corner_mode(wm->dpy, ob->win, &ob->corner, mode, ob->width, ob->height);
+                    }
+                }
             }
         }
     }
