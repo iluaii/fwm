@@ -11,5 +11,6 @@
 #define STOP_SPEED_THRESHOLD    1.0
 #define RESTITUTION             0.75
 #define PHYSICS_TICK_RATE       60.0
+#define GRAVITY  200.0   // px/s²
 
 #endif /* FWM_DEFINES_H */

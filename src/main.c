@@ -10,10 +10,14 @@
 #include "defines.h"
 #include <X11/cursorfont.h>
 
+#include "ui/welcome.h"
+
 static double elapsed_seconds(struct timespec start, struct timespec end) {
     return (end.tv_sec - start.tv_sec)
          + (end.tv_nsec - start.tv_nsec) / 1e9;
 }
+
+int running = 1;
 
 int main(void) {
     Display *dpy = XOpenDisplay(NULL);
@@ -24,6 +28,7 @@ int main(void) {
 
     Fwm wm;
     fwm_init(&wm, dpy);
+    welcome_show(wm.dpy, wm.root, wm.screen_width, wm.screen_height);
 
     Cursor cursor = XCreateFontCursor(dpy, XC_left_ptr);
     XDefineCursor(dpy, wm.root, cursor);
@@ -41,7 +46,7 @@ int main(void) {
     struct timespec last_tick;
     clock_gettime(CLOCK_MONOTONIC, &last_tick);
 
-    while (1) {
+    while (running) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(xfd, &fds);

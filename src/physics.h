@@ -24,11 +24,10 @@ typedef struct {
     int tiling_saved;
 } PhysicsBody;
 
-
-
 typedef struct {
     PhysicsBody bodies[MAX_WINDOWS];
     int body_count;
+    double gravity_scale;
 } PhysicsWorld;
 
 void physics_init(PhysicsWorld *world);

@@ -94,6 +94,7 @@ static int should_skip_collision(Window skip_a, Window skip_b, Window win) {
 
 void physics_init(PhysicsWorld *world) {
     world->body_count = 0;
+    world->gravity_scale = 0.0;
 }
 
 PhysicsBody *physics_sync_body(PhysicsWorld *world, Window win, int x, int y, int width, int height, int screen_width) {
@@ -273,8 +274,15 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
     for (int i = 0; i < world->body_count; i++) {
         PhysicsBody *body = &world->bodies[i];
         if (body->win == skip_b) continue;
-        if (!body->active || !body->flying) continue;
+        if (!body->active) continue;
         if (body->pinned) { body->vx = 0; body->vy = 0; body->flying = 0; continue; }
+
+        if (world->gravity_scale > 0.0) {
+            body->vy += GRAVITY * world->gravity_scale * dt;
+            body->flying = 1;
+        }
+
+        if (!body->flying) continue;
 
         double new_x = body->x + body->vx * dt;
         double new_y = body->y + body->vy * dt;
@@ -283,8 +291,13 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
         body->vx *= friction_factor;
         body->vy *= friction_factor;
 
+        if (world->gravity_scale > 0.0) {
+            body->vy += GRAVITY * world->gravity_scale * dt;
+            body->flying = 1;
+        }
+
         double speed = body->vx * body->vx + body->vy * body->vy;
-        if (speed < STOP_SPEED_THRESHOLD) {
+        if (speed < STOP_SPEED_THRESHOLD && world->gravity_scale == 0.0) {
             body->flying = 0;
         }
 
