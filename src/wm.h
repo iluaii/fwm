@@ -85,6 +85,7 @@ typedef struct {
     int camera_x;
     int target_camera_x;
     int total_desktops;
+    int gap;             
     DesktopMode desktop_mode[10];
     Atom net_wm_state;
     Atom net_wm_state_fullscreen;
@@ -98,6 +99,7 @@ typedef struct {
 void fwm_init(Fwm *wm, Display *dpy);
 void fwm_handle_event(Fwm *wm, XEvent *ev);
 void fwm_tick(Fwm *wm, double dt);
+void fwm_load_config(Fwm *wm, const char *path);
 
 
 #endif /* FWM_WM_H */

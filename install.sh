@@ -119,6 +119,29 @@ install_xephyr() {
     esac
 }
 
+# ── setup config ────────────────────────────
+
+setup_config() {
+    local config_dir="${HOME}/.config/fwm"
+    local config_file="${config_dir}/config.toml"
+    local default_file="config.toml.default"
+
+    if [ ! -f "$default_file" ]; then
+        warn "config.toml.default not found in project root, skipping config setup."
+        return
+    fi
+
+    mkdir -p "$config_dir"
+
+    if [ -f "$config_file" ]; then
+        success "Config already exists at ${config_file}, skipping."
+        return
+    fi
+
+    cp "$default_file" "$config_file"
+    success "Created config at ${config_file}."
+}
+
 # ── setup xinitrc ────────────────────────────
 
 setup_xinitrc() {
@@ -177,6 +200,21 @@ cmd_update() {
         return
     fi
 
+    if git rev-parse --git-dir &>/dev/null 2>&1; then
+        read -r -p "$(echo -e "${YELLOW}[?]${NC} Pull latest changes from git? [Y/n] ")" yn
+        case "$yn" in
+            [Nn]*)
+                warn "Skipping git pull."
+                ;;
+            *)
+                info "Pulling latest changes..."
+                git pull || die "git pull failed."
+                success "Repository updated."
+                ;;
+        esac
+        echo ""
+    fi
+
     info "Rebuilding ${BOLD}${TARGET}${NC}..."
     make clean 2>/dev/null || true
     make -j"$(nproc)"
@@ -196,6 +234,7 @@ cmd_update() {
 
     echo ""
     success "${BOLD}fwm updated!${NC}"
+    setup_config
 }
 
 # ── install ───────────────────────────────────
@@ -209,6 +248,7 @@ cmd_install() {
     build
     install_xephyr
     install_bin
+    setup_config
     setup_xinitrc
 
     echo ""
