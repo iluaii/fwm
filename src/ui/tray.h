@@ -14,6 +14,8 @@ typedef struct {
     int flying;
     int desktop_window_counts[10];
     int active_desktop;
+    double active_pos; /* fractional desktop position (camera_x / screen_w):
+                        * the underline marker glides with the camera slide */
     double opacity; /* island fill alpha 0..1 (decor.tray_opacity) */
 } TrayData;
 

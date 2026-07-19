@@ -118,13 +118,14 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
                 cairo_fill(cr);
             }
 
-            // Small underline marker for the active desktop, dot or number.
-            if (active) {
-                cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
-                cairo_rectangle(cr, cx - 4, h - 6, 8, 2);
-                cairo_fill(cr);
-            }
         }
+
+        // Underline marker: drawn at the fractional camera position, so it
+        // glides between indicators in sync with the desktop-switch slide.
+        double ux = px + PILL_PAD + 3 + data->active_pos * spacing;
+        cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
+        cairo_rectangle(cr, ux - 4, h - 6, 8, 2);
+        cairo_fill(cr);
     }
 
     /* ── right pill: clock ── */
