@@ -84,6 +84,7 @@ struct wlr_scene_buffer *welcome_show(struct wlr_scene_tree *parent, int screen_
     if (welcome_buf) {
         wlr_scene_node_set_position(&welcome_buf->node, wx, wy);
         cairo_overlay_update(welcome_buf, draw_welcome_content, NULL);
+        cairo_overlay_make_static(welcome_buf);
     }
     return welcome_buf;
 }

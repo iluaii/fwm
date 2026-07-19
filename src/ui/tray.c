@@ -164,7 +164,44 @@ struct wlr_scene_buffer *tray_init(struct wlr_scene_tree *parent, int screen_wid
     return tray_buf;
 }
 
+/* Everything the tray renders, rounded to displayed precision. Redrawing a
+ * full-width ARGB strip at 60 Hz when nothing changed is pure memory/GPU
+ * churn, so tray_redraw compares against the last drawn signature first. */
+typedef struct {
+    char name[128];
+    int  speed, angle;   /* displayed as %.0f */
+    int  mass10;         /* displayed as %.1f */
+    int  flying;
+    int  counts[10];
+    int  active_desktop;
+    int  pos_mil; /* active_pos in thousandths — redraw while it glides */
+    int  opacity1000;
+    int  minute;         /* clock shows minutes at most */
+} TraySig;
+
 void tray_redraw(struct wlr_scene_buffer *tray_buf, const TrayData *data) {
+    static TraySig last;
+    static int have_last = 0;
+
+    TraySig sig = {0};
+    if (data->win_name) snprintf(sig.name, sizeof(sig.name), "%s", data->win_name);
+    sig.speed = (int)lround(data->speed);
+    sig.angle = (int)lround(data->angle);
+    sig.mass10 = (int)lround(data->mass * 10.0);
+    sig.flying = data->flying;
+    memcpy(sig.counts, data->desktop_window_counts, sizeof(sig.counts));
+    sig.active_desktop = data->active_desktop;
+    sig.pos_mil = (int)lround(data->active_pos * 1000.0);
+    sig.opacity1000 = (int)lround(data->opacity * 1000.0);
+    time_t now = time(NULL);
+    struct tm tm;
+    localtime_r(&now, &tm);
+    sig.minute = tm.tm_yday * 1440 + tm.tm_hour * 60 + tm.tm_min;
+
+    if (have_last && memcmp(&sig, &last, sizeof(sig)) == 0) return;
+    last = sig;
+    have_last = 1;
+
     DrawTrayData draw_data = { .data = data };
     cairo_overlay_update(tray_buf, draw_tray_content, &draw_data);
 }

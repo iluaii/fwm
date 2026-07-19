@@ -138,6 +138,18 @@ void cairo_overlay_update(struct wlr_scene_buffer *scene_buffer,
     info->current = buf;
 }
 
+void cairo_overlay_make_static(struct wlr_scene_buffer *scene_buffer) {
+    if (!scene_buffer) return;
+    struct CairoOverlayInfo *info = scene_buffer->node.data;
+    if (info && info->current) {
+        // The scene holds its own lock until the texture is uploaded, so
+        // dropping ours frees the CPU-side pixels right after that upload;
+        // the renderer's cached texture keeps the content on screen.
+        wlr_buffer_unlock(info->current);
+        info->current = NULL;
+    }
+}
+
 void cairo_overlay_destroy(struct wlr_scene_buffer *scene_buffer) {
     if (!scene_buffer) return;
     struct CairoOverlayInfo *info = scene_buffer->node.data;

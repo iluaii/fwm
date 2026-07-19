@@ -71,6 +71,7 @@ struct wlr_scene_buffer *hints_show(struct wlr_scene_tree *parent, int screen_w,
     if (hints_buf) {
         wlr_scene_node_set_position(&hints_buf->node, wx, wy);
         cairo_overlay_update(hints_buf, draw_hints_content, NULL);
+        cairo_overlay_make_static(hints_buf);
     }
     return hints_buf;
 }

@@ -155,6 +155,9 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
         if (buf) {
             struct DrawCtx ctx = { .img = img, .contain = contain };
             cairo_overlay_update(buf, draw_layer, &ctx);
+            // Layers never redraw (panning just moves the node): drop the
+            // CPU-side pixels — a native-width pan buffer is tens of MB.
+            cairo_overlay_make_static(buf);
 
             int idx = wp->count++;
             wp->layers[idx].buffer = buf;
