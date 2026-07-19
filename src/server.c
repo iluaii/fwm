@@ -18,6 +18,8 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_screencopy_v1.h>
+#include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_output.h>
@@ -1053,8 +1055,12 @@ bool server_init(FwmServer *server) {
     wlr_compositor_create(server->wl_display, 5, server->wlr_renderer);
     wlr_subcompositor_create(server->wl_display);
     wlr_data_device_manager_create(server->wl_display);
+    // Screen capture protocol: lets wf-recorder record and grim screenshot.
+    wlr_screencopy_manager_v1_create(server->wl_display);
 
     server->output_layout = wlr_output_layout_create(server->wl_display);
+    // xdg-output: exposes output geometry to clients (grim/wf-recorder need it).
+    wlr_xdg_output_manager_v1_create(server->wl_display, server->output_layout);
 
     server->scene = wlr_scene_create();
     server->scene_layout = wlr_scene_attach_output_layout(server->scene, server->output_layout);
