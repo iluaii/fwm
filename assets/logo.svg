@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 248 140" width="248" height="140">
+  <!-- fwm badge: monogram inside the tray-island silhouette (sharp chevron-cut
+       hexagon) — the same shape the compositor's tray and launcher pills use. -->
+  <g fill="none" stroke="#d0a82c" stroke-width="7" stroke-linejoin="miter" stroke-linecap="butt">
+    <polygon points="66,0 174,0 240,66 174,132 66,132 0,66"/>
+    <g transform="translate(64,13)">
+      <polyline points="6,96 6,10 76,10"/>
+      <polyline points="6,46 34,46"/>
+      <polyline points="34,46 46,96 54,62 64,96 76,10"/>
+      <polyline points="76,10 90,54 104,14 104,96"/>
+    </g>
+  </g>
+</svg>

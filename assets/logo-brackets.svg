@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-48 2 208 102" width="208" height="102">
+  <!-- fwm monogram flanked by open chevrons (the sketch variant, refined) -->
+  <g fill="none" stroke="#d0a82c" stroke-width="7" stroke-linejoin="miter" stroke-linecap="butt">
+    <polyline points="-14,16 -40,53 -14,90"/>
+    <polyline points="6,96 6,10 76,10"/>
+    <polyline points="6,46 34,46"/>
+    <polyline points="34,46 46,96 54,62 64,96 76,10"/>
+    <polyline points="76,10 90,54 104,14 104,96"/>
+    <polyline points="124,16 150,53 124,90"/>
+  </g>
+</svg>

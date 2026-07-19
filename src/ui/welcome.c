@@ -1,12 +1,14 @@
 #include "welcome.h"
 #include "cairo_overlay.h"
+#include "logo.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #define WELCOME_W 670
-#define WELCOME_H 180
+#define WELCOME_H 300
+#define WELCOME_LOGO_H 88
 #define WELCOME_PAD_X 32
 #define WELCOME_PAD_Y 28
 #define WELCOME_LINE_H 24
@@ -49,8 +51,13 @@ static void draw_welcome_content(cairo_t *cr, int w, int h, void *user_data) {
     pango_layout_set_font_description(layout, desc);
     pango_font_description_free(desc);
     
-    int y = WELCOME_PAD_Y;
-    
+    // Logo badge centered at the top (#d0a82c brand gold), text below.
+    double logo_w = WELCOME_LOGO_H * FWM_LOGO_AR_BRACKETS;
+    fwm_logo_draw(cr, (w - logo_w) / 2.0, WELCOME_PAD_Y, WELCOME_LOGO_H, FWM_LOGO_BRACKETS,
+                  0.816, 0.659, 0.173, 1.0);
+
+    int y = WELCOME_PAD_Y + WELCOME_LOGO_H + 24;
+
     for (size_t i = 0; i < sizeof(welcome_lines)/sizeof(welcome_lines[0]); i++) {
         if (welcome_lines[i] == NULL) {
             y += WELCOME_LINE_H;

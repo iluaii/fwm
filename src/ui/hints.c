@@ -1,11 +1,14 @@
 #include "hints.h"
 #include "cairo_overlay.h"
+#include "logo.h"
 #include <string.h>
 
 #define HINTS_W     480
 #define HINTS_PAD_X 32
 #define HINTS_PAD_Y 24
 #define HINTS_LINE_H 22
+#define HINTS_LOGO_H 64
+#define HINTS_LOGO_GAP 20
 
 static const char *hints_list[] = {
     "Super + Enter        terminal",
@@ -40,9 +43,14 @@ static void draw_hints_content(cairo_t *cr, int w, int h, void *user_data) {
     
     int text_height;
     pango_layout_get_pixel_size(layout, NULL, &text_height);
-    
-    int y = HINTS_PAD_Y;
-    
+
+    // Logo badge, centered above the list (#d0a82c brand gold).
+    double logo_w = HINTS_LOGO_H * FWM_LOGO_AR_BRACKETS;
+    fwm_logo_draw(cr, (w - logo_w) / 2.0, HINTS_PAD_Y, HINTS_LOGO_H, FWM_LOGO_BRACKETS,
+                  0.816, 0.659, 0.173, 1.0);
+
+    int y = HINTS_PAD_Y + HINTS_LOGO_H + HINTS_LOGO_GAP;
+
     // Draw hints
     cairo_set_source_rgba(cr, 0.92, 0.94, 0.96, 1.0); // #eceff4
     for (int i = 0; i < HINTS_COUNT; i++) {
@@ -63,7 +71,8 @@ static void draw_hints_content(cairo_t *cr, int w, int h, void *user_data) {
 }
 
 struct wlr_scene_buffer *hints_show(struct wlr_scene_tree *parent, int screen_w, int screen_h) {
-    int hints_h = HINTS_PAD_Y * 2 + HINTS_COUNT * HINTS_LINE_H;
+    int hints_h = HINTS_PAD_Y * 2 + HINTS_LOGO_H + HINTS_LOGO_GAP
+                + (HINTS_COUNT + 1) * HINTS_LINE_H; /* +1: footer row */
     int wx = (screen_w - HINTS_W) / 2;
     int wy = (screen_h - hints_h) / 2;
 

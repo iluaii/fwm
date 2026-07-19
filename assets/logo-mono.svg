@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-6 2 124 102" width="124" height="102">
+  <!-- fwm monogram: F/W/M ligature, uniform stroke, sharp joins -->
+  <g fill="none" stroke="#d0a82c" stroke-width="7" stroke-linejoin="miter" stroke-linecap="butt">
+    <polyline points="6,96 6,10 76,10"/>
+    <polyline points="6,46 34,46"/>
+    <polyline points="34,46 46,96 54,62 64,96 76,10"/>
+    <polyline points="76,10 90,54 104,14 104,96"/>
+  </g>
+</svg>
