@@ -58,7 +58,24 @@ This is the primary, actively developed version. The legacy X11 version lives on
 
 ---
 
-## Build
+## Install
+
+One command — installs dependencies (pacman / apt / dnf / xbps), builds Box2D v3 from source if your distro doesn't ship it, builds fwm, and registers a `fwm` session for your display manager:
+
+```sh
+git clone https://github.com/iluaii/fwm.git
+cd fwm
+./install.sh
+```
+
+Updating later:
+
+```sh
+./install.sh update      # git pull + rebuild + reinstall
+./install.sh uninstall   # removes binary + session file, keeps your config
+```
+
+## Build (manual)
 
 ```sh
 cmake -B build

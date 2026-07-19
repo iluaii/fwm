@@ -1,0 +1,5 @@
+[Desktop Entry]
+Name=fwm
+Comment=Physics-based Wayland compositor
+Exec=fwm-wayland
+Type=Application
