@@ -13,6 +13,8 @@ This is the primary, actively developed version. The legacy X11 version lives on
 ## 🎬 Demonstration
 ![Demonstration](demo.gif)
 
+[Full-quality demo (mp4, 1.8 MB)](https://github.com/iluaii/fwm/releases/download/v0.3.0/demo.mp4)
+
 ## Features
 
 ### Physics
