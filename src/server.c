@@ -599,7 +599,14 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         return; /* launcher consumed the click; nothing reaches clients */
     }
 
-    wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
+    // Clicks that belong to a compositor gesture stay in the compositor: any
+    // button event while a drag/resize/swap is running, and any press with
+    // the drag modifier (Super) held. Forwarding them made clients count
+    // phantom clicks during window drags.
+    uint32_t fwd_mods = get_active_modifiers(server);
+    if (server->interactive.action == FWM_ACTION_NONE && !(fwd_mods & FWM_MOD_LOGO)) {
+        wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
+    }
     
     double lx = server->cursor->x;
     double ly = server->cursor->y;
