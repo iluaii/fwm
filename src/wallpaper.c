@@ -25,7 +25,8 @@ struct FwmWallpaper {
 
 struct DrawCtx {
     cairo_surface_t *img;
-    int contain; /* 1: fit whole image inside; 0: cover (fill+crop) */
+    int contain;  /* 1: fit whole image inside; 0: cover (fill+crop) */
+    double scale; /* > 0: uniform aspect-true scale (pan layers); 0: cover/contain */
 };
 
 /* Load any gdk-pixbuf-supported format (PNG/JPEG/WebP/…) into a premultiplied
@@ -86,18 +87,30 @@ static void draw_layer(cairo_t *cr, int w, int h, void *user) {
     int ih = cairo_image_surface_get_height(ctx->img);
     if (iw <= 0 || ih <= 0) return;
 
-    double sx = (double)w / iw;
-    double sy = (double)h / ih;
-    // cover -> max (fill, crop); contain -> min (whole image fits, letterboxed)
-    double s = ctx->contain ? (sx < sy ? sx : sy) : (sx > sy ? sx : sy);
-    double tx = (w - iw * s) / 2.0;
-    double ty = (h - ih * s) / 2.0;
+    double s, tx, ty;
+    if (ctx->scale > 0.0) {
+        // Pan layer: one aspect-true scale chosen so the image height exactly
+        // matches the buffer height — never the cover math, which either
+        // stretched short images or drew tall ones unscaled (1:1 crop band).
+        s = ctx->scale;
+        tx = 0.0;
+        ty = 0.0;
+    } else {
+        double sx = (double)w / iw;
+        double sy = (double)h / ih;
+        // cover -> max (fill, crop); contain -> min (whole image fits, letterboxed)
+        s = ctx->contain ? (sx < sy ? sx : sy) : (sx > sy ? sx : sy);
+        tx = (w - iw * s) / 2.0;
+        ty = (h - ih * s) / 2.0;
+    }
 
     cairo_save(cr);
     cairo_translate(cr, tx, ty);
     cairo_scale(cr, s, s);
     cairo_set_source_surface(cr, ctx->img, 0, 0);
-    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+    // One-time render into a static buffer: spend on quality. GOOD's bilinear
+    // smears badly on strong downscales.
+    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BEST);
     cairo_paint(cr);
     cairo_restore(cr);
 }
@@ -128,23 +141,31 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
 
         int buf_w = screen_w;   // buffer width (>= screen_w); slack = buf_w - screen_w
         int contain = 0;        // draw mode passed to draw_layer
+        double scale = 0.0;     // > 0: uniform pan scale for draw_layer
 
         switch (layer->fit) {
         case WALLPAPER_FIT_CONTAIN:
             contain = 1;                 // whole image, letterboxed, no pan
             break;
         case WALLPAPER_FIT_PAN:
-            // Walkable background. Default (zoom <= 0) renders at the image's
-            // native width — no upscaling, so it stays sharp — and pans across
-            // whatever width exceeds the screen. A positive zoom widens the
-            // render to `screen_w * zoom` for more travel at the cost of scaling
-            // the image up. draw_layer then covers this buffer.
+            // Walkable background: scale the image uniformly so its height
+            // exactly fills the screen, buffer width = the scaled image width;
+            // the width beyond screen_w becomes the pan travel. A positive
+            // zoom widens the render to `screen_w * zoom` for more travel at
+            // the cost of extra upscale (cover semantics fill that buffer).
             if (layer->zoom > 0.0) {
                 buf_w = (int)lround(screen_w * layer->zoom);
-            } else {
-                buf_w = iw; // native width = sharpest
+                if (buf_w < screen_w) buf_w = screen_w;
+            } else if (ih > 0) {
+                scale = (double)screen_h / ih;
+                buf_w = (int)lround(iw * scale);
+                if (buf_w < screen_w) {
+                    // Scaled image narrower than the screen: nothing to pan
+                    // across, fall back to cover so no edge is exposed.
+                    buf_w = screen_w;
+                    scale = 0.0;
+                }
             }
-            if (buf_w < screen_w) buf_w = screen_w;
             break;
         case WALLPAPER_FIT_COVER:
         default:
@@ -153,7 +174,7 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
 
         struct wlr_scene_buffer *buf = cairo_overlay_create(parent, buf_w, screen_h);
         if (buf) {
-            struct DrawCtx ctx = { .img = img, .contain = contain };
+            struct DrawCtx ctx = { .img = img, .contain = contain, .scale = scale };
             cairo_overlay_update(buf, draw_layer, &ctx);
             // Layers never redraw (panning just moves the node): drop the
             // CPU-side pixels — a native-width pan buffer is tens of MB.
