@@ -38,6 +38,15 @@ anim_speed = 12.0
 [camera]
 anim_ms = 350.0
 
+[input]
+# xkb keyboard: several layouts + a grp:* option = layout switching.
+# The FIRST layout must stay Latin so binds keep working on any layout.
+kbd_layout  = "us,ru"
+kbd_options = "grp:alt_shift_toggle"
+# kbd_variant = ""
+repeat_rate  = 25
+repeat_delay = 600
+
 [binds]
 # format: "mod+key" = "action"
 # mod keys: super, alt, shift, ctrl
@@ -73,6 +82,11 @@ anim_ms = 350.0
 "super+shift+Up"     = "tile_move:u"
 "super+shift+Down"   = "tile_move:d"
 "super+s"            = "toggle_split"
+# Tab-stacks (Hyprland-style groups)
+"super+w"            = "group_toggle"
+"super+Tab"          = "group_next"
+"super+shift+Tab"    = "group_prev"
+"super+shift+w"      = "group_add"
 "super+1"            = "view:0"
 "super+2"            = "view:1"
 "super+3"            = "view:2"

@@ -5,7 +5,15 @@ set(CMAKE_C_STANDARD 11)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND_SERVER REQUIRED wayland-server)
-pkg_check_modules(WLROOTS REQUIRED wlroots-0.20)
+# wlroots is hard-pinned: the unstable API breaks between minor versions, so
+# fwm builds only against the 0.20 series (the .pc name itself is versioned;
+# a system upgrade to 0.21 fails configure loudly instead of breaking the
+# build halfway with cryptic API errors).
+pkg_check_modules(WLROOTS REQUIRED "wlroots-0.20>=0.20.0" "wlroots-0.20<0.21.0")
+pkg_get_variable(WLROOTS_HAVE_XWAYLAND wlroots-0.20 have_xwayland)
+if(NOT WLROOTS_HAVE_XWAYLAND STREQUAL "true")
+    message(FATAL_ERROR "wlroots-0.20 was built without Xwayland support (needed for X11 apps)")
+endif()
 pkg_check_modules(XKBCOMMON REQUIRED xkbcommon)
 pkg_check_modules(CAIRO REQUIRED cairo)
 pkg_check_modules(PANGO REQUIRED pango)
@@ -22,6 +30,7 @@ set(SOURCES
     src/config.c
     src/wallpaper.c
     src/view.c
+    src/group.c
     src/server.c
     src/ui/cairo_overlay.c
     src/ui/tray.c

@@ -8,6 +8,7 @@
 #include "ui/launcher.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
+#include "group.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -22,6 +23,12 @@
 #include <wlr/backend/session.h>
 #include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
+#include <wlr/types/wlr_primary_selection.h>
+#include <wlr/types/wlr_primary_selection_v1.h>
+#include <wlr/types/wlr_viewporter.h>
+#include <wlr/types/wlr_fractional_scale_v1.h>
+#include <wlr/types/wlr_single_pixel_buffer_v1.h>
+#include <wlr/types/wlr_presentation_time.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_output.h>
@@ -114,7 +121,8 @@ static void launcher_grab_sync(FwmServer *server, bool was_open) {
         wlr_seat_keyboard_notify_clear_focus(server->seat);
     } else if (server->focused_view) {
         struct wlr_keyboard *kbd = wlr_seat_get_keyboard(server->seat);
-        struct wlr_surface *surface = server->focused_view->xdg_toplevel->base->surface;
+        struct wlr_surface *surface = view_surface(server->focused_view);
+        if (!surface) return;
         if (kbd) {
             wlr_seat_keyboard_notify_enter(server->seat, surface,
                 kbd->keycodes, kbd->num_keycodes, &kbd->modifiers);
@@ -153,6 +161,42 @@ static int key_repeat_cb(void *data) {
     return 0;
 }
 
+/* Try to match+dispatch a bind for any of `syms`. Returns 1 when consumed. */
+static int try_binds(FwmServer *server, struct wlr_keyboard_key_event *event,
+                     const xkb_keysym_t *syms, int num_syms, uint32_t active_mods) {
+    for (int i = 0; i < num_syms; i++) {
+        // Compare case-insensitively: xkb_state_key_get_syms() reflects the
+        // live CapsLock state, so with Caps Lock on, a letter key resolves to
+        // its uppercase keysym (e.g. 'q' -> 'Q') while binds are parsed from
+        // lowercase config strings. Without normalizing, every letter-based
+        // bind silently fails to match whenever Caps Lock is toggled on,
+        // while digit/Return binds (unaffected by Caps Lock) keep working.
+        xkb_keysym_t sym = xkb_keysym_to_lower(syms[i]);
+        for (int j = 0; j < server->config.key_count; j++) {
+            KeyBind *bind = &server->config.keys[j];
+            if (xkb_keysym_to_lower(bind->key) == sym && bind->mod == active_mods) {
+                // Consumed by the compositor: the client never sees this key
+                // (forwarding it too made super+g type a 'g' into the client).
+                if (event->keycode < sizeof(server->key_consumed)) {
+                    server->key_consumed[event->keycode] = 1;
+                }
+                server_dispatch_action(server, bind->action);
+                // Arm auto-repeat for repeatable binds (e.g. move_camera) so
+                // holding the key keeps scrolling; delay before first repeat.
+                if (action_is_repeatable(bind->action) && server->key_repeat_timer) {
+                    server->repeat_action = bind->action;
+                    server->repeat_keycode = event->keycode;
+                    wl_event_source_timer_update(server->key_repeat_timer, 300);
+                } else {
+                    key_repeat_stop(server);
+                }
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 static void handle_keyboard_key(struct wl_listener *listener, void *data) {
     struct FwmKeyboard *keyboard = wl_container_of(listener, keyboard, key);
     struct wlr_keyboard_key_event *event = data;
@@ -174,6 +218,8 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
                     wlr_session_change_vt(server->session,
                                           sym - XKB_KEY_XF86Switch_VT_1 + 1);
                 }
+                if (event->keycode < sizeof(server->key_consumed))
+                    server->key_consumed[event->keycode] = 1;
                 return;
             }
             if (sym == XKB_KEY_Escape || sym == XKB_KEY_Return) {
@@ -181,11 +227,15 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
                     welcome_set_welcomed();
                     cairo_overlay_destroy(server->welcome_buffer);
                     server->welcome_buffer = NULL;
+                    if (event->keycode < sizeof(server->key_consumed))
+                        server->key_consumed[event->keycode] = 1;
                     return;
                 }
                 if (server->hints_buffer) {
                     cairo_overlay_destroy(server->hints_buffer);
                     server->hints_buffer = NULL;
+                    if (event->keycode < sizeof(server->key_consumed))
+                        server->key_consumed[event->keycode] = 1;
                     return;
                 }
             }
@@ -226,15 +276,20 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
         return;
     }
 
-    // Pass event to seat first (e.g. for client hotkeys/typing)
-    wlr_seat_set_keyboard(server->seat, keyboard->wlr_keyboard);
-    wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
-    
     if (event->state != WL_KEYBOARD_KEY_STATE_PRESSED) {
         // Stop auto-repeat when the held bind key is released.
         if (server->repeat_action && event->keycode == server->repeat_keycode) {
             key_repeat_stop(server);
         }
+        // If the press was eaten by a bind, eat the release too — the client
+        // never saw the press, it must not see a stray release.
+        if (event->keycode < sizeof(server->key_consumed) &&
+            server->key_consumed[event->keycode]) {
+            server->key_consumed[event->keycode] = 0;
+            return;
+        }
+        wlr_seat_set_keyboard(server->seat, keyboard->wlr_keyboard);
+        wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
         return;
     }
     
@@ -243,37 +298,37 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
     int num_syms = xkb_state_key_get_syms(keyboard->wlr_keyboard->xkb_state, keycode, &syms);
     uint32_t active_mods = get_active_modifiers(server);
 
-    for (int i = 0; i < num_syms; i++) {
-        // Compare case-insensitively: xkb_state_key_get_syms() reflects the
-        // live CapsLock state, so with Caps Lock on, a letter key resolves to
-        // its uppercase keysym (e.g. 'q' -> 'Q') while binds are parsed from
-        // lowercase config strings. Without normalizing, every letter-based
-        // bind silently fails to match whenever Caps Lock is toggled on,
-        // while digit/Return binds (unaffected by Caps Lock) keep working.
-        xkb_keysym_t sym = xkb_keysym_to_lower(syms[i]);
-        for (int j = 0; j < server->config.key_count; j++) {
-            KeyBind *bind = &server->config.keys[j];
-            if (xkb_keysym_to_lower(bind->key) == sym && bind->mod == active_mods) {
-                server_dispatch_action(server, bind->action);
-                // Arm auto-repeat for repeatable binds (e.g. move_camera) so
-                // holding the key keeps scrolling; delay before first repeat.
-                if (action_is_repeatable(bind->action) && server->key_repeat_timer) {
-                    server->repeat_action = bind->action;
-                    server->repeat_keycode = event->keycode;
-                    wl_event_source_timer_update(server->key_repeat_timer, 300);
-                } else {
-                    key_repeat_stop(server);
-                }
-                return;
-            }
-        }
+    // Layout-independent binds: with a non-Latin layout active (e.g. Russian),
+    // the same key resolves to a Cyrillic keysym and "super+q" would go dead.
+    // If the active-layout syms match nothing, retry with layout 0 (the first
+    // in [input] kbd_layout — keep Latin first there).
+    const xkb_keysym_t *syms0 = NULL;
+    int num_syms0 = 0;
+    struct xkb_keymap *kmap = keyboard->wlr_keyboard->keymap;
+    if (kmap && xkb_keymap_num_layouts(kmap) > 1) {
+        num_syms0 = xkb_keymap_key_get_syms_by_level(kmap, keycode, 0, 0, &syms0);
     }
+
+    if (try_binds(server, event, syms, num_syms, active_mods)) return;
+    if (try_binds(server, event, syms0, num_syms0, active_mods)) return;
+
+    // No bind matched — only now does the client get the key. Clear any stale
+    // consumed mark (e.g. the release was swallowed by the launcher instead of
+    // the release path), so this press's release is forwarded normally.
+    if (event->keycode < sizeof(server->key_consumed)) {
+        server->key_consumed[event->keycode] = 0;
+    }
+    wlr_seat_set_keyboard(server->seat, keyboard->wlr_keyboard);
+    wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
 }
 
 static void handle_keyboard_modifiers(struct wl_listener *listener, void *data) {
     struct FwmKeyboard *keyboard = wl_container_of(listener, keyboard, modifiers);
     wlr_seat_set_keyboard(keyboard->server->seat, keyboard->wlr_keyboard);
     wlr_seat_keyboard_notify_modifiers(keyboard->server->seat, &keyboard->wlr_keyboard->modifiers);
+    // Layout switches arrive as group changes inside the modifiers event —
+    // refresh the tray's layout tag (its signature dedupes the no-op case).
+    server_request_tray_redraw(keyboard->server);
 }
 
 static void handle_keyboard_destroy(struct wl_listener *listener, void *data) {
@@ -295,11 +350,24 @@ static void handle_new_input(struct wl_listener *listener, void *data) {
         keyboard->wlr_keyboard = wlr_keyboard_from_input_device(device);
         
         struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-        struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+        // [input] config: multiple layouts + a grp:* switch option give layout
+        // switching for free — xkb tracks the active group internally.
+        const InputConfig *in = &server->config.input;
+        struct xkb_rule_names rules = {
+            .layout  = in->kbd_layout[0]  ? in->kbd_layout  : NULL,
+            .variant = in->kbd_variant[0] ? in->kbd_variant : NULL,
+            .options = in->kbd_options[0] ? in->kbd_options : NULL,
+        };
+        struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, &rules, XKB_KEYMAP_COMPILE_NO_FLAGS);
+        if (!keymap) {
+            wlr_log(WLR_ERROR, "bad [input] xkb config, falling back to environment");
+            keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+        }
         wlr_keyboard_set_keymap(keyboard->wlr_keyboard, keymap);
         xkb_keymap_unref(keymap);
         xkb_context_unref(context);
-        wlr_keyboard_set_repeat_info(keyboard->wlr_keyboard, 25, 600);
+        wlr_keyboard_set_repeat_info(keyboard->wlr_keyboard,
+                                     in->repeat_rate, in->repeat_delay);
         
         keyboard->modifiers.notify = handle_keyboard_modifiers;
         keyboard->key.notify = handle_keyboard_key;
@@ -382,7 +450,13 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
         server->tray_buffer = tray_init(server->layer_overlay, server->screen_width);
         server_request_tray_redraw(server);
 
-        server->welcome_buffer = welcome_show(server->layer_overlay, server->screen_width, server->screen_height);
+        server->welcome_buffer = welcome_show(server->layer_overlay, server->screen_width, server->screen_height, &server->config);
+
+        // Debug: FWM_SHOW_HINTS=1 opens the bind help at startup, so the
+        // overlay can be checked in a nested run without a keyboard.
+        if (getenv("FWM_SHOW_HINTS") && !server->hints_buffer) {
+            server->hints_buffer = hints_show(server->layer_overlay, server->screen_width, server->screen_height, &server->config);
+        }
     }
 }
 
@@ -435,6 +509,187 @@ static void handle_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     view_create(toplevel, server);
 }
 
+/* ── Xwayland ─────────────────────────────────────────────────────────────
+ * Managed X11 windows become regular FwmViews (view_xwl_create). Override-
+ * redirect surfaces (menus, tooltips, DnD icons) position themselves in X11
+ * root coordinates — which match our screen coordinates, because managed X
+ * windows are always configured at screen coords (view_set_size). They get a
+ * bare scene surface, no physics/borders/focus. */
+
+struct FwmXwlUnmanaged {
+    struct wlr_xwayland_surface *xs;
+    FwmServer *server;
+    struct wlr_scene_tree *tree;
+    struct wl_listener associate;
+    struct wl_listener dissociate;
+    struct wl_listener destroy;
+    struct wl_listener set_geometry;
+    struct wl_listener map;
+    struct wl_listener unmap;
+};
+
+static void xwl_or_handle_map(struct wl_listener *listener, void *data) {
+    struct FwmXwlUnmanaged *u = wl_container_of(listener, u, map);
+    u->tree = wlr_scene_tree_create(u->server->layer_windows);
+    if (!u->tree) return;
+    if (!wlr_scene_surface_create(u->tree, u->xs->surface)) {
+        wlr_scene_node_destroy(&u->tree->node);
+        u->tree = NULL;
+        return;
+    }
+    wlr_scene_node_set_position(&u->tree->node, u->xs->x, u->xs->y);
+    wlr_scene_node_raise_to_top(&u->tree->node);
+}
+
+static void xwl_or_handle_unmap(struct wl_listener *listener, void *data) {
+    struct FwmXwlUnmanaged *u = wl_container_of(listener, u, unmap);
+    if (u->tree) {
+        wlr_scene_node_destroy(&u->tree->node);
+        u->tree = NULL;
+    }
+}
+
+static void xwl_or_handle_set_geometry(struct wl_listener *listener, void *data) {
+    struct FwmXwlUnmanaged *u = wl_container_of(listener, u, set_geometry);
+    if (u->tree) {
+        wlr_scene_node_set_position(&u->tree->node, u->xs->x, u->xs->y);
+    }
+}
+
+static void xwl_or_handle_associate(struct wl_listener *listener, void *data) {
+    struct FwmXwlUnmanaged *u = wl_container_of(listener, u, associate);
+    wl_signal_add(&u->xs->surface->events.map, &u->map);
+    wl_signal_add(&u->xs->surface->events.unmap, &u->unmap);
+}
+
+static void xwl_or_handle_dissociate(struct wl_listener *listener, void *data) {
+    struct FwmXwlUnmanaged *u = wl_container_of(listener, u, dissociate);
+    wl_list_remove(&u->map.link);   wl_list_init(&u->map.link);
+    wl_list_remove(&u->unmap.link); wl_list_init(&u->unmap.link);
+}
+
+static void xwl_or_handle_destroy(struct wl_listener *listener, void *data) {
+    struct FwmXwlUnmanaged *u = wl_container_of(listener, u, destroy);
+    if (u->tree) wlr_scene_node_destroy(&u->tree->node);
+    wl_list_remove(&u->map.link);
+    wl_list_remove(&u->unmap.link);
+    wl_list_remove(&u->associate.link);
+    wl_list_remove(&u->dissociate.link);
+    wl_list_remove(&u->set_geometry.link);
+    wl_list_remove(&u->destroy.link);
+    free(u);
+}
+
+static void xwl_unmanaged_create(FwmServer *server, struct wlr_xwayland_surface *xs) {
+    struct FwmXwlUnmanaged *u = calloc(1, sizeof(*u));
+    if (!u) return;
+    u->xs = xs;
+    u->server = server;
+    u->map.notify = xwl_or_handle_map;     wl_list_init(&u->map.link);
+    u->unmap.notify = xwl_or_handle_unmap; wl_list_init(&u->unmap.link);
+    u->associate.notify = xwl_or_handle_associate;
+    wl_signal_add(&xs->events.associate, &u->associate);
+    u->dissociate.notify = xwl_or_handle_dissociate;
+    wl_signal_add(&xs->events.dissociate, &u->dissociate);
+    u->set_geometry.notify = xwl_or_handle_set_geometry;
+    wl_signal_add(&xs->events.set_geometry, &u->set_geometry);
+    u->destroy.notify = xwl_or_handle_destroy;
+    wl_signal_add(&xs->events.destroy, &u->destroy);
+}
+
+static void handle_xwl_ready(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, xwl_ready);
+    wlr_xwayland_set_seat(server->xwayland, server->seat);
+    // Spawned children inherit DISPLAY, so binds can launch X11 apps.
+    // (No wlr_xwayland_set_cursor: the compositor draws the pointer itself,
+    // the X-side cursor image is never shown.)
+    setenv("DISPLAY", server->xwayland->display_name, true);
+}
+
+static void handle_xwl_new_surface(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, xwl_new_surface);
+    struct wlr_xwayland_surface *xs = data;
+    if (xs->override_redirect) {
+        xwl_unmanaged_create(server, xs);
+    } else {
+        view_xwl_create(xs, server);
+    }
+}
+
+// xdg popups (context/dropdown menus). wlr_scene_xdg_surface_create on the
+// toplevel does NOT cover its popups — each popup needs its own scene tree
+// parented into the parent surface's tree, or the menu is invisible while
+// its input still works (clicks land through view_at's scene lookup).
+struct FwmPopup {
+    struct wlr_xdg_popup *popup;
+    FwmServer *server;
+    struct wl_listener commit;
+    struct wl_listener destroy;
+};
+
+static void popup_handle_commit(struct wl_listener *listener, void *data) {
+    (void)data;
+    struct FwmPopup *p = wl_container_of(listener, p, commit);
+    // Everything popup-positioning must wait for the initial commit: before it
+    // the xdg_surface is uninitialized and unconstrain/schedule_configure
+    // assert inside wlroots (that abort looked like "rmb crashes fwm").
+    if (!p->popup->base->initial_commit) return;
+
+    // Keep the menu on screen: give the popup the whole output as its
+    // constraint box, expressed in the parent's coordinate space.
+    FwmServer *server = p->server;
+    struct wlr_scene_tree *tree = p->popup->base->data;
+    if (tree && tree->node.parent) {
+        int px = 0, py = 0;
+        wlr_scene_node_coords(&tree->node.parent->node, &px, &py);
+        struct wlr_box box = {
+            .x = -px,
+            .y = -py,
+            .width = server->screen_width,
+            .height = server->screen_height,
+        };
+        wlr_xdg_popup_unconstrain_from_box(p->popup, &box);
+    }
+
+    // The compositor must answer the popup's initial commit with a configure,
+    // same contract as for toplevels (view.c).
+    wlr_xdg_surface_schedule_configure(p->popup->base);
+}
+
+static void popup_handle_destroy(struct wl_listener *listener, void *data) {
+    (void)data;
+    struct FwmPopup *p = wl_container_of(listener, p, destroy);
+    wl_list_remove(&p->commit.link);
+    wl_list_remove(&p->destroy.link);
+    free(p);
+}
+
+static void handle_new_xdg_popup(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, new_xdg_popup);
+    struct wlr_xdg_popup *popup = data;
+
+    if (!popup->parent) return;
+    struct wlr_xdg_surface *parent = wlr_xdg_surface_try_from_wlr_surface(popup->parent);
+    // parent->data is the parent's scene tree: set in view_map for toplevels
+    // and below for nested popups. NULL means the parent isn't mapped into
+    // the scene — nowhere to draw the popup.
+    if (!parent || !parent->data) return;
+    struct wlr_scene_tree *parent_tree = parent->data;
+
+    struct wlr_scene_tree *tree = wlr_scene_xdg_surface_create(parent_tree, popup->base);
+    if (!tree) return;
+    popup->base->data = tree;
+
+    struct FwmPopup *p = calloc(1, sizeof(*p));
+    if (!p) return;
+    p->popup = popup;
+    p->server = server;
+    p->commit.notify = popup_handle_commit;
+    wl_signal_add(&popup->base->surface->events.commit, &p->commit);
+    p->destroy.notify = popup_handle_destroy;
+    wl_signal_add(&popup->events.destroy, &p->destroy);
+}
+
 static void handle_cursor_motion(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;
@@ -474,12 +729,27 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
         
         int target_world_x = server->interactive.view_start_x + server->camera_x + dx;
         int target_world_y = server->interactive.view_start_y + dy;
+        int want_x = target_world_x, want_y = target_world_y;
         
         if (target_world_x < min_world_x) target_world_x = min_world_x;
         if (target_world_x > max_world_x) target_world_x = max_world_x;
         if (target_world_y < min_y) target_world_y = min_y;
         if (target_world_y > max_y) target_world_y = max_y;
-        
+
+        // When the clamp engages, re-base the grab anchor onto the clamped
+        // position: while the window is pinned against a wall the cursor keeps
+        // travelling, and without this the whole overshoot has to be dragged
+        // back before the window moves again — magnet-stuck to the edge.
+        // Only on an actual clamp: doing it unconditionally accumulates
+        // int-truncation error every motion event and the window drifts away
+        // from the cursor.
+        if (target_world_x != want_x) {
+            server->interactive.view_start_x += target_world_x - want_x;
+        }
+        if (target_world_y != want_y) {
+            server->interactive.view_start_y += target_world_y - want_y;
+        }
+
         view->x = target_world_x;
         view->y = target_world_y;
 
@@ -539,7 +809,7 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
         view->width = new_w;
         view->height = new_h;
         
-        wlr_xdg_toplevel_set_size(view->xdg_toplevel, view->width, view->height);
+        view_set_size(view, view->width, view->height);
         physics_sync_body(&server->physics, view->id, view->x, view->y, view->width, view->height, server->screen_width);
     } else if (server->interactive.action == FWM_ACTION_BSP_RESIZE) {
         BspNode *n = server->interactive.bsp_node;
@@ -563,8 +833,10 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
         struct wlr_surface *surface = NULL;
         double sx, sy;
         FwmView *view = view_at(server, lx, ly, &surface, &sx, &sy);
-        if (view && surface) {
-            server_focus_view(server, view);
+        if (surface) {
+            // view == NULL happens over unmanaged X11 surfaces (menus,
+            // tooltips): they still get pointer events, just no focus change.
+            if (view) server_focus_view(server, view);
             wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
             wlr_seat_pointer_notify_motion(server->seat, event->time_msec, sx, sy);
         } else {
@@ -597,6 +869,23 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
                                event->state == WL_POINTER_BUTTON_STATE_PRESSED)) {
         launcher_grab_sync(server, l_was_open); /* click may have closed it */
         return; /* launcher consumed the click; nothing reaches clients */
+    }
+
+    // Tab-stack bars: a left click on a tab switches the stack's window and
+    // stays in the compositor (its release is swallowed too).
+    if (event->state == WL_POINTER_BUTTON_STATE_PRESSED && event->button == BTN_LEFT &&
+        server->interactive.action == FWM_ACTION_NONE) {
+        int tab;
+        FwmGroup *bg = group_bar_at(server, server->cursor->x, server->cursor->y, &tab);
+        if (bg) {
+            group_set_active(server, bg, tab);
+            server->group_click = 1;
+            return;
+        }
+    }
+    if (server->group_click && event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
+        server->group_click = 0;
+        return;
     }
 
     // Clicks that belong to a compositor gesture stay in the compositor: any
@@ -686,7 +975,12 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         // Button release
         if (server->interactive.action == FWM_ACTION_MOVE) {
             FwmView *view = server->interactive.view;
-            if (view) {
+            // Dropping an ungrouped window onto a tab bar adds it to that stack.
+            int tab;
+            FwmGroup *bg = view ? group_bar_at(server, lx, ly, &tab) : NULL;
+            if (view && bg && !view->group && group_add(server, bg, view)) {
+                // adopted by the group — no throw
+            } else if (view) {
                 PhysicsBody *pb = physics_find_body(&server->physics, view->id);
                 if (pb) {
                     if (server->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
@@ -726,6 +1020,10 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
             }
         }
         
+        // X11 windows: push the final position after a drag/resize so the
+        // client's idea of its root coordinates matches reality again.
+        if (server->interactive.view) view_sync_position(server->interactive.view);
+
         server->interactive.action = FWM_ACTION_NONE;
         server->interactive.view = NULL;
     }
@@ -755,6 +1053,12 @@ static void handle_seat_request_set_selection(struct wl_listener *listener, void
     FwmServer *server = wl_container_of(listener, server, seat_request_set_selection);
     struct wlr_seat_request_set_selection_event *event = data;
     wlr_seat_set_selection(server->seat, event->source, event->serial);
+}
+
+static void handle_seat_request_set_primary_selection(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, seat_request_set_primary_selection);
+    struct wlr_seat_request_set_primary_selection_event *event = data;
+    wlr_seat_set_primary_selection(server->seat, event->source, event->serial);
 }
 
 static int physics_tick_cb(void *data) {
@@ -795,6 +1099,10 @@ static int physics_tick_cb(void *data) {
         if (t >= 1.0) {
             server->camera_x = server->cam_anim_to;
             server->cam_anim = 0;
+            // X11 clients place popups from their last-configured root coords;
+            // tell them where they are on the new desktop.
+            FwmView *xv;
+            wl_list_for_each(xv, &server->views, link) view_sync_position(xv);
         } else {
             // Cubic ease-in-out.
             double e = t < 0.5 ? 4.0 * t * t * t
@@ -877,6 +1185,9 @@ static int physics_tick_cb(void *data) {
                                         (int)lround(g->x) - server->camera_x, (int)lround(g->y));
         }
     }
+
+    // Tab bars follow their window's width (resize/tiling glides).
+    group_tick(server);
 
     // Launcher: tile physics + overlay redraw while open.
     launcher_tick(server->launcher, dt);
@@ -1004,7 +1315,7 @@ static int tile_action_ctx(FwmServer *server, int *out_d, BspNode **out_leaf) {
 static void server_dispatch_action(FwmServer *server, const char *action) {
     if (strcmp(action, "killclient") == 0) {
         if (server->focused_view) {
-            wlr_xdg_toplevel_send_close(server->focused_view->xdg_toplevel);
+            view_send_close(server->focused_view);
         }
     } else if (strcmp(action, "toggle_tiling") == 0) {
         int d = server->target_camera_x / server->screen_width;
@@ -1059,7 +1370,7 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
 
                     view->x = b->x; view->y = b->y;
                     view->width = b->width; view->height = b->height;
-                    wlr_xdg_toplevel_set_size(view->xdg_toplevel, view->width, view->height);
+                    view_set_size(view, view->width, view->height);
                     if (view->scene_tree) {
                         wlr_scene_node_set_position(&view->scene_tree->node, (int)lround(view->x - server->camera_x), (int)lround(view->y));
                     }
@@ -1109,7 +1420,37 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
             cairo_overlay_destroy(server->hints_buffer);
             server->hints_buffer = NULL;
         } else {
-            server->hints_buffer = hints_show(server->layer_overlay, server->screen_width, server->screen_height);
+            server->hints_buffer = hints_show(server->layer_overlay, server->screen_width, server->screen_height, &server->config);
+        }
+    } else if (strcmp(action, "group_toggle") == 0) {
+        FwmView *v = server->focused_view;
+        if (v) {
+            if (v->group) group_dissolve(server, v->group);
+            else group_create(server, v);
+        }
+    } else if (strcmp(action, "group_next") == 0) {
+        if (server->focused_view && server->focused_view->group) {
+            group_cycle(server, server->focused_view->group, 1);
+        }
+    } else if (strcmp(action, "group_prev") == 0) {
+        if (server->focused_view && server->focused_view->group) {
+            group_cycle(server, server->focused_view->group, -1);
+        }
+    } else if (strcmp(action, "group_add") == 0) {
+        // Join the focused window into the group of any grouped window it
+        // overlaps (drag-dropping onto a tab bar does the same with the mouse).
+        FwmView *v = server->focused_view;
+        if (v && !v->group) {
+            FwmView *o;
+            wl_list_for_each(o, &server->views, link) {
+                if (o == v || !o->group || !o->scene_tree ||
+                    !o->scene_tree->node.enabled) continue;
+                if (v->x < o->x + o->width && v->x + v->width > o->x &&
+                    v->y < o->y + o->height && v->y + v->height > o->y) {
+                    group_add(server, o->group, v);
+                    break;
+                }
+            }
         }
     } else if (strcmp(action, "cycle_gravity") == 0) {
         double g = server->physics.gravity_scale;
@@ -1200,11 +1541,20 @@ bool server_init(FwmServer *server) {
         return false;
     }
 
-    wlr_compositor_create(server->wl_display, 5, server->wlr_renderer);
+    server->compositor = wlr_compositor_create(server->wl_display, 5, server->wlr_renderer);
     wlr_subcompositor_create(server->wl_display);
     wlr_data_device_manager_create(server->wl_display);
     // Screen capture protocol: lets wf-recorder record and grim screenshot.
     wlr_screencopy_manager_v1_create(server->wl_display);
+    // Standard client protocols, all self-contained in wlroots:
+    // primary selection = middle-click paste; viewporter + fractional-scale +
+    // single-pixel-buffer are expected by games/video players/toolkits;
+    // presentation-time gives clients accurate frame timing (mpv, games).
+    wlr_primary_selection_v1_device_manager_create(server->wl_display);
+    wlr_viewporter_create(server->wl_display);
+    wlr_fractional_scale_manager_v1_create(server->wl_display, 1);
+    wlr_single_pixel_buffer_manager_v1_create(server->wl_display);
+    wlr_presentation_create(server->wl_display, server->wlr_backend, 2);
 
     server->output_layout = wlr_output_layout_create(server->wl_display);
     // xdg-output: exposes output geometry to clients (grim/wf-recorder need it).
@@ -1222,6 +1572,7 @@ bool server_init(FwmServer *server) {
     server->launcher = launcher_create(server);
 
     wl_list_init(&server->views);
+    wl_list_init(&server->groups);
     wl_list_init(&server->ghosts);
     wl_list_init(&server->outputs);
     wl_list_init(&server->keyboards);
@@ -1229,6 +1580,8 @@ bool server_init(FwmServer *server) {
     server->new_xdg_toplevel.notify = handle_new_xdg_toplevel;
     server->xdg_shell = wlr_xdg_shell_create(server->wl_display, 3); // xdg-shell v3/v6 depending on wlroots version (v3 is standard in 0.17+)
     wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
+    server->new_xdg_popup.notify = handle_new_xdg_popup;
+    wl_signal_add(&server->xdg_shell->events.new_popup, &server->new_xdg_popup);
 
     // Advertise xdg-decoration and force server-side mode so clients drop their
     // client-side titlebars (we draw none) and windows render borderless.
@@ -1258,10 +1611,27 @@ bool server_init(FwmServer *server) {
     wl_signal_add(&server->cursor->events.frame, &server->cursor_frame);
     
     server->seat = wlr_seat_create(server->wl_display, "seat0");
+
+    // Xwayland (lazy: the X server starts on the first X11 client). Managed
+    // windows become FwmViews, override-redirect ones bare scene surfaces.
+    server->xwayland = wlr_xwayland_create(server->wl_display, server->compositor, true);
+    if (server->xwayland) {
+        server->xwl_ready.notify = handle_xwl_ready;
+        wl_signal_add(&server->xwayland->events.ready, &server->xwl_ready);
+        server->xwl_new_surface.notify = handle_xwl_new_surface;
+        wl_signal_add(&server->xwayland->events.new_surface, &server->xwl_new_surface);
+        setenv("DISPLAY", server->xwayland->display_name, true);
+        wlr_log(WLR_INFO, "Xwayland on DISPLAY=%s", server->xwayland->display_name);
+    } else {
+        wlr_log(WLR_ERROR, "Failed to start Xwayland; X11 apps won't work");
+    }
+
     server->request_cursor.notify = handle_request_cursor;
     wl_signal_add(&server->seat->events.request_set_cursor, &server->request_cursor);
     server->seat_request_set_selection.notify = handle_seat_request_set_selection;
     wl_signal_add(&server->seat->events.request_set_selection, &server->seat_request_set_selection);
+    server->seat_request_set_primary_selection.notify = handle_seat_request_set_primary_selection;
+    wl_signal_add(&server->seat->events.request_set_primary_selection, &server->seat_request_set_primary_selection);
     
     server->new_input.notify = handle_new_input;
     wl_signal_add(&server->wlr_backend->events.new_input, &server->new_input);
@@ -1351,6 +1721,8 @@ void server_destroy(FwmServer *server) {
         free(g);
     }
 
+    // Xwayland must go down before the clients/display it hangs off.
+    if (server->xwayland) wlr_xwayland_destroy(server->xwayland);
     wl_display_destroy_clients(server->wl_display);
     wl_display_destroy(server->wl_display);
 }
@@ -1362,13 +1734,15 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
     server->focused_view = view;
     
     if (view) {
-        wlr_scene_node_raise_to_top(&view->scene_tree->node);
+        if (view->scene_tree) wlr_scene_node_raise_to_top(&view->scene_tree->node);
         
         struct wlr_keyboard *kbd = wlr_seat_get_keyboard(server->seat);
-        if (kbd) {
-            wlr_seat_keyboard_notify_enter(server->seat, view->xdg_toplevel->base->surface,
+        struct wlr_surface *surface = view_surface(view);
+        if (kbd && surface) {
+            wlr_seat_keyboard_notify_enter(server->seat, surface,
                 kbd->keycodes, kbd->num_keycodes, &kbd->modifiers);
         }
+        view_set_activated(view, true);
         
         PhysicsBody *pb = physics_find_body(&server->physics, view->id);
         if (pb) {
@@ -1380,6 +1754,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
     }
 
     if (prev_focus) {
+        view_set_activated(prev_focus, false);
         PhysicsBody *pb = physics_find_body(&server->physics, prev_focus->id);
         if (pb) {
             int d = pb->desktop_id;
@@ -1443,7 +1818,7 @@ void server_apply_tiling(FwmServer *server, int desktop) {
 
         view->width = pb->width;
         view->height = pb->height;
-        wlr_xdg_toplevel_set_size(view->xdg_toplevel, view->width, view->height);
+        view_set_size(view, view->width, view->height);
 
         if (animate) {
             view->tile_anim = 1;
@@ -1538,8 +1913,8 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
         b->x = view->x; b->y = view->y;
         b->width = view->width; b->height = view->height;
         
-        wlr_xdg_toplevel_set_size(view->xdg_toplevel, view->width, view->height);
-        wlr_xdg_toplevel_set_fullscreen(view->xdg_toplevel, real);
+        view_set_size(view, view->width, view->height);
+        view_set_fullscreen_hint(view, real);
         
         if (view->scene_tree) {
             wlr_scene_node_set_position(&view->scene_tree->node, (int)lround(view->x - server->camera_x), (int)lround(view->y));
@@ -1555,8 +1930,8 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
             
             view->x = b->x; view->y = b->y;
             view->width = b->width; view->height = b->height;
-            wlr_xdg_toplevel_set_size(view->xdg_toplevel, view->width, view->height);
-            wlr_xdg_toplevel_set_fullscreen(view->xdg_toplevel, false);
+            view_set_size(view, view->width, view->height);
+            view_set_fullscreen_hint(view, false);
             
             if (view->scene_tree) {
                 wlr_scene_node_set_position(&view->scene_tree->node, (int)lround(view->x - server->camera_x), (int)lround(view->y));
@@ -1591,6 +1966,34 @@ void server_request_tray_redraw(FwmServer *server) {
         }
     }
     
+    // Active keyboard layout tag, shown only when several are configured.
+    // Prefer the short name from [input] kbd_layout ("us,ru" -> "US"/"RU");
+    // fall back to the xkb layout name's first letters.
+    struct wlr_keyboard *kbd = wlr_seat_get_keyboard(server->seat);
+    if (kbd && kbd->keymap && xkb_keymap_num_layouts(kbd->keymap) > 1) {
+        xkb_layout_index_t idx =
+            xkb_state_serialize_layout(kbd->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE);
+        const char *src = server->config.input.kbd_layout;
+        int cur = 0;
+        const char *p = src;
+        while (*p && cur < (int)idx) {
+            if (*p == ',') cur++;
+            p++;
+        }
+        if (*p && cur == (int)idx) {
+            int n = 0;
+            while (p[n] && p[n] != ',' && p[n] != '(' && n < 2) n++;
+            for (int i = 0; i < n; i++) {
+                char c = p[i];
+                data.kbd_layout[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
+            }
+            data.kbd_layout[n] = '\0';
+        } else {
+            const char *name = xkb_keymap_layout_get_name(kbd->keymap, idx);
+            if (name) snprintf(data.kbd_layout, sizeof(data.kbd_layout), "%.2s", name);
+        }
+    }
+
     data.opacity = server->config.decor.tray_opacity;
     data.active_pos = (double)server->camera_x / server->screen_width;
     if (data.active_pos < 0.0) data.active_pos = 0.0;
@@ -1602,7 +2005,7 @@ void server_request_tray_redraw(FwmServer *server) {
     if (server->focused_view) {
         PhysicsBody *b = physics_find_body(&server->physics, server->focused_view->id);
         if (b) {
-            data.win_name = server->focused_view->xdg_toplevel->title;
+            data.win_name = view_title(server->focused_view);
             if (!data.win_name) data.win_name = "Window";
             data.speed = hypot(b->vx, b->vy);
             data.angle = atan2(b->vy, b->vx) * 180.0 / M_PI;

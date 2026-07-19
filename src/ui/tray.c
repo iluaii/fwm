@@ -128,13 +128,19 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
         cairo_fill(cr);
     }
 
-    /* ── right pill: clock ── */
+    /* ── right pill: clock (+ keyboard layout when several configured) ── */
     {
-        char clock[64];
+        char clock[80];
+        char stamp[64];
         time_t now = time(NULL);
         struct tm tm;
         localtime_r(&now, &tm);
-        strftime(clock, sizeof(clock), "%H:%M \xE2\x80\xA2 %a, %d/%m", &tm);
+        strftime(stamp, sizeof(stamp), "%H:%M \xE2\x80\xA2 %a, %d/%m", &tm);
+        if (data->kbd_layout[0]) {
+            snprintf(clock, sizeof(clock), "%s \xE2\x80\xA2 %s", data->kbd_layout, stamp);
+        } else {
+            snprintf(clock, sizeof(clock), "%s", stamp);
+        }
 
         int cw;
         pango_layout_set_text(layout, clock, -1);
@@ -177,6 +183,7 @@ typedef struct {
     int  pos_mil; /* active_pos in thousandths — redraw while it glides */
     int  opacity1000;
     int  minute;         /* clock shows minutes at most */
+    char kbd[8];
 } TraySig;
 
 void tray_redraw(struct wlr_scene_buffer *tray_buf, const TrayData *data) {
@@ -197,6 +204,7 @@ void tray_redraw(struct wlr_scene_buffer *tray_buf, const TrayData *data) {
     struct tm tm;
     localtime_r(&now, &tm);
     sig.minute = tm.tm_yday * 1440 + tm.tm_hour * 60 + tm.tm_min;
+    memcpy(sig.kbd, data->kbd_layout, sizeof(sig.kbd));
 
     if (have_last && memcmp(&sig, &last, sizeof(sig)) == 0) return;
     last = sig;

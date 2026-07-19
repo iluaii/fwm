@@ -81,12 +81,15 @@ typedef struct FwmServer {
     struct wlr_output_layout *output_layout;
     struct wlr_scene_output_layout *scene_layout;
     struct wlr_xdg_shell *xdg_shell;
+    struct wlr_compositor *compositor;
+    struct wlr_xwayland *xwayland;
     
     struct wlr_cursor *cursor;
     struct wlr_xcursor_manager *cursor_mgr;
     struct wlr_seat *seat;
     
     struct wl_list views;
+    struct wl_list groups; /* FwmGroup tab-stacks */
     struct wl_list ghosts; /* FwmGhost close-animation snapshots */ /* FwmView list */
     struct FwmView *focused_view;
     struct FwmView *last_touched_view;
@@ -103,11 +106,15 @@ typedef struct FwmServer {
     struct wl_listener cursor_frame;
     struct wl_listener request_cursor;
     struct wl_listener seat_request_set_selection;
+    struct wl_listener seat_request_set_primary_selection;
     
     /* Keyboard input */
     struct wl_list keyboards;
     struct wl_listener new_xdg_toplevel;
+    struct wl_listener new_xdg_popup;
     struct wl_listener new_toplevel_decoration;
+    struct wl_listener xwl_ready;
+    struct wl_listener xwl_new_surface;
 
     /* Held-key auto-repeat for repeatable binds (e.g. move_camera) */
     struct wl_event_source *key_repeat_timer;
@@ -117,6 +124,9 @@ typedef struct FwmServer {
     xkb_keysym_t repeat_l_sym;
     char repeat_l_utf8[16];   /* points into config.keys[].action; NULL when idle */
     uint32_t repeat_keycode;     /* raw event keycode currently repeating */
+    unsigned char key_consumed[768]; /* per-keycode: press was eaten by a bind,
+                                        swallow the matching release too */
+    int group_click; /* tab-bar click consumed; swallow its release */
     
     /* Physics and desktop coordinates */
     PhysicsWorld physics;

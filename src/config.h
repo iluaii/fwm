@@ -48,6 +48,16 @@ typedef struct {
     char   icon_theme[64];   /* launcher icon theme; "" = auto (gtk3 setting, then hicolor) */
 } DecorConfig;
 
+/* ── input ───────────────────────────────────────────────────────────── */
+
+typedef struct {
+    char kbd_layout[64];   /* xkb layout list, e.g. "us,ru"; "" = environment */
+    char kbd_variant[64];  /* xkb variant list, may be empty */
+    char kbd_options[128]; /* xkb options, e.g. "grp:alt_shift_toggle" */
+    int  repeat_rate;      /* key repeat, chars/s */
+    int  repeat_delay;     /* ms before repeat starts */
+} InputConfig;
+
 /* ── binds ───────────────────────────────────────────────────────────── */
 
 /*
@@ -103,6 +113,7 @@ typedef struct {
     TilingConfig    tiling;
     CameraConfig    camera;
     DecorConfig     decor;
+    InputConfig     input;
     KeyBind        *keys;
     int             key_count;
     WallpaperLayer *wallpapers;

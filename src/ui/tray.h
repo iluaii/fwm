@@ -17,6 +17,7 @@ typedef struct {
     double active_pos; /* fractional desktop position (camera_x / screen_w):
                         * the underline marker glides with the camera slide */
     double opacity; /* island fill alpha 0..1 (decor.tray_opacity) */
+    char kbd_layout[8]; /* short active-layout tag ("EN", "RU"); "" hides it */
 } TrayData;
 
 struct wlr_scene_buffer *tray_init(struct wlr_scene_tree *parent, int screen_width);

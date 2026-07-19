@@ -38,16 +38,31 @@ void welcome_set_welcomed(void) {
     if (f) fclose(f);
 }
 
+#define WELCOME_CUT 14.0 /* corner chevron cut, px — matches hints.c */
+
+// Tray-island silhouette with a moderate corner cut (see panel_path in hints.c).
+static void panel_path(cairo_t *cr, double x, double y, double w, double h, double cut) {
+    cairo_move_to(cr, x + cut, y);
+    cairo_line_to(cr, x + w - cut, y);
+    cairo_line_to(cr, x + w, y + cut);
+    cairo_line_to(cr, x + w, y + h - cut);
+    cairo_line_to(cr, x + w - cut, y + h);
+    cairo_line_to(cr, x + cut, y + h);
+    cairo_line_to(cr, x, y + h - cut);
+    cairo_line_to(cr, x, y + cut);
+    cairo_close_path(cr);
+}
+
 static void draw_welcome_content(cairo_t *cr, int w, int h, void *user_data) {
-    (void)user_data;
-    
-    // Draw background (#2e3440)
-    cairo_set_source_rgba(cr, 0.18, 0.20, 0.25, 1.0);
-    cairo_rectangle(cr, 0, 0, w, h);
+    double opacity = *(double *)user_data;
+
+    // Same flat near-black as the tray islands, same opacity knob.
+    cairo_set_source_rgba(cr, 0.075, 0.082, 0.098, opacity);
+    panel_path(cr, 0, 0, w, h, WELCOME_CUT);
     cairo_fill(cr);
     
     PangoLayout *layout = pango_cairo_create_layout(cr);
-    PangoFontDescription *desc = pango_font_description_from_string("monospace 10");
+    PangoFontDescription *desc = pango_font_description_from_string("sans 10");
     pango_layout_set_font_description(layout, desc);
     pango_font_description_free(desc);
     
@@ -81,7 +96,8 @@ static void draw_welcome_content(cairo_t *cr, int w, int h, void *user_data) {
     g_object_unref(layout);
 }
 
-struct wlr_scene_buffer *welcome_show(struct wlr_scene_tree *parent, int screen_w, int screen_h) {
+struct wlr_scene_buffer *welcome_show(struct wlr_scene_tree *parent, int screen_w, int screen_h,
+                                      const FwmConfig *cfg) {
     if (welcomed_flag_exists()) return NULL;
 
     int wx = (screen_w - WELCOME_W) / 2;
@@ -89,8 +105,9 @@ struct wlr_scene_buffer *welcome_show(struct wlr_scene_tree *parent, int screen_
 
     struct wlr_scene_buffer *welcome_buf = cairo_overlay_create(parent, WELCOME_W, WELCOME_H);
     if (welcome_buf) {
+        double opacity = cfg->decor.tray_opacity;
         wlr_scene_node_set_position(&welcome_buf->node, wx, wy);
-        cairo_overlay_update(welcome_buf, draw_welcome_content, NULL);
+        cairo_overlay_update(welcome_buf, draw_welcome_content, &opacity);
         cairo_overlay_make_static(welcome_buf);
     }
     return welcome_buf;

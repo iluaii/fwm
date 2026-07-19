@@ -190,6 +190,32 @@ static void load_decor(toml_table_t *root, DecorConfig *dc) {
     if (dc->launcher_opacity > 1.0) dc->launcher_opacity = 1.0;
 }
 
+/* ── input section ───────────────────────────────────────────────────── */
+
+static void load_input(toml_table_t *root, InputConfig *in) {
+    in->kbd_layout[0]  = '\0';
+    in->kbd_variant[0] = '\0';
+    in->kbd_options[0] = '\0';
+    in->repeat_rate  = 25;
+    in->repeat_delay = 600;
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "input");
+    if (!tbl) return;
+
+    toml_datum_t d;
+    d = toml_string_in(tbl, "kbd_layout");
+    if (d.ok) { snprintf(in->kbd_layout, sizeof(in->kbd_layout), "%s", d.u.s); free(d.u.s); }
+    d = toml_string_in(tbl, "kbd_variant");
+    if (d.ok) { snprintf(in->kbd_variant, sizeof(in->kbd_variant), "%s", d.u.s); free(d.u.s); }
+    d = toml_string_in(tbl, "kbd_options");
+    if (d.ok) { snprintf(in->kbd_options, sizeof(in->kbd_options), "%s", d.u.s); free(d.u.s); }
+    d = toml_int_in(tbl, "repeat_rate");
+    if (d.ok && d.u.i > 0) in->repeat_rate = (int)d.u.i;
+    d = toml_int_in(tbl, "repeat_delay");
+    if (d.ok && d.u.i > 0) in->repeat_delay = (int)d.u.i;
+}
+
 /* ── binds section ───────────────────────────────────────────────────── */
 
 static void load_binds(toml_table_t *root, FwmConfig *cfg) {
@@ -288,6 +314,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     cfg->key_count       = 0;
     cfg->wallpapers      = NULL;
     cfg->wallpaper_count = 0;
+    load_input(NULL, &cfg->input); /* defaults for the no-config-file path */
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -308,6 +335,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_tiling(root, &cfg->tiling);
     load_camera(root, &cfg->camera);
     load_decor(root, &cfg->decor);
+    load_input(root, &cfg->input);
     load_binds(root, cfg);
     load_wallpaper(root, cfg);
 
