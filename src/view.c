@@ -4,6 +4,7 @@
 #include "bsp.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <wlr/types/wlr_buffer.h>
 
 static void handle_map(struct wl_listener *listener, void *data) {
     FwmView *view = wl_container_of(listener, view, map);
@@ -25,6 +26,16 @@ static void handle_commit(struct wl_listener *listener, void *data) {
     }
     // Track the actual committed surface size so borders hug the real window.
     view_update_border_geometry(view);
+
+    // Keep our own lock on the latest committed buffer: at unmap time the
+    // client's buffer may already be gone, but the close animation needs the
+    // last frame as a snapshot.
+    struct wlr_surface *surface = view->xdg_toplevel->base->surface;
+    if (surface->buffer) {
+        wlr_buffer_lock(&surface->buffer->base);
+        if (view->last_buffer) wlr_buffer_unlock(view->last_buffer);
+        view->last_buffer = &surface->buffer->base;
+    }
 }
 
 /* ── focus border ─────────────────────────────────────────────────────── */
@@ -157,6 +168,10 @@ void view_destroy(FwmView *view) {
     if (view->xdg_toplevel->base->surface->mapped) {
         view_unmap(view);
     }
+    if (view->last_buffer) {
+        wlr_buffer_unlock(view->last_buffer);
+        view->last_buffer = NULL;
+    }
     
     free(view);
 }
@@ -250,6 +265,35 @@ void view_unmap(FwmView *view) {
         view->server->interactive.view = NULL;
     }
     
+    // Close animation: leave a snapshot of the last frame fading out (the
+    // mirror of the map fade-in). The ghost takes over the buffer lock; the
+    // physics tick fades it and frees it.
+    if (view->last_buffer && view->server->config.decor.fade_in_ms > 0.0) {
+        FwmGhost *ghost = calloc(1, sizeof(*ghost));
+        if (ghost) {
+            ghost->scene_buffer = wlr_scene_buffer_create(view->server->layer_windows, view->last_buffer);
+        }
+        if (ghost && ghost->scene_buffer) {
+            // The raw buffer's top-left sits above/left of the xdg geometry
+            // (CSD shadows) — compensate like the xdg scene helper does.
+            struct wlr_box geo = view->xdg_toplevel->base->current.geometry;
+            ghost->buffer = view->last_buffer;
+            view->last_buffer = NULL;
+            ghost->x = view->x - geo.x;
+            ghost->y = view->y - geo.y;
+            wlr_scene_node_set_position(&ghost->scene_buffer->node,
+                                        (int)ghost->x - view->server->camera_x, (int)ghost->y);
+            wlr_scene_node_raise_to_top(&ghost->scene_buffer->node);
+            wl_list_insert(&view->server->ghosts, &ghost->link);
+        } else {
+            free(ghost);
+        }
+    }
+    if (view->last_buffer) {
+        wlr_buffer_unlock(view->last_buffer);
+        view->last_buffer = NULL;
+    }
+
     if (view->scene_tree) {
         wlr_scene_node_destroy(&view->scene_tree->node);
         view->scene_tree = NULL;

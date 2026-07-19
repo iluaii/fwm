@@ -56,6 +56,16 @@ typedef struct {
     double cur_x, cur_y;
 } FwmInteractiveState;
 
+/* Snapshot of a closed window's last frame, fading out (close animation).
+ * Owns one lock on `buffer`; released when the fade ends. */
+typedef struct FwmGhost {
+    struct wlr_scene_buffer *scene_buffer;
+    struct wlr_buffer *buffer;
+    double x, y; /* world coordinates (camera-independent) */
+    double t;    /* fade progress 0 -> 1 */
+    struct wl_list link;
+} FwmGhost;
+
 typedef struct FwmServer {
     struct wl_display *wl_display;
     struct wlr_backend *wlr_backend;
@@ -75,7 +85,8 @@ typedef struct FwmServer {
     struct wlr_xcursor_manager *cursor_mgr;
     struct wlr_seat *seat;
     
-    struct wl_list views; /* FwmView list */
+    struct wl_list views;
+    struct wl_list ghosts; /* FwmGhost close-animation snapshots */ /* FwmView list */
     struct FwmView *focused_view;
     struct FwmView *last_touched_view;
     

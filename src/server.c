@@ -25,6 +25,7 @@
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
@@ -746,6 +747,25 @@ static int physics_tick_cb(void *data) {
             double t = fv->fade_t;
             view_set_opacity(fv, 1.0 - (1.0 - t) * (1.0 - t));
         }
+
+        // Window fade-out: ghost snapshots of closed windows ramp 1 -> 0
+        // over the same duration, then die (node destroyed, buffer released).
+        FwmGhost *g, *g_tmp;
+        wl_list_for_each_safe(g, g_tmp, &server->ghosts, link) {
+            g->t += step;
+            if (g->t >= 1.0) {
+                wlr_scene_node_destroy(&g->scene_buffer->node);
+                wlr_buffer_unlock(g->buffer);
+                wl_list_remove(&g->link);
+                free(g);
+                continue;
+            }
+            // Ease-in (mirror of the fade-in's ease-out): slow start, fast end.
+            double o = (1.0 - g->t) * (1.0 - g->t);
+            wlr_scene_buffer_set_opacity(g->scene_buffer, (float)o);
+            wlr_scene_node_set_position(&g->scene_buffer->node,
+                                        (int)lround(g->x) - server->camera_x, (int)lround(g->y));
+        }
     }
 
     // Physics step
@@ -1084,6 +1104,7 @@ bool server_init(FwmServer *server) {
     server->layer_overlay = wlr_scene_tree_create(&server->scene->tree);
 
     wl_list_init(&server->views);
+    wl_list_init(&server->ghosts);
     wl_list_init(&server->outputs);
     wl_list_init(&server->keyboards);
     
@@ -1202,6 +1223,14 @@ void server_destroy(FwmServer *server) {
         wl_event_source_remove(server->key_repeat_timer);
     }
     physics_destroy(&server->physics);
+
+    FwmGhost *g, *g_tmp;
+    wl_list_for_each_safe(g, g_tmp, &server->ghosts, link) {
+        wlr_scene_node_destroy(&g->scene_buffer->node);
+        wlr_buffer_unlock(g->buffer);
+        wl_list_remove(&g->link);
+        free(g);
+    }
 
     wl_display_destroy_clients(server->wl_display);
     wl_display_destroy(server->wl_display);

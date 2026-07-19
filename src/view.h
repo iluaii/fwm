@@ -40,6 +40,10 @@ typedef struct FwmView {
     int fade_anim;
     double fade_t;
 
+    /* Last committed buffer, kept locked so view_unmap can leave a fading
+     * close-animation snapshot (FwmGhost) after the client buffer is gone. */
+    struct wlr_buffer *last_buffer;
+
     /* Real (whole-output) fullscreen: while such a view is on the active
      * desktop the tray hides — overlays outrank windows in the scene, so
      * this is the only way a fullscreen surface can cover everything. */
