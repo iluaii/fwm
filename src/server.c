@@ -5,6 +5,7 @@
 #include "ui/tray.h"
 #include "ui/hints.h"
 #include "ui/welcome.h"
+#include "ui/launcher.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 
@@ -100,8 +101,32 @@ static bool action_is_repeatable(const char *action) {
     return strncmp(action, "move_camera:", 12) == 0;
 }
 
+/* Call around any code that may toggle the launcher. Opening it takes the
+ * keyboard away from the focused client via a wl_keyboard leave — per the
+ * Wayland spec the client must then treat every key as released, which is
+ * what prevents "stuck" keys (e.g. the space of a super+space toggle bind,
+ * whose press was already forwarded but whose release we swallow). Closing
+ * re-enters the focused surface. */
+static void launcher_grab_sync(FwmServer *server, bool was_open) {
+    bool open = launcher_is_open(server->launcher);
+    if (open == was_open) return;
+    if (open) {
+        wlr_seat_keyboard_notify_clear_focus(server->seat);
+    } else if (server->focused_view) {
+        struct wlr_keyboard *kbd = wlr_seat_get_keyboard(server->seat);
+        struct wlr_surface *surface = server->focused_view->xdg_toplevel->base->surface;
+        if (kbd) {
+            wlr_seat_keyboard_notify_enter(server->seat, surface,
+                kbd->keycodes, kbd->num_keycodes, &kbd->modifiers);
+        } else {
+            wlr_seat_keyboard_notify_enter(server->seat, surface, NULL, 0, NULL);
+        }
+    }
+}
+
 static void key_repeat_stop(FwmServer *server) {
     server->repeat_action = NULL;
+    server->repeat_l_active = 0;
     server->repeat_keycode = 0;
     if (server->key_repeat_timer) {
         wl_event_source_timer_update(server->key_repeat_timer, 0);
@@ -110,6 +135,17 @@ static void key_repeat_stop(FwmServer *server) {
 
 static int key_repeat_cb(void *data) {
     FwmServer *server = data;
+    if (server->repeat_l_active) {
+        // Launcher repeat: only while it is still open (Enter/Escape/click
+        // may have closed it since the key went down).
+        if (launcher_is_open(server->launcher)) {
+            launcher_handle_key(server->launcher, server->repeat_l_sym, server->repeat_l_utf8);
+            wl_event_source_timer_update(server->key_repeat_timer, 40);
+        } else {
+            key_repeat_stop(server);
+        }
+        return 0;
+    }
     if (!server->repeat_action) return 0;
     server_dispatch_action(server, server->repeat_action);
     // Re-arm at the keyboard repeat rate (25/s -> 40ms).
@@ -156,6 +192,40 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
         }
     }
     
+    // While the launcher is open it owns the keyboard entirely: feed it
+    // presses (keysym + the text they produce) and swallow releases too, so
+    // clients never see stray events from launcher typing.
+    if (launcher_is_open(server->launcher)) {
+        if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            uint32_t kc = event->keycode + 8;
+            xkb_keysym_t sym = xkb_state_key_get_one_sym(keyboard->wlr_keyboard->xkb_state, kc);
+            char utf8[16] = "";
+            xkb_state_key_get_utf8(keyboard->wlr_keyboard->xkb_state, kc, utf8, sizeof(utf8));
+            launcher_handle_key(server->launcher, sym, utf8);
+            launcher_grab_sync(server, true); /* Escape/Enter may have closed it */
+
+            // Wayland auto-repeat is client-side, and while the launcher is
+            // open no client sees the keyboard — so repeat held navigation
+            // and typing keys ourselves (same delay/rate as bind repeat).
+            bool repeatable = sym == XKB_KEY_Up || sym == XKB_KEY_Down
+                || sym == XKB_KEY_Tab || sym == XKB_KEY_BackSpace
+                || (utf8[0] && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f);
+            if (repeatable && server->key_repeat_timer) {
+                server->repeat_l_active = 1;
+                server->repeat_l_sym = sym;
+                memcpy(server->repeat_l_utf8, utf8, sizeof(server->repeat_l_utf8));
+                server->repeat_keycode = event->keycode;
+                server->repeat_action = NULL;
+                wl_event_source_timer_update(server->key_repeat_timer, 300);
+            } else {
+                key_repeat_stop(server);
+            }
+        } else if (server->repeat_l_active && event->keycode == server->repeat_keycode) {
+            key_repeat_stop(server);
+        }
+        return;
+    }
+
     // Pass event to seat first (e.g. for client hotkeys/typing)
     wlr_seat_set_keyboard(server->seat, keyboard->wlr_keyboard);
     wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
@@ -373,7 +443,16 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
     // Process pointer movement
     double lx = server->cursor->x;
     double ly = server->cursor->y;
-    
+
+    // While the launcher is open the pointer belongs to it: hover moves the
+    // selection, clients get no motion (and no pointer focus).
+    if (launcher_is_open(server->launcher)) {
+        launcher_handle_motion(server->launcher, lx, ly);
+        wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+        wlr_seat_pointer_clear_focus(server->seat);
+        return;
+    }
+
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     
@@ -502,11 +581,24 @@ static void handle_cursor_motion_absolute(struct wl_listener *listener, void *da
     FwmServer *server = wl_container_of(listener, server, cursor_motion_absolute);
     struct wlr_pointer_motion_absolute_event *event = data;
     wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
+    if (launcher_is_open(server->launcher)) {
+        launcher_handle_motion(server->launcher, server->cursor->x, server->cursor->y);
+        wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+        wlr_seat_pointer_clear_focus(server->seat);
+    }
 }
 
 static void handle_cursor_button(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
+
+    bool l_was_open = launcher_is_open(server->launcher);
+    if (launcher_handle_button(server->launcher, server->cursor->x, server->cursor->y,
+                               event->state == WL_POINTER_BUTTON_STATE_PRESSED)) {
+        launcher_grab_sync(server, l_was_open); /* click may have closed it */
+        return; /* launcher consumed the click; nothing reaches clients */
+    }
+
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
     
     double lx = server->cursor->x;
@@ -778,6 +870,9 @@ static int physics_tick_cb(void *data) {
                                         (int)lround(g->x) - server->camera_x, (int)lround(g->y));
         }
     }
+
+    // Launcher: tile physics + overlay redraw while open.
+    launcher_tick(server->launcher, dt);
 
     // Physics step
     physics_step(&server->physics, server->screen_width, server->screen_height,
@@ -1058,6 +1153,10 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
         if (new_target < 0) new_target = 0;
         if (new_target > 9 * server->screen_width) new_target = 9 * server->screen_width;
         server->target_camera_x = new_target;
+    } else if (strcmp(action, "launcher") == 0) {
+        bool was_open = launcher_is_open(server->launcher);
+        launcher_toggle(server->launcher);
+        launcher_grab_sync(server, was_open);
     } else if (strncmp(action, "view:", 5) == 0) {
         int desktop = atoi(action + 5);
         if (desktop >= 0 && desktop < 10) {
@@ -1113,6 +1212,7 @@ bool server_init(FwmServer *server) {
     server->layer_background = wlr_scene_tree_create(&server->scene->tree);
     server->layer_windows = wlr_scene_tree_create(&server->scene->tree);
     server->layer_overlay = wlr_scene_tree_create(&server->scene->tree);
+    server->launcher = launcher_create(server);
 
     wl_list_init(&server->views);
     wl_list_init(&server->ghosts);
@@ -1226,6 +1326,7 @@ void server_destroy(FwmServer *server) {
     if (server->hints_buffer) cairo_overlay_destroy(server->hints_buffer);
     if (server->welcome_buffer) cairo_overlay_destroy(server->welcome_buffer);
     if (server->wallpaper) wallpaper_destroy(server->wallpaper);
+    launcher_destroy(server->launcher);
     
     if (server->physics_timer) {
         wl_event_source_remove(server->physics_timer);

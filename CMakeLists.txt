@@ -27,6 +27,7 @@ set(SOURCES
     src/ui/tray.c
     src/ui/hints.c
     src/ui/welcome.c
+    src/ui/launcher.c
 )
 
 add_executable(fwm-wayland ${SOURCES})

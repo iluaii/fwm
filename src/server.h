@@ -30,6 +30,7 @@ typedef enum {
 } FwmInteractiveAction;
 
 struct FwmView;
+struct Launcher;
 
 typedef struct {
     FwmInteractiveAction action;
@@ -110,7 +111,11 @@ typedef struct FwmServer {
 
     /* Held-key auto-repeat for repeatable binds (e.g. move_camera) */
     struct wl_event_source *key_repeat_timer;
-    const char *repeat_action;   /* points into config.keys[].action; NULL when idle */
+    const char *repeat_action;
+    /* Launcher key auto-repeat (arrows/backspace/typing while it is open). */
+    int repeat_l_active;
+    xkb_keysym_t repeat_l_sym;
+    char repeat_l_utf8[16];   /* points into config.keys[].action; NULL when idle */
     uint32_t repeat_keycode;     /* raw event keycode currently repeating */
     
     /* Physics and desktop coordinates */
@@ -137,6 +142,7 @@ typedef struct FwmServer {
     struct wlr_scene_buffer *tray_buffer;
     struct wlr_scene_buffer *hints_buffer;
     struct wlr_scene_buffer *welcome_buffer;
+    struct Launcher *launcher;
     
     int running;
 } FwmServer;

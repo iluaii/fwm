@@ -49,9 +49,10 @@ anim_ms = 350.0
 # workspace:      view:0 .. view:9
 
 "super+Return"       = "spawn:kitty"
-"super+space"        = "spawn:rofi -show drun -normal-window"
+#"super+space"        = "spawn:rofi -show drun -normal-window"
 "super+q"            = "killclient"
 "super+t"            = "toggle_tiling"
+"super+space"            = "launcher"
 "super+d"            = "fake_fullscreen"
 "super+f"            = "real_fullscreen"
 "super+h"            = "move_camera:-50"
