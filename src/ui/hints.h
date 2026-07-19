@@ -1,8 +1,8 @@
 #ifndef FWM_HINTS_H
 #define FWM_HINTS_H
 
-#include <X11/Xlib.h>
+#include <wlr/types/wlr_scene.h>
 
-void hints_show(Display *dpy, Window root, int screen_w, int screen_h);
+struct wlr_scene_buffer *hints_show(struct wlr_scene_tree *parent, int screen_w, int screen_h);
 
 #endif /* FWM_HINTS_H */

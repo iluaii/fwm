@@ -1,139 +1,170 @@
 #include "tray.h"
-
+#include "cairo_overlay.h"
 #include <stdio.h>
 #include <string.h>
-#include <X11/extensions/shape.h>
-#include <X11/Xft/Xft.h>
+#include <math.h>
+#include <time.h>
 
-static GC tray_gc;
-static unsigned long bg_color;
-static XftFont *font;
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
-static Pixmap back_buf;
-static XftDraw *xft_draw;
+/* Minimal "islands" style with the WM's sharp identity: flat dark islands
+ * whose ends taper to a point (chevron cut), on a transparent background.
+ * No gradients, no shadows — depth comes from spacing alone. */
 
-static XftColor text_primary;
-static XftColor text_secondary;
-static int tray_width_stored;
+#define PILL_PAD    20.0  /* horizontal padding inside an island (covers the point) */
+#define PILL_ALPHA  0.92
 
-static void apply_hexagon_shape(Display *dpy, Window tray, int width, int height) {
-    int cut = height / 2;
+static const double COL_PILL[3]  = {0.075, 0.082, 0.098}; /* near-black */
+static const double COL_TEXT[3]  = {0.91, 0.92, 0.94};    /* primary */
+static const double COL_MUTED[3] = {0.54, 0.57, 0.63};    /* secondary */
+static const double COL_DIM[3]   = {0.32, 0.34, 0.40};    /* empty desktop dot */
 
-    Pixmap mask = XCreatePixmap(dpy, tray, width, height, 1);
-
-    XGCValues gcv;
-    GC mask_gc = XCreateGC(dpy, mask, 0, &gcv);
-
-    XSetForeground(dpy, mask_gc, 1);
-    XPoint points[6] = {
-        { cut, 0 },
-        { width - cut, 0 },
-        { width, height / 2 },
-        { width - cut, height },
-        { cut, height },
-        { 0, height / 2 },
-    };
-    XFillPolygon(dpy, mask, mask_gc, points, 6, Convex, CoordModeOrigin);
-
-    XShapeCombineMask(dpy, tray, ShapeBounding, 0,0, mask, ShapeSet);
-
-    XFreeGC(dpy, mask_gc);
-    XFreePixmap(dpy, mask);
+/* Island with pointed (chevron) ends: same silhouette family as the old bar. */
+static void pill_path(cairo_t *cr, double x, double y, double w, double h) {
+    double cut = h / 2.0;
+    cairo_new_path(cr);
+    cairo_move_to(cr, x + cut, y);
+    cairo_line_to(cr, x + w - cut, y);
+    cairo_line_to(cr, x + w, y + h / 2.0);
+    cairo_line_to(cr, x + w - cut, y + h);
+    cairo_line_to(cr, x + cut, y + h);
+    cairo_line_to(cr, x, y + h / 2.0);
+    cairo_close_path(cr);
 }
 
-Window tray_init(Display *dpy, Window root, int screen_width) {
-    int screen = DefaultScreen(dpy);
+static void draw_pill(cairo_t *cr, double x, double y, double w, double h) {
+    pill_path(cr, x, y, w, h);
+    cairo_set_source_rgba(cr, COL_PILL[0], COL_PILL[1], COL_PILL[2], PILL_ALPHA);
+    cairo_fill(cr);
+}
 
+typedef struct {
+    const TrayData *data;
+} DrawTrayData;
+
+static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
+    DrawTrayData *draw_data = user_data;
+    const TrayData *data = draw_data->data;
+    if (!data) return;
+
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+    PangoFontDescription *desc = pango_font_description_from_string("sans 10");
+    pango_layout_set_font_description(layout, desc);
+    pango_font_description_free(desc);
+
+    int th;
+    pango_layout_get_pixel_size(layout, NULL, &th);
+    double text_y = (h - th) / 2.0;
+
+    /* ── left pill: focused window title + physics info ── */
+    if (data->win_name) {
+        char params[128];
+        if (data->flying) {
+            snprintf(params, sizeof(params), "spd %.0f  ang %.0f\xC2\xB0  m %.1f",
+                     data->speed, data->angle, data->mass);
+        } else {
+            snprintf(params, sizeof(params), "m %.1f", data->mass);
+        }
+
+        int title_w, params_w;
+        pango_layout_set_text(layout, data->win_name, -1);
+        pango_layout_get_pixel_size(layout, &title_w, NULL);
+        pango_layout_set_text(layout, params, -1);
+        pango_layout_get_pixel_size(layout, &params_w, NULL);
+
+        double gap = 10.0;
+        double pw = PILL_PAD + title_w + gap + params_w + PILL_PAD;
+        draw_pill(cr, 0, 0, pw, h);
+
+        cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
+        pango_layout_set_text(layout, data->win_name, -1);
+        cairo_move_to(cr, PILL_PAD, text_y);
+        pango_cairo_show_layout(cr, layout);
+
+        cairo_set_source_rgb(cr, COL_MUTED[0], COL_MUTED[1], COL_MUTED[2]);
+        pango_layout_set_text(layout, params, -1);
+        cairo_move_to(cr, PILL_PAD + title_w + gap, text_y);
+        pango_cairo_show_layout(cr, layout);
+    }
+
+    /* ── center pill: desktop indicators ── */
+    {
+        double spacing = 18.0;
+        double pw = PILL_PAD * 2 + spacing * 9 + 6;
+        double px = (w - pw) / 2.0;
+        draw_pill(cr, px, 0, pw, h);
+
+        for (int i = 0; i < 10; i++) {
+            double cx = px + PILL_PAD + 3 + i * spacing;
+            int count = data->desktop_window_counts[i];
+            int active = (i == data->active_desktop);
+
+            if (count > 0) {
+                char buf[8];
+                snprintf(buf, sizeof(buf), "%d", count);
+                pango_layout_set_text(layout, buf, -1);
+                int nw;
+                pango_layout_get_pixel_size(layout, &nw, NULL);
+                if (active) cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
+                else        cairo_set_source_rgb(cr, COL_MUTED[0], COL_MUTED[1], COL_MUTED[2]);
+                cairo_move_to(cr, cx - nw / 2.0, text_y);
+                pango_cairo_show_layout(cr, layout);
+            } else {
+                double r = active ? 3.5 : 2.0;
+                if (active) cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
+                else        cairo_set_source_rgb(cr, COL_DIM[0], COL_DIM[1], COL_DIM[2]);
+                cairo_arc(cr, cx, h / 2.0, r, 0, 2 * M_PI);
+                cairo_fill(cr);
+            }
+
+            // Small underline marker for the active desktop, dot or number.
+            if (active) {
+                cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
+                cairo_rectangle(cr, cx - 4, h - 6, 8, 2);
+                cairo_fill(cr);
+            }
+        }
+    }
+
+    /* ── right pill: clock ── */
+    {
+        char clock[64];
+        time_t now = time(NULL);
+        struct tm tm;
+        localtime_r(&now, &tm);
+        strftime(clock, sizeof(clock), "%H:%M \xE2\x80\xA2 %a, %d/%m", &tm);
+
+        int cw;
+        pango_layout_set_text(layout, clock, -1);
+        pango_layout_get_pixel_size(layout, &cw, NULL);
+
+        double pw = PILL_PAD * 2 + cw;
+        double px = w - pw;
+        draw_pill(cr, px, 0, pw, h);
+
+        cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
+        cairo_move_to(cr, px + PILL_PAD, text_y);
+        pango_cairo_show_layout(cr, layout);
+    }
+
+    g_object_unref(layout);
+}
+
+struct wlr_scene_buffer *tray_init(struct wlr_scene_tree *parent, int screen_width) {
     int tray_width = screen_width - 40;
     int tray_x = (screen_width - tray_width) / 2;
     int tray_y = 8;
 
-    Window tray = XCreateSimpleWindow(dpy, root, tray_x, tray_y, tray_width, TRAY_HEIGHT, 0, 0, BlackPixel(dpy, screen));
-
-    tray_gc = XCreateGC(dpy, tray, 0, NULL);
-
-    Visual *visual = DefaultVisual(dpy, screen);
-    Colormap cmap = XDefaultColormap(dpy, screen);
-
-    font = XftFontOpenName(dpy, screen, "monospace:size=10");
-
-    XftColorAllocName(dpy, visual, cmap, "#eceff4", &text_primary);
-    XftColorAllocName(dpy, visual, cmap, "#9099aa", &text_secondary);
-
-    tray_width_stored = tray_width;
-
-    XColor color;
-    XParseColor(dpy, cmap, "#2e3440", &color);
-    XAllocColor(dpy, cmap, &color);
-    bg_color = color.pixel;
-
-    XSetWindowBackground(dpy, tray, bg_color);
-
-    back_buf = XCreatePixmap(dpy, tray, tray_width, TRAY_HEIGHT,
-                             DefaultDepth(dpy, screen));
-    xft_draw = XftDrawCreate(dpy, back_buf, visual, cmap);
-
-    apply_hexagon_shape(dpy, tray, tray_width, TRAY_HEIGHT);
-    XMapRaised(dpy, tray);
-
-    return tray;
+    struct wlr_scene_buffer *tray_buf = cairo_overlay_create(parent, tray_width, TRAY_HEIGHT);
+    if (tray_buf) {
+        wlr_scene_node_set_position(&tray_buf->node, tray_x, tray_y);
+    }
+    return tray_buf;
 }
 
-void tray_redraw(Display *dpy, Window tray_win, const TrayData *data) {
-    XSetForeground(dpy, tray_gc, bg_color);
-    XFillRectangle(dpy, back_buf, tray_gc, 0, 0, tray_width_stored, TRAY_HEIGHT);
-
-    if (!data) goto blit;
-
-    int text_y = (TRAY_HEIGHT + font->ascent - font->descent) / 2;
-    int margin_x = TRAY_HEIGHT / 2 + 8;
-
-    int dot_spacing = 20;
-    for (int i = 0; i < 10; i++) {
-        char buf[16];
-        int count = data->desktop_window_counts[i];
-        if (count > 0) {
-            snprintf(buf, sizeof(buf), "%d", count);
-        } else {
-            strcpy(buf, "•");
-        }
-
-        XftColor *color = (i == data->active_desktop) ? &text_primary : &text_secondary;
-        XftDrawStringUtf8(xft_draw, color, font,
-                          margin_x + i * dot_spacing, text_y,
-                          (const FcChar8 *)buf, strlen(buf));
-    }
-
-    int win_info_x = margin_x + 10 * dot_spacing + 15;
-    if (data->win_name) {
-        XftDrawStringUtf8(xft_draw, &text_primary, font,
-                          win_info_x, text_y,
-                          (const FcChar8 *)data->win_name,
-                          strlen(data->win_name));
-
-        char params[128];
-        if (data->flying) {
-            snprintf(params, sizeof(params),
-                     "spd: %.0f  ang: %.0f°  mass: %.1f",
-                     data->speed, data->angle, data->mass);
-        } else {
-            snprintf(params, sizeof(params),
-                     "mass: %.1f  idle",
-                     data->mass);
-        }
-
-        XGlyphInfo extents;
-        XftTextExtentsUtf8(dpy, font,
-                           (const FcChar8 *)data->win_name,
-                           strlen(data->win_name), &extents);
-
-        XftDrawStringUtf8(xft_draw, &text_secondary, font,
-                          win_info_x + extents.xOff + 8, text_y,
-                          (const FcChar8 *)params,
-                          strlen(params));
-    }
-
-blit:
-    XCopyArea(dpy, back_buf, tray_win, tray_gc,
-              0, 0, tray_width_stored, TRAY_HEIGHT, 0, 0);
+void tray_redraw(struct wlr_scene_buffer *tray_buf, const TrayData *data) {
+    DrawTrayData draw_data = { .data = data };
+    cairo_overlay_update(tray_buf, draw_tray_content, &draw_data);
 }

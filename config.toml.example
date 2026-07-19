@@ -1,0 +1,84 @@
+# fwm configuration file
+# ~/.config/fwm/config.toml
+
+# Realistic preset: earth gravity (9.8 m/s^2 at 100 px/m scale), dull heavy
+# bounce, long weighty glides in zero-g.
+# Old "cartoon" feel: friction 0.97, restitution 0.75, gravity 200.
+[physics]
+friction              = 0.985
+mass_density          = 0.0005
+throw_speed_multiplier = 0.65
+max_throw_speed       = 1800.0
+stop_speed_threshold  = 1.0
+restitution           = 0.3
+gravity               = 981.0
+tick_rate             = 60.0
+
+# Window decorations: focus border colors ("#RRGGBB" or "#RRGGBBAA"),
+# border width (0 disables) and map fade-in duration (0 disables).
+[decor]
+border_width = 2
+col_active   = "#7aa2f7"
+col_inactive = "#3b4261"
+fade_in_ms   = 150.0
+
+# Hyprland-style tiling: gaps and the tile-glide animation.
+# anim_speed is 1/s (12 ~ 250ms glide); 0 disables the animation.
+[tiling]
+gaps_in    = 6
+gaps_out   = 12
+anim_speed = 12.0
+
+[binds]
+# format: "mod+key" = "action"
+# mod keys: super, alt, shift, ctrl
+# system actions: killclient, toggle_tiling, fake_fullscreen, real_fullscreen,
+#                 pin_window, toggle_nocollide, calm_all, cycle_gravity,
+#                 show_hints, EXIT
+# spawn actions:  spawn:command arg1 arg2 ...
+# camera:         move_camera:-50  move_camera:50
+# workspace:      view:0 .. view:9
+
+"super+Return"       = "spawn:kitty"
+"super+space"        = "spawn:rofi -show drun -normal-window"
+"super+q"            = "killclient"
+"super+t"            = "toggle_tiling"
+"super+d"            = "fake_fullscreen"
+"super+f"            = "real_fullscreen"
+"super+h"            = "move_camera:-50"
+"super+l"            = "move_camera:50"
+"super+p"            = "pin_window"
+"super+n"            = "toggle_nocollide"
+"super+shift+c"      = "calm_all"
+"super+g"            = "cycle_gravity"
+"super+shift+Escape" = "EXIT"
+"super+shift+question" = "show_hints"
+# Tiling control (Hyprland-style; only active on tiling desktops)
+"super+Left"         = "tile_focus:l"
+"super+Right"        = "tile_focus:r"
+"super+Up"           = "tile_focus:u"
+"super+Down"         = "tile_focus:d"
+"super+shift+Left"   = "tile_move:l"
+"super+shift+Right"  = "tile_move:r"
+"super+shift+Up"     = "tile_move:u"
+"super+shift+Down"   = "tile_move:d"
+"super+s"            = "toggle_split"
+"super+1"            = "view:0"
+"super+2"            = "view:1"
+"super+3"            = "view:2"
+"super+4"            = "view:3"
+"super+5"            = "view:4"
+"super+6"            = "view:5"
+"super+7"            = "view:6"
+"super+8"            = "view:7"
+"super+9"            = "view:8"
+"super+0"            = "view:9"
+
+# Wallpaper. fit = "cover" (fill+crop, static) | "contain" (whole image,
+# letterboxed, static) | "pan" (walk across the image as you switch desktops).
+# For "pan": leave zoom unset for max sharpness (image shown at native size),
+# or set zoom > 1 for a longer walk at the cost of some softness, e.g. zoom = 1.5
+
+[[wallpaper]]
+path = "/path/to/wallpaper.png"
+fit  = "pan"

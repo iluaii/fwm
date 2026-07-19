@@ -1,4 +1,21 @@
-*.o
-*.d
+# Build output
 build/
-fwm
+build_check/
+cmake-build-*/
+*.o
+*.a
+compile_commands.json
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+
+# Assistant / tooling state
+.serena/
+.claude/
+
+# Misc
+core
+core.*
+*.log
