@@ -30,6 +30,12 @@ typedef struct {
     double anim_speed; /* tile-glide speed, 1/s (higher = snappier); <= 0 disables */
 } TilingConfig;
 
+/* ── camera ──────────────────────────────────────────────────────────── */
+
+typedef struct {
+    double anim_ms; /* desktop-switch slide duration; <= 0 = instant snap */
+} CameraConfig;
+
 /* ── decorations ─────────────────────────────────────────────────────── */
 
 typedef struct {
@@ -92,6 +98,7 @@ typedef struct {
 typedef struct {
     PhysicsConfig   physics;
     TilingConfig    tiling;
+    CameraConfig    camera;
     DecorConfig     decor;
     KeyBind        *keys;
     int             key_count;

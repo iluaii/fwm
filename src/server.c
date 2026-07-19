@@ -680,17 +680,28 @@ static int physics_tick_cb(void *data) {
         physics_set_velocity(&server->physics, server->interactive.view->id, server->interactive.vx, server->interactive.vy);
     }
     
-    // Smooth camera scrolling
-    if (server->camera_x != server->target_camera_x) {
-        double diff = server->target_camera_x - server->camera_x;
-        int step = (int)lround(diff * 10.0 * dt);
-        if (step == 0) {
-            step = diff > 0 ? 1 : -1;
+    // Desktop-switch camera slide: fixed-duration ease-in-out instead of the
+    // old exponential chase (fast jump + 1px/tick crawl tail). If the target
+    // changes mid-flight, restart from the current position so it stays smooth.
+    if (server->camera_x != server->target_camera_x || server->cam_anim) {
+        if (!server->cam_anim || server->cam_anim_to != server->target_camera_x) {
+            server->cam_anim = 1;
+            server->cam_anim_from = server->camera_x;
+            server->cam_anim_to = server->target_camera_x;
+            server->cam_anim_t = 0.0;
         }
-        if (abs(step) >= fabs(diff)) {
-            server->camera_x = server->target_camera_x;
+        double cam_ms = server->config.camera.anim_ms;
+        server->cam_anim_t += cam_ms > 0.0 ? dt * 1000.0 / cam_ms : 1.0;
+        double t = server->cam_anim_t;
+        if (t >= 1.0) {
+            server->camera_x = server->cam_anim_to;
+            server->cam_anim = 0;
         } else {
-            server->camera_x += step;
+            // Cubic ease-in-out.
+            double e = t < 0.5 ? 4.0 * t * t * t
+                               : 1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0;
+            server->camera_x = server->cam_anim_from
+                + (int)lround((server->cam_anim_to - server->cam_anim_from) * e);
         }
         
         // Sync non-dragged windows relative to camera

@@ -117,6 +117,11 @@ typedef struct FwmServer {
     PhysicsWorld physics;
     int camera_x;
     int target_camera_x;
+    /* Desktop-switch slide: timed ease-in-out from cam_anim_from to
+     * cam_anim_to; retargets smoothly if target_camera_x changes mid-flight. */
+    int cam_anim;
+    int cam_anim_from, cam_anim_to;
+    double cam_anim_t;
     int screen_width;
     int screen_height;
     

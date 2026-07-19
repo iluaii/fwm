@@ -29,6 +29,10 @@ gaps_in    = 6
 gaps_out   = 12
 anim_speed = 12.0
 
+# Desktop-switch camera slide (ease-in-out). 0 = instant snap.
+[camera]
+anim_ms = 350.0
+
 [binds]
 # format: "mod+key" = "action"
 # mod keys: super, alt, shift, ctrl

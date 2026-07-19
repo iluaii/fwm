@@ -126,6 +126,17 @@ static void load_tiling(toml_table_t *root, TilingConfig *t) {
     if (t->gaps_out < 0) t->gaps_out = 0;
 }
 
+/* ── camera section ──────────────────────────────────────────────────── */
+
+static void load_camera(toml_table_t *root, CameraConfig *c) {
+    c->anim_ms = 350.0;
+
+    toml_table_t *tbl = toml_table_in(root, "camera");
+    if (!tbl) return;
+
+    LOAD_DOUBLE(tbl, "anim_ms", c->anim_ms);
+}
+
 /* ── decor section ───────────────────────────────────────────────────── */
 
 /* Parse "#RRGGBB" or "#RRGGBBAA" into RGBA floats. Returns 0 on bad input. */
@@ -253,6 +264,7 @@ static void load_wallpaper(toml_table_t *root, FwmConfig *cfg) {
 void config_load(FwmConfig *cfg, const char *path) {
     cfg->physics         = physics_defaults;
     cfg->tiling          = (TilingConfig){ .gaps_in = 6, .gaps_out = 12, .anim_speed = 12.0 };
+    cfg->camera          = (CameraConfig){ .anim_ms = 350.0 };
     // Defaults for the no-config-file path; load_decor re-applies them anyway.
     cfg->decor.border_width = 2;
     parse_hex_color("#7aa2f7", cfg->decor.col_active);
@@ -280,6 +292,7 @@ void config_load(FwmConfig *cfg, const char *path) {
 
     load_physics(root, &cfg->physics);
     load_tiling(root, &cfg->tiling);
+    load_camera(root, &cfg->camera);
     load_decor(root, &cfg->decor);
     load_binds(root, cfg);
     load_wallpaper(root, cfg);
