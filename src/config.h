@@ -43,6 +43,9 @@ typedef struct {
     float col_active[4];     /* RGBA 0..1, focused window */
     float col_inactive[4];   /* RGBA 0..1, unfocused windows */
     double fade_in_ms;       /* window fade-in duration; <= 0 disables */
+    double tray_opacity;     /* island fill alpha 0..1 for the tray bar */
+    double launcher_opacity; /* island fill alpha 0..1 for the app launcher */
+    char   icon_theme[64];   /* launcher icon theme; "" = auto (gtk3 setting, then hicolor) */
 } DecorConfig;
 
 /* ── binds ───────────────────────────────────────────────────────────── */

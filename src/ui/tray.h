@@ -14,6 +14,7 @@ typedef struct {
     int flying;
     int desktop_window_counts[10];
     int active_desktop;
+    double opacity; /* island fill alpha 0..1 (decor.tray_opacity) */
 } TrayData;
 
 struct wlr_scene_buffer *tray_init(struct wlr_scene_tree *parent, int screen_width);

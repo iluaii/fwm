@@ -21,6 +21,11 @@ border_width = 2
 col_active   = "#7aa2f7"
 col_inactive = "#3b4261"
 fade_in_ms   = 150.0
+# Island fill opacity (0..1), separate for the tray bar and the app launcher.
+tray_opacity     = 0.92
+launcher_opacity = 0.92
+# Launcher icon theme. "" = auto: gtk-3.0 settings.ini, then hicolor.
+icon_theme = ""
 
 # Hyprland-style tiling: gaps and the tile-glide animation.
 # anim_speed is 1/s (12 ~ 250ms glide); 0 disables the animation.

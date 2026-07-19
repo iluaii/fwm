@@ -14,7 +14,6 @@
  * No gradients, no shadows — depth comes from spacing alone. */
 
 #define PILL_PAD    20.0  /* horizontal padding inside an island (covers the point) */
-#define PILL_ALPHA  0.92
 
 static const double COL_PILL[3]  = {0.075, 0.082, 0.098}; /* near-black */
 static const double COL_TEXT[3]  = {0.91, 0.92, 0.94};    /* primary */
@@ -34,9 +33,9 @@ static void pill_path(cairo_t *cr, double x, double y, double w, double h) {
     cairo_close_path(cr);
 }
 
-static void draw_pill(cairo_t *cr, double x, double y, double w, double h) {
+static void draw_pill(cairo_t *cr, double x, double y, double w, double h, double alpha) {
     pill_path(cr, x, y, w, h);
-    cairo_set_source_rgba(cr, COL_PILL[0], COL_PILL[1], COL_PILL[2], PILL_ALPHA);
+    cairo_set_source_rgba(cr, COL_PILL[0], COL_PILL[1], COL_PILL[2], alpha);
     cairo_fill(cr);
 }
 
@@ -76,7 +75,7 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
 
         double gap = 10.0;
         double pw = PILL_PAD + title_w + gap + params_w + PILL_PAD;
-        draw_pill(cr, 0, 0, pw, h);
+        draw_pill(cr, 0, 0, pw, h, data->opacity);
 
         cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
         pango_layout_set_text(layout, data->win_name, -1);
@@ -94,7 +93,7 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
         double spacing = 18.0;
         double pw = PILL_PAD * 2 + spacing * 9 + 6;
         double px = (w - pw) / 2.0;
-        draw_pill(cr, px, 0, pw, h);
+        draw_pill(cr, px, 0, pw, h, data->opacity);
 
         for (int i = 0; i < 10; i++) {
             double cx = px + PILL_PAD + 3 + i * spacing;
@@ -142,7 +141,7 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
 
         double pw = PILL_PAD * 2 + cw;
         double px = w - pw;
-        draw_pill(cr, px, 0, pw, h);
+        draw_pill(cr, px, 0, pw, h, data->opacity);
 
         cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
         cairo_move_to(cr, px + PILL_PAD, text_y);

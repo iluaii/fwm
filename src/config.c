@@ -163,6 +163,9 @@ static void load_decor(toml_table_t *root, DecorConfig *dc) {
     parse_hex_color("#7aa2f7", dc->col_active);   /* soft blue */
     parse_hex_color("#3b4261", dc->col_inactive); /* muted slate */
     dc->fade_in_ms = 150.0;
+    dc->tray_opacity = 0.92;
+    dc->launcher_opacity = 0.92;
+    dc->icon_theme[0] = '\0';
 
     toml_table_t *tbl = toml_table_in(root, "decor");
     if (!tbl) return;
@@ -177,6 +180,14 @@ static void load_decor(toml_table_t *root, DecorConfig *dc) {
     d = toml_string_in(tbl, "col_inactive");
     if (d.ok) { parse_hex_color(d.u.s, dc->col_inactive); free(d.u.s); }
     LOAD_DOUBLE(tbl, "fade_in_ms", dc->fade_in_ms);
+    d = toml_string_in(tbl, "icon_theme");
+    if (d.ok) { snprintf(dc->icon_theme, sizeof(dc->icon_theme), "%s", d.u.s); free(d.u.s); }
+    LOAD_DOUBLE(tbl, "tray_opacity", dc->tray_opacity);
+    LOAD_DOUBLE(tbl, "launcher_opacity", dc->launcher_opacity);
+    if (dc->tray_opacity < 0.0) dc->tray_opacity = 0.0;
+    if (dc->tray_opacity > 1.0) dc->tray_opacity = 1.0;
+    if (dc->launcher_opacity < 0.0) dc->launcher_opacity = 0.0;
+    if (dc->launcher_opacity > 1.0) dc->launcher_opacity = 1.0;
 }
 
 /* ── binds section ───────────────────────────────────────────────────── */
@@ -270,6 +281,9 @@ void config_load(FwmConfig *cfg, const char *path) {
     parse_hex_color("#7aa2f7", cfg->decor.col_active);
     parse_hex_color("#3b4261", cfg->decor.col_inactive);
     cfg->decor.fade_in_ms = 150.0;
+    cfg->decor.tray_opacity = 0.92;
+    cfg->decor.launcher_opacity = 0.92;
+    cfg->decor.icon_theme[0] = '\0';
     cfg->keys            = NULL;
     cfg->key_count       = 0;
     cfg->wallpapers      = NULL;

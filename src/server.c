@@ -1483,6 +1483,7 @@ void server_request_tray_redraw(FwmServer *server) {
         }
     }
     
+    data.opacity = server->config.decor.tray_opacity;
     data.active_desktop = (server->camera_x + server->screen_width / 2) / server->screen_width;
     if (data.active_desktop < 0) data.active_desktop = 0;
     if (data.active_desktop >= 10) data.active_desktop = 9;
