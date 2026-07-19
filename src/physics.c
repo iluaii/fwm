@@ -47,6 +47,7 @@ struct Engine {
     bool walls_built;
     int wall_w, wall_h;      /* screen dims the walls were built for */
     float linear_damping;    /* derived from world->friction */
+    double last_gravity;     /* px/s^2 applied last step; wake bodies on change */
 };
 
 static struct Engine *engine_of(PhysicsWorld *world) {
@@ -378,6 +379,11 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
     // Gravity: config value is px/s^2 (y-down); convert to m/s^2.
     double g = world->gravity * world->gravity_scale;
     b2World_SetGravity(eng->world, (b2Vec2){0.0f, px2m(g)});
+    // Box2D does NOT wake sleeping bodies when world gravity changes — a
+    // window that sat still long enough to sleep would just hang in the air
+    // after cycle_gravity (until a drag changed its body type and woke it).
+    bool gravity_changed = (g != eng->last_gravity);
+    eng->last_gravity = g;
 
     // Air drag depends on the mode. Zero-g (floating windows) needs the config
     // friction as the only brake; with gravity on, real objects barely slow down
@@ -442,6 +448,7 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
         }
 
         if (type == b2_dynamicBody) {
+            if (gravity_changed) b2Body_SetAwake(s->body, true);
             // Only override Box2D's own evolution when the mirror was changed
             // from outside (teleport, throw, stop) since the last write-back.
             if (fabs(m->x - s->sx) > POS_EPS || fabs(m->y - s->sy) > POS_EPS) {
