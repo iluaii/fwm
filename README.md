@@ -6,6 +6,9 @@ This is the primary, actively developed version. The legacy X11 version lives on
 
 ---
 
+## 🎬 Demonstration
+![Demonstration](demo.gif)
+
 ## Features
 
 ### Physics

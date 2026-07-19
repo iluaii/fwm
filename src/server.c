@@ -18,6 +18,7 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_data_device.h>
+#include <wlr/backend/session.h>
 #include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/types/wlr_keyboard.h>
@@ -125,9 +126,19 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
         uint32_t keycode = event->keycode + 8;
         const xkb_keysym_t *syms;
         int num_syms = xkb_state_key_get_syms(keyboard->wlr_keyboard->xkb_state, keycode, &syms);
-        
+
         for (int i = 0; i < num_syms; i++) {
             xkb_keysym_t sym = syms[i];
+            // VT switching (Ctrl+Alt+F1..F12): xkb maps the chord to
+            // XF86Switch_VT_* keysyms; only meaningful on the DRM backend
+            // where we own a session (nested backends have none).
+            if (sym >= XKB_KEY_XF86Switch_VT_1 && sym <= XKB_KEY_XF86Switch_VT_12) {
+                if (server->session) {
+                    wlr_session_change_vt(server->session,
+                                          sym - XKB_KEY_XF86Switch_VT_1 + 1);
+                }
+                return;
+            }
             if (sym == XKB_KEY_Escape || sym == XKB_KEY_Return) {
                 if (server->welcome_buffer) {
                     welcome_set_welcomed();
@@ -1033,7 +1044,7 @@ bool server_init(FwmServer *server) {
     }
     
     struct wl_event_loop *event_loop = wl_display_get_event_loop(server->wl_display);
-    server->wlr_backend = wlr_backend_autocreate(event_loop, NULL);
+    server->wlr_backend = wlr_backend_autocreate(event_loop, &server->session);
     if (!server->wlr_backend) {
         wlr_log(WLR_ERROR, "failed to create backend");
         return false;

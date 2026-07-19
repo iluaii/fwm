@@ -59,6 +59,7 @@ typedef struct {
 typedef struct FwmServer {
     struct wl_display *wl_display;
     struct wlr_backend *wlr_backend;
+    struct wlr_session *session; /* NULL on nested backends; used for VT switching */
     struct wlr_renderer *wlr_renderer;
     struct wlr_allocator *wlr_allocator;
     struct wlr_scene *scene;
