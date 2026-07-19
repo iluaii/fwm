@@ -1,26 +1,24 @@
 #include "bsp.h"
-
 #include <stdlib.h>
-#include <X11/Xlib.h>
 
-BspNode *bsp_new_leaf(Window win) {
+BspNode *bsp_new_leaf(uint32_t id) {
     BspNode *n = calloc(1, sizeof(BspNode));
-    n->win = win;
+    n->id = id;
     n->ratio = 0.5f;
     return n;
 }
 
-BspNode *bsp_find(BspNode *root, Window win) {
-    if (!root || win == None) return NULL;
-    if (root->win == win && root->left == NULL) return root;
-    BspNode *l = bsp_find(root->left, win);
+BspNode *bsp_find(BspNode *root, uint32_t id) {
+    if (!root || id == 0) return NULL;
+    if (root->id == id && root->left == NULL) return root;
+    BspNode *l = bsp_find(root->left, id);
     if (l) return l;
-    return bsp_find(root->right, win);
+    return bsp_find(root->right, id);
 }
 
-void bsp_insert(BspNode **root, Window focused, Window new_win) {
+void bsp_insert(BspNode **root, uint32_t focused, uint32_t new_id) {
     if (!*root) {
-        *root = bsp_new_leaf(new_win);
+        *root = bsp_new_leaf(new_id);
         return;
     }
 
@@ -30,20 +28,20 @@ void bsp_insert(BspNode **root, Window focused, Window new_win) {
         while (target->left) target = target->left;
     }
 
-    BspNode *old_leaf = bsp_new_leaf(target->win);
-    BspNode *new_leaf = bsp_new_leaf(new_win);
+    BspNode *old_leaf = bsp_new_leaf(target->id);
+    BspNode *new_leaf = bsp_new_leaf(new_id);
 
     old_leaf->parent = target;
     new_leaf->parent = target;
 
     target->split_h = (target->w >= target->h) ? 0 : 1;
-    target->win = None;
+    target->id = 0;
     target->left  = old_leaf;
     target->right = new_leaf;
 }
 
-void bsp_remove(BspNode **root, Window win) {
-    BspNode *leaf = bsp_find(*root, win);
+void bsp_remove(BspNode **root, uint32_t id) {
+    BspNode *leaf = bsp_find(*root, id);
     if (!leaf) return;
 
     BspNode *parent = leaf->parent;
@@ -70,52 +68,53 @@ void bsp_remove(BspNode **root, Window win) {
 
     free(leaf);
     free(parent);
-    if (!grandparent && sibling->win == None && !sibling->left && !sibling->right) {
+    if (!grandparent && sibling->id == 0 && !sibling->left && !sibling->right) {
         *root = NULL;
         free(sibling);
     }
 }
 
-void bsp_recalc(BspNode *node, Display *dpy, int camera_x,
-                int x, int y, int w, int h) {
+void bsp_recalc(BspNode *node, int x, int y, int w, int h, int gap) {
     if (!node) return;
     node->x = x; node->y = y;
     node->w = w; node->h = h;
 
-    if (node->win != None) {
-        XMoveResizeWindow(dpy, node->win, x - camera_x, y, w, h);
+    if (node->id != 0) {
+        // Recalculating coordinates of the leaf node. The window manager
+        // will update the actual window dimensions later.
         return;
     }
 
     if (!node->left && !node->right) return;
 
-    int gap = 6;
     int left_w = (int)((w - gap) * node->ratio);
     if (left_w < 1) left_w = 1;
     int right_w = w - left_w - gap;
     if (right_w < 1) right_w = 1;
+
     if (!node->split_h) {
-        int left_w = (int)((w - gap) * node->ratio);
-        int right_w = w - left_w - gap;
-        bsp_recalc(node->left,  dpy, camera_x, x,              y, left_w,  h);
-        bsp_recalc(node->right, dpy, camera_x, x + left_w + gap, y, right_w, h);
+        bsp_recalc(node->left,  x,              y, left_w,  h, gap);
+        bsp_recalc(node->right, x + left_w + gap, y, right_w, h, gap);
     } else {
         int top_h = (int)((h - gap) * node->ratio);
+        if (top_h < 1) top_h = 1;
         int bot_h = h - top_h - gap;
-        bsp_recalc(node->left,  dpy, camera_x, x, y,            w, top_h);
-        bsp_recalc(node->right, dpy, camera_x, x, y + top_h + gap, w, bot_h);
+        if (bot_h < 1) bot_h = 1;
+        bsp_recalc(node->left,  x, y,            w, top_h, gap);
+        bsp_recalc(node->right, x, y + top_h + gap, w, bot_h, gap);
     }
 }
-void bsp_swap(BspNode *root, Window a, Window b) {
+
+void bsp_swap(BspNode *root, uint32_t a, uint32_t b) {
     BspNode *na = bsp_find(root, a);
     BspNode *nb = bsp_find(root, b);
     if (!na || !nb) return;
-    na->win = b;
-    nb->win = a;
+    na->id = b;
+    nb->id = a;
 }
 
 BspNode *bsp_find_border(BspNode *root, int x, int y, int threshold) {
-    if (!root || root->win != None) return NULL;
+    if (!root || root->id != 0) return NULL;
 
     if (!root->split_h) {
         int border_x = root->left->x + root->left->w;
@@ -136,7 +135,7 @@ BspNode *bsp_find_border(BspNode *root, int x, int y, int threshold) {
 
 void bsp_collect_leaves(BspNode *node, BspNode **out, int *count) {
     if (!node) return;
-    if (node->win != None) {
+    if (node->id != 0) {
         out[(*count)++] = node;
         return;
     }

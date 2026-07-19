@@ -1,173 +1,157 @@
-# fwm — Physics Window Manager
+# fwm — Physics Window Manager (Wayland)
 
-A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls, and respond to gravity.
+A Wayland compositor written in C (wlroots) where windows behave as physical objects with **mass, momentum, inertia, and velocity** — simulated by a real rigid-body engine ([Box2D](https://box2d.org/) v3). Drag a window and throw it — it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
 
----
-## 🎬 Demonstration
-
-![Demonstration](demo.gif)
+This is the primary, actively developed version. The legacy X11 version lives on the [`x11`](https://github.com/iluaii/fwm/tree/x11) branch and is no longer supported.
 
 ---
 
 ## Features
 
-- **Physics simulation** — windows have mass (proportional to their area), velocity, and friction. Release a window mid-drag and it flies across the screen.
-- **Gravity** — toggle between no gravity, space mode, and Earth gravity to affect window movement.
-- **Elastic collisions** — windows bounce off each other and off screen edges with configurable restitution.
-- **Drag to throw** — velocity is sampled over the last few frames so a quick flick sends windows flying naturally.
-- **Shift-drag** — hold `Shift` while dragging to pass through other windows without collision.
-- **Per-window collision disable** — press `Super+N` to temporarily disable collisions for the focused window.
-- **10 virtual desktops** — the world is 10 screen widths wide. Drag a window to the edge or press `Super+1`…`0` to switch to any desktop. Windows keep their absolute position in the world.
-- **Camera movement** — use `Super+H` / `Super+L` to scroll the camera left/right across desktops.
-- **Per-desktop tiling mode** — toggle `Super+T` to switch the current desktop between physics and BSP tiling layout.
-- **Per-window pin** — press `Super+P` to freeze a window's position.
-- **Calm all** — press `Super+Shift+C` to stop all flying windows.
-- **Fake fullscreen** (`Super+D`) and **real fullscreen** (`Super+F`).
-- **Chamfered window corners** via the X Shape extension.
-- **Status tray** — a hexagon-shaped overlay showing desktop occupancy, the focused window's name, speed, angle, and mass.
-- **Keybind hints** — press `Super+?` to display available keybinds.
-- **Focus-follows-mouse** with `EnterNotify`.
-- **Rofi** is handled as a special floating overlay centered on screen.
+### Physics
+- **Real rigid-body simulation** — powered by Box2D: impulse-based collisions, proper mass ratios, resting contact and sleeping. No hand-rolled solver artifacts.
+- **Drag to throw** — velocity is sampled over the last frames, a quick flick sends windows flying naturally.
+- **Gravity modes** — cycle `Super+G` between zero-g, space mode, and Earth gravity (9.8 m/s² at the compositor's 100 px/m scale). Windows fall, thud, and stack on the floor.
+- **Realistic feel** — dull heavy bounces (restitution 0.3), contact friction, no mid-air braking under gravity; long weighty glides in zero-g.
+- **Continuous collision** — fast throws never tunnel through walls.
+- **Per-window toggles** — pin (`Super+P`), collision off (`Super+N`), calm everything (`Super+Shift+C`).
+
+### World
+- **10 virtual desktops** on one continuous strip — the world is 10 screens wide, windows keep absolute positions.
+- **Smooth camera** — scroll with `Super+H`/`Super+L` (hold to repeat), jump with `Super+1`…`0`.
+- **Parallax wallpaper** — multi-layer background images (PNG/JPEG/WebP) that scroll as you move across desktops. `pan` mode turns one large image into a world you walk across.
+
+### Tiling (Hyprland-style)
+- **Per-desktop BSP tiling** — toggle `Super+T`; dwindle-style splits along the longer side.
+- **Smooth tile animations** — windows glide into their slots (~250 ms, configurable) instead of teleporting.
+- **Configurable gaps** — inner (`gaps_in`) and outer (`gaps_out`).
+- **Keyboard control** — directional focus (`Super+Arrows`), move window (`Super+Shift+Arrows`), flip split orientation (`Super+S`).
+- **Mouse control** — drag BSP borders with `Super+RightDrag` (instant, no animation lag), swap tiles with `Super+Shift+Drag`.
+
+### Visuals
+- **Focus borders** — accent color on the focused window, muted on the rest; colors and width in the config.
+- **Window fade-in** — new windows ease in over ~150 ms.
+- **Minimal tray** — three flat chevron-ended islands: focused window + physics readout, desktop indicators, clock. No titlebars anywhere (server-side decorations).
+- **Transparency** — client alpha (e.g. kitty `background_opacity`) is rendered as-is.
+- **Fake fullscreen** (`Super+D`) keeps the tray visible; **real fullscreen** (`Super+F`) hides it and covers the whole output.
 
 ---
 
 ## Requirements
 
-| Library | Package (Debian/Ubuntu) | Package (Arch) | Package (Fedora) |
-|---|---|---|---|
-| Xlib | `libx11-dev` | `libx11` | `libX11-devel` |
-| Xft | `libxft-dev` | `libxft` | `libXft-devel` |
-| Xext / Shape | `libxext-dev` | `libxext` | `libXext-devel` |
-| FreeType | `libfreetype-dev` | `freetype2` | `freetype-devel` |
-| pkg-config | `pkg-config` | `pkgconf` | `pkgconf-pkg-config` |
-
----
-
-## Installation
-
-The `install.sh` script detects your package manager (apt / dnf / pacman), installs dependencies, builds the binary, and optionally configures `~/.xinitrc`.
-
-```sh
-git clone <repo-url>
-cd fwm
-bash install.sh          # full install
-bash install.sh update   # rebuild and replace binary only
-```
-
-The binary is installed to `/usr/local/bin/fwm` by default. Override with `INSTALL_BIN=/your/path bash install.sh`.
-
----
-
-## Building manually
-
-```sh
-make          # build the fwm binary
-make run      # launch inside a 1280×800 Xephyr window (good for testing)
-make stop     # kill the Xephyr instance
-make clean    # remove build artifacts
-```
-
----
-
-## Starting fwm
-
-Add to `~/.xinitrc`:
-
-```sh
-exec fwm
-```
-
-Then start X:
-
-```sh
-startx
-```
-
----
-
-## Key bindings
-
-All bindings use `Super` (Win key) as the modifier. Edit `src/config.h` to change them.
-
-| Binding | Action |
+| Library | Arch package |
 |---|---|
-| `Super+Return` | Launch terminal (`kitty`) |
-| `Super+Space` | Launch app launcher (`rofi -show drun`) |
-| `Super+Q` | Close focused window |
-| `Super+T` | Toggle tiling mode on current desktop |
-| `Super+H` | Scroll camera left (10 virtual desktops) |
-| `Super+L` | Scroll camera right (10 virtual desktops) |
-| `Super+P` | Pin focused window (freeze position) |
-| `Super+N` | Disable collisions for focused window |
-| `Super+Shift+C` | Stop all flying windows |
-| `Super+D` | Fake fullscreen (fills screen, keeps physics) |
-| `Super+F` | Real fullscreen (`_NET_WM_STATE_FULLSCREEN`) |
-| `Super+G` | Cycle gravity (off → space → earth) |
-| `Super+?` | Show keybind hints |
-| `Super+Shift+Esc` | Exit fwm |
-| `Super+1` … `Super+0` | Switch to desktop 1–10 |
+| wlroots 0.20 | `wlroots0.20` |
+| wayland-server | `wayland` |
+| xkbcommon | `libxkbcommon` |
+| cairo + pango | `cairo`, `pango` |
+| gdk-pixbuf | `gdk-pixbuf2` |
+| Box2D 3.x | `box2d` |
+| CMake + pkg-config | `cmake`, `pkgconf` |
 
 ---
 
-## Mouse controls
+## Build
 
-| Action | Gesture |
-|---|---|
-| Drag window | `Super+LMB` drag |
-| Drag through walls | `Super+Shift+LMB` drag |
-| Resize window | `Super+RMB` drag |
-| Throw window | `Super+LMB` drag then release with momentum |
+```sh
+cmake -B build
+cmake --build build
+```
+
+Run from a TTY:
+
+```sh
+./build/fwm-wayland
+```
+
+Or nested inside another compositor / X session for testing:
+
+```sh
+WLR_BACKENDS=x11 ./build/fwm-wayland      # nested X11 window
+WLR_BACKENDS=wayland ./build/fwm-wayland  # nested Wayland window
+```
 
 ---
 
 ## Configuration
 
-Edit `src/config.h` before building. Key options:
+Everything lives in `~/.config/fwm/config.toml`. All sections are optional — missing values fall back to sane defaults.
 
-```c
-#define MOD_KEY  Mod4Mask          // modifier key (Super by default)
-static const char *termcmd[] = { "kitty", ... };
-static const char *menucmd[] = { "rofi", "-show", "drun", "-normal-window", ... };
+```toml
+[physics]
+friction              = 0.985   # zero-g glide brake (per-frame factor)
+restitution           = 0.3     # bounciness: 0 = dead, 1 = superball
+gravity               = 981.0   # px/s^2; 981 = Earth at 100 px/m
+mass_density          = 0.0005  # window mass = area * density
+throw_speed_multiplier = 0.65
+max_throw_speed       = 1800.0
+
+[tiling]
+gaps_in    = 6       # px between tiles
+gaps_out   = 12      # px between tiles and screen edges
+anim_speed = 12.0    # tile glide speed (1/s); 0 = instant
+
+[decor]
+border_width = 2
+col_active   = "#7aa2f7"   # "#RRGGBB" or "#RRGGBBAA"
+col_inactive = "#3b4261"
+fade_in_ms   = 150.0       # window fade-in; 0 disables
+
+# Wallpaper layers, drawn back-to-front.
+# fit = "cover" (fill+crop) | "contain" (letterboxed) | "pan" (walk across)
+[[wallpaper]]
+path = "/path/to/image.png"
+fit  = "pan"
+# zoom = 1.5   # pan only: longer walk, slightly softer
+
+[binds]
+"super+Return"       = "spawn:kitty"
+"super+space"        = "spawn:rofi -show drun -normal-window"
+"super+q"            = "killclient"
+"super+t"            = "toggle_tiling"
+"super+d"            = "fake_fullscreen"
+"super+f"            = "real_fullscreen"
+"super+h"            = "move_camera:-50"
+"super+l"            = "move_camera:50"
+"super+p"            = "pin_window"
+"super+n"            = "toggle_nocollide"
+"super+g"            = "cycle_gravity"
+"super+s"            = "toggle_split"
+"super+shift+c"      = "calm_all"
+"super+shift+question" = "show_hints"
+"super+shift+Escape" = "EXIT"
+"super+Left"         = "tile_focus:l"    # Right/Up/Down likewise
+"super+shift+Left"   = "tile_move:l"
+"super+1"            = "view:0"          # ... "super+0" = "view:9"
 ```
 
-Physics constants live in `src/defines.h`:
+### Actions
 
-| Constant | Default | Effect |
-|---|---|---|
-| `MASS_DENSITY` | `0.0085` | Mass per pixel² |
-| `FRICTION` | `0.97` | Velocity decay per tick |
-| `RESTITUTION` | `0.75` | Elasticity of collisions / wall bounces |
-| `THROW_SPEED_MULTIPLIER` | `0.65` | Scales drag velocity on release |
-| `MAX_THROW_SPEED` | `1800.0` | Hard cap on throw velocity (px/s) |
-| `STOP_SPEED_THRESHOLD` | `1.0` | Speed² below which a window stops flying |
-| `PHYSICS_TICK_RATE` | `60.0` | Simulation steps per second |
-| `GRAVITY` | `200.0` | Gravitational acceleration (px/s²) when enabled |
-| `MAX_WINDOWS` | `32` | Maximum tracked windows |
-| `DRAG_MARGIN` | `5` | Margin for window drag detection |
-| `PHYSICS_MARGIN` | `3` | Margin for physics calculations |
+| Action | Meaning |
+|---|---|
+| `spawn:<cmd>` | run a command |
+| `killclient` | close focused window |
+| `toggle_tiling` | physics ⇄ BSP tiling for the current desktop |
+| `fake_fullscreen` / `real_fullscreen` | fullscreen below the tray / whole output |
+| `move_camera:<px>` | scroll the camera (repeats while held) |
+| `view:<0-9>` | jump to desktop |
+| `tile_focus:l\|r\|u\|d` | focus tile in direction |
+| `tile_move:l\|r\|u\|d` | swap tile in direction |
+| `toggle_split` | flip split orientation of the focused tile |
+| `pin_window`, `toggle_nocollide`, `calm_all`, `cycle_gravity` | physics toggles |
+| `show_hints` | keybind cheat-sheet overlay |
+| `EXIT` | quit the compositor |
 
----
+### Mouse
 
-## Project structure
-
-```
-src/
-  main.c          — event loop, tray data aggregation
-  wm.c / wm.h     — core WM: event handling, drag/resize, keybindings
-  physics.c / .h  — physics world: bodies, step, collisions, throw, gravity
-  window.c / .h   — geometry helpers, window spawning
-  bsp.c / bsp.h   — binary space partition tiling
-  ui/
-    tray.c / .h       — status bar (hexagon overlay, Xft rendering)
-    decorations.c / .h — borders and chamfered corners (Shape extension)
-    hints.c / .h      — keybind hints overlay
-    welcome.c / .h    — welcome overlay
-  config.h        — keybindings and launch commands
-  defines.h       — tunable physics and layout constants
-```
+| Gesture | Effect |
+|---|---|
+| `Super+LeftDrag` | move / throw a window (floating) |
+| `Super+Shift+LeftDrag` | move through windows (no collision) — or swap tiles when tiling |
+| `Super+RightDrag` | resize (floating) / drag BSP border (tiling) |
 
 ---
 
 ## License
 
-See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
