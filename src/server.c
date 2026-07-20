@@ -24,6 +24,7 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_data_device.h>
+#include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/backend/session.h>
 #include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
@@ -1289,6 +1290,41 @@ static void handle_seat_start_drag(struct wl_listener *listener, void *data) {
     wl_signal_add(&drag->icon->events.destroy, &server->drag_icon_destroy);
 }
 
+static void handle_xdg_activation_request_activate(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, xdg_activation_request_activate);
+    const struct wlr_xdg_activation_v1_request_activate_event *event = data;
+
+    FocusActivatePolicy policy = server->config.focus.on_activate;
+    if (policy == FOCUS_ACTIVATE_NEVER) return;
+
+    /* Filters out clients that do not even claim to be acting on user input.
+     * NOT real focus-stealing protection: wlroots stores whatever serial the
+     * client sends without checking it against any input event, so a
+     * determined app passes this trivially. Validating the serial against
+     * recent input would be the real fix. */
+    if (!event->token->seat) return;
+
+    FwmView *view = NULL, *v;
+    wl_list_for_each(v, &server->views, link) {
+        if (view_surface(v) == event->surface) { view = v; break; }
+    }
+    if (!view) return;
+
+    PhysicsBody *pb = physics_find_body(&server->physics, view->id);
+    int target_d = (pb && pb->desktop_id >= 0 && pb->desktop_id < 10) ? pb->desktop_id : -1;
+    int visible_d = (server->camera_x + server->screen_width / 2) / server->screen_width;
+
+    if (target_d >= 0 && target_d != visible_d) {
+        /* Off-screen window. Panning the camera away from what the user is
+         * working on is the disruptive part of activation, so only "always"
+         * may do it; "same_desktop" drops the request instead. */
+        if (policy != FOCUS_ACTIVATE_ALWAYS) return;
+        server->target_camera_x = target_d * server->screen_width;
+        server->cam_free = 0; /* discrete jump: eased slide, not the free chase */
+    }
+    server_focus_view(server, view);
+}
+
 static void handle_seat_request_start_drag(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, seat_request_start_drag);
     struct wlr_seat_request_start_drag_event *event = data;
@@ -2120,6 +2156,13 @@ bool server_init(FwmServer *server) {
     wl_signal_add(&server->seat->events.request_start_drag, &server->seat_request_start_drag);
     server->seat_start_drag.notify = handle_seat_start_drag;
     wl_signal_add(&server->seat->events.start_drag, &server->seat_start_drag);
+
+    server->xdg_activation = wlr_xdg_activation_v1_create(server->wl_display);
+    if (server->xdg_activation) {
+        server->xdg_activation_request_activate.notify = handle_xdg_activation_request_activate;
+        wl_signal_add(&server->xdg_activation->events.request_activate,
+                      &server->xdg_activation_request_activate);
+    }
     
     server->new_input.notify = handle_new_input;
     wl_signal_add(&server->wlr_backend->events.new_input, &server->new_input);

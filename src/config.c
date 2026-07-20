@@ -280,6 +280,25 @@ static void load_input(toml_table_t *root, InputConfig *in) {
     if (d.ok && d.u.i > 0) in->repeat_delay = (int)d.u.i;
 }
 
+static void load_focus(toml_table_t *root, FocusConfig *f, FwmConfig *cfg) {
+    /* Default keeps activation useful without ever yanking the view away from
+     * what the user is looking at. */
+    f->on_activate = FOCUS_ACTIVATE_SAME_DESKTOP;
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "focus");
+    if (!tbl) return;
+
+    toml_datum_t d = toml_string_in(tbl, "on_activate");
+    if (!d.ok) return;
+    if      (strcmp(d.u.s, "never")        == 0) f->on_activate = FOCUS_ACTIVATE_NEVER;
+    else if (strcmp(d.u.s, "same_desktop") == 0) f->on_activate = FOCUS_ACTIVATE_SAME_DESKTOP;
+    else if (strcmp(d.u.s, "always")       == 0) f->on_activate = FOCUS_ACTIVATE_ALWAYS;
+    else config_report_error(cfg, "[focus] on_activate: unknown value \"%s\" "
+                                  "(never | same_desktop | always)", d.u.s);
+    free(d.u.s);
+}
+
 /* ── binds section ───────────────────────────────────────────────────── */
 
 /* Built-in binds, installed whenever the config file yielded no usable ones
@@ -523,6 +542,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     cfg->fallback_binds  = 0;
     snprintf(cfg->source, sizeof(cfg->source), "%s", path ? path : "");
     load_input(NULL, &cfg->input); /* defaults for the no-config-file path */
+    load_focus(NULL, &cfg->focus, cfg);
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -552,6 +572,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_camera(root, &cfg->camera);
     load_decor(root, cfg);
     load_input(root, &cfg->input);
+    load_focus(root, &cfg->focus, cfg);
     load_binds(root, cfg);
     load_wallpaper(root, cfg);
     load_wallpaper_picker(root, cfg);

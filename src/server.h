@@ -129,6 +129,11 @@ typedef struct FwmServer {
     struct wl_listener seat_start_drag;
     struct wlr_scene_tree *drag_icon;      /* NULL when no drag is running */
     struct wl_listener drag_icon_destroy;
+
+    /* xdg-activation: apps asking to be raised/focused (a link opening in an
+     * already-running browser, a chat client jumping to a message). */
+    struct wlr_xdg_activation_v1 *xdg_activation;
+    struct wl_listener xdg_activation_request_activate;
     
     /* Keyboard input */
     struct wl_list keyboards;

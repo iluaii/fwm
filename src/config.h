@@ -68,6 +68,22 @@ typedef struct {
     int  repeat_delay;     /* ms before repeat starts */
 } InputConfig;
 
+/* ── focus ───────────────────────────────────────────────────────────── */
+
+/* What an xdg-activation request (an app asking to be raised — a link opening
+ * in a running browser, a chat client jumping to a message) is allowed to do.
+ * Split three ways because on fwm the disruptive part is not the focus change
+ * but the CAMERA leaving the desktop the user is working on. */
+typedef enum {
+    FOCUS_ACTIVATE_NEVER = 0,   /* ignore activation requests entirely */
+    FOCUS_ACTIVATE_SAME_DESKTOP,/* focus only if already on the visible desktop */
+    FOCUS_ACTIVATE_ALWAYS,      /* focus, and pan the camera to reach it */
+} FocusActivatePolicy;
+
+typedef struct {
+    FocusActivatePolicy on_activate;
+} FocusConfig;
+
 /* ── binds ───────────────────────────────────────────────────────────── */
 
 /*
@@ -142,6 +158,7 @@ typedef struct {
     CameraConfig    camera;
     DecorConfig     decor;
     InputConfig     input;
+    FocusConfig     focus;
     KeyBind        *keys;
     int             key_count;
     WallpaperLayer *wallpapers;
