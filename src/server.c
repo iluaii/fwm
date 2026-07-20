@@ -25,6 +25,8 @@
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
+#include <wlr/types/wlr_idle_notify_v1.h>
+#include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/backend/session.h>
 #include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
@@ -106,6 +108,15 @@ static struct FwmView *view_at(FwmServer *server, double lx, double ly,
 
 static void server_dispatch_action(FwmServer *server, const char *action);
 static void drag_icon_update_position(FwmServer *server);
+
+/* Any real user input resets the idle timers of ext-idle-notify clients
+ * (swayidle and friends). Must be called from every input path, or the session
+ * dims while the user is actively working. */
+static void server_notify_activity(FwmServer *server) {
+    if (server->idle_notifier) {
+        wlr_idle_notifier_v1_notify_activity(server->idle_notifier, server->seat);
+    }
+}
 
 /* Only continuous navigation binds should auto-repeat while held. Repeating
  * one-shot actions (killclient, spawn, toggles, view/fullscreen) would be
@@ -207,6 +218,8 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
     struct FwmKeyboard *keyboard = wl_container_of(listener, keyboard, key);
     struct wlr_keyboard_key_event *event = data;
     FwmServer *server = keyboard->server;
+
+    server_notify_activity(server);
     
     // Handle overlays dismissal first
     if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
@@ -874,6 +887,7 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
     double lx = server->cursor->x;
     double ly = server->cursor->y;
 
+    server_notify_activity(server);
     drag_icon_update_position(server);
 
     // While the launcher is open the pointer belongs to it: hover moves the
@@ -1032,6 +1046,7 @@ static void handle_cursor_motion_absolute(struct wl_listener *listener, void *da
     FwmServer *server = wl_container_of(listener, server, cursor_motion_absolute);
     struct wlr_pointer_motion_absolute_event *event = data;
     wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
+    server_notify_activity(server);
     drag_icon_update_position(server);
     if (launcher_is_open(server->launcher)) {
         launcher_handle_motion(server->launcher, server->cursor->x, server->cursor->y);
@@ -1043,6 +1058,8 @@ static void handle_cursor_motion_absolute(struct wl_listener *listener, void *da
 static void handle_cursor_button(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
+
+    server_notify_activity(server);
 
     bool l_was_open = launcher_is_open(server->launcher);
     if (launcher_handle_button(server->launcher, server->cursor->x, server->cursor->y,
@@ -1226,6 +1243,7 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
 static void handle_cursor_axis(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_axis);
     struct wlr_pointer_axis_event *event = data;
+    server_notify_activity(server);
     wlr_seat_pointer_notify_axis(server->seat, event->time_msec, event->orientation, event->delta, event->delta_discrete, event->source, event->relative_direction);
 }
 
@@ -1290,6 +1308,44 @@ static void handle_seat_start_drag(struct wl_listener *listener, void *data) {
     wl_signal_add(&drag->icon->events.destroy, &server->drag_icon_destroy);
 }
 
+/* Which view owns a surface. Takes the root surface, so a subsurface (a video
+ * player's content layer, an inhibitor's surface) resolves to its toplevel. */
+static FwmView *view_from_surface(FwmServer *server, struct wlr_surface *surface) {
+    if (!surface) return NULL;
+    struct wlr_surface *root = wlr_surface_get_root_surface(surface);
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        if (view_surface(v) == root) return v;
+    }
+    return NULL;
+}
+
+/* An inhibitor only counts while its surface is actually on screen — the
+ * protocol says inhibitors apply "while this surface is visible", and on fwm a
+ * video paused on desktop 7 must not keep the whole session awake. Recomputed
+ * from scratch each tick: the list is empty or has one entry in practice, and
+ * polling avoids hooking every path that can change visibility (map, unmap,
+ * desktop switch, camera slide). */
+static void idle_inhibit_refresh(FwmServer *server) {
+    if (!server->idle_notifier || !server->idle_inhibit) return;
+
+    int visible_d = (server->camera_x + server->screen_width / 2) / server->screen_width;
+    int inhibited = 0;
+    struct wlr_idle_inhibitor_v1 *inh;
+    wl_list_for_each(inh, &server->idle_inhibit->inhibitors, link) {
+        FwmView *v = view_from_surface(server, inh->surface);
+        if (!v) continue;
+        PhysicsBody *pb = physics_find_body(&server->physics, v->id);
+        /* No body means a hidden group member — not visible by definition. */
+        if (pb && pb->desktop_id == visible_d) { inhibited = 1; break; }
+    }
+
+    if (inhibited != server->idle_inhibited) {
+        wlr_idle_notifier_v1_set_inhibited(server->idle_notifier, inhibited != 0);
+        server->idle_inhibited = inhibited;
+    }
+}
+
 static void handle_xdg_activation_request_activate(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, xdg_activation_request_activate);
     const struct wlr_xdg_activation_v1_request_activate_event *event = data;
@@ -1304,10 +1360,7 @@ static void handle_xdg_activation_request_activate(struct wl_listener *listener,
      * recent input would be the real fix. */
     if (!event->token->seat) return;
 
-    FwmView *view = NULL, *v;
-    wl_list_for_each(v, &server->views, link) {
-        if (view_surface(v) == event->surface) { view = v; break; }
-    }
+    FwmView *view = view_from_surface(server, event->surface);
     if (!view) return;
 
     PhysicsBody *pb = physics_find_body(&server->physics, view->id);
@@ -1501,6 +1554,8 @@ static int physics_tick_cb(void *data) {
 
     // Redraw tray if data changed
     server_request_tray_redraw(server);
+
+    idle_inhibit_refresh(server);
 
     // Parallax: shift each wallpaper layer by a fraction of the camera offset.
     wallpaper_update(server->wallpaper, server->camera_x);
@@ -2156,6 +2211,13 @@ bool server_init(FwmServer *server) {
     wl_signal_add(&server->seat->events.request_start_drag, &server->seat_request_start_drag);
     server->seat_start_drag.notify = handle_seat_start_drag;
     wl_signal_add(&server->seat->events.start_drag, &server->seat_start_drag);
+
+    /* No listeners needed: the notifier is driven by server_notify_activity
+     * from the input paths, and the inhibit manager keeps its own list, which
+     * idle_inhibit_refresh polls each tick. */
+    server->idle_notifier = wlr_idle_notifier_v1_create(server->wl_display);
+    server->idle_inhibit  = wlr_idle_inhibit_v1_create(server->wl_display);
+    server->idle_inhibited = 0;
 
     server->xdg_activation = wlr_xdg_activation_v1_create(server->wl_display);
     if (server->xdg_activation) {

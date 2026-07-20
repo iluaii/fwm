@@ -134,6 +134,12 @@ typedef struct FwmServer {
      * already-running browser, a chat client jumping to a message). */
     struct wlr_xdg_activation_v1 *xdg_activation;
     struct wl_listener xdg_activation_request_activate;
+
+    /* Idle: ext-idle-notify tells idle daemons (swayidle) when the user goes
+     * quiet; idle-inhibit lets a client (a video player) suppress that. */
+    struct wlr_idle_notifier_v1 *idle_notifier;
+    struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
+    int idle_inhibited;                    /* last state pushed to the notifier */
     
     /* Keyboard input */
     struct wl_list keyboards;
