@@ -96,7 +96,9 @@ repeat_delay = 600
 #                 pin_window, toggle_nocollide, toggle_nocollide_all,
 #                 toggle_tiling_all, calm_all, cycle_gravity,
 #                 show_hints, show_errors, reload_config,
-#                 wallpaper_picker, EXIT
+#                 wallpaper_picker, launcher, EXIT
+# tiling:         toggle_split, tile_focus:l|r|u|d, tile_move:l|r|u|d
+# tab-stacks:     group_toggle, group_next, group_prev, group_add
 #
 # A broken config never costs you the session: fwm falls back to built-in
 # keybindings, reports the problem in a tray pill (click it for details) and
@@ -123,7 +125,10 @@ repeat_delay = 600
 "super+shift+c"      = "calm_all"
 "super+g"            = "cycle_gravity"
 "super+shift+Escape" = "EXIT"
-"super+shift+question" = "show_hints"
+# Bound to the physical "/" key, not to the "?" symbol: a symbol bind lands on
+# a different key per layout (US shift+/, RU shift+7), while "slash" resolves
+# through the layout-0 fallback and stays put on every layout.
+"super+shift+slash"  = "show_hints"
 "super+shift+r"      = "reload_config"
 "super+shift+p"      = "wallpaper_picker"
 # Lock the screen. fwm implements ext-session-lock-v1; the lock screen itself
@@ -172,6 +177,9 @@ dir = "~/Pictures"
 #   zoom     = 1.6    # or set the render width directly (screen_w * zoom)
 # The log line for each layer reports the travel and crop you ended up with.
 
-[[wallpaper]]
-path = "/path/to/wallpaper.png"
-fit  = "pan"
+# Commented out on purpose: a placeholder path would be reported as a config
+# problem (the tray pill) on a fresh install. Point it at a real image and
+# uncomment, or just pick one with super+shift+p.
+#[[wallpaper]]
+#path = "/path/to/wallpaper.png"
+#fit  = "pan"

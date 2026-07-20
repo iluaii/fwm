@@ -37,12 +37,28 @@ This is the primary, actively developed version. The legacy X11 version lives on
 - **Keyboard control** — directional focus (`Super+Arrows`), move window (`Super+Shift+Arrows`), flip split orientation (`Super+S`).
 - **Mouse control** — drag BSP borders with `Super+RightDrag` (instant, no animation lag), swap tiles with `Super+Shift+Drag`.
 
+### Tab-stacks
+- **Hyprland-style groups** — stack windows into one slot with a chevron tab bar: `Super+W` toggles a stack, `Super+Shift+W` joins the window below, `Super+Tab` / `Super+Shift+Tab` cycle tabs.
+
+### Built-in overlays
+- **App launcher** (`Super+Space`) — fuzzy search over desktop entries with icons, no external `rofi` needed. Launched windows drop into the world with physics.
+- **Wallpaper picker** (`Super+Shift+P`) — browse a folder and apply an image instantly; the choice is remembered without ever rewriting your config.
+- **Keybind cheat-sheet** (`Super+Shift+/`) — generated from your actual binds, not a static list.
+- **Config never costs you the session** — a broken file falls back to built-in binds and reports the problem in a tray pill; fix it and press `Super+Shift+R` to reload live.
+
 ### Visuals
 - **Focus borders** — accent color on the focused window, muted on the rest; colors and width in the config.
-- **Window fade-in** — new windows ease in over ~150 ms.
+- **Window fade-in** — new windows ease in over ~260 ms (configurable, 0 disables).
+- **Impact effects** — windows squash and stretch where they hit; optional camera shake on hard landings.
+- **Wallpaper-derived palette** — optionally tint the whole UI toward the wallpaper's dominant hue (`color_source = "wallpaper"`).
 - **Minimal tray** — three flat chevron-ended islands: focused window + physics readout, desktop indicators, clock. No titlebars anywhere (server-side decorations).
 - **Transparency** — client alpha (e.g. kitty `background_opacity`) is rendered as-is.
 - **Fake fullscreen** (`Super+D`) keeps the tray visible; **real fullscreen** (`Super+F`) hides it and covers the whole output.
+
+### Desktop integration
+Runs the software you already use: **XWayland** (X11 apps as ordinary physics windows), **layer-shell** (waybar, mako, rofi, swaybg), **ext-session-lock** (hyprlock, swaylock), **idle protocols** (swayidle, no blanking during video), **xdg-activation**, **screencopy** (screenshots, screen share), **gamma-control** (wlsunset), **pointer constraints** (games and mouse-look), **foreign-toplevel** (taskbars), plus drag-and-drop and primary selection.
+
+Known gaps: no HiDPI / fractional output scale, no multimonitor, no IME (xkb layouts do work).
 
 ---
 
@@ -57,6 +73,9 @@ This is the primary, actively developed version. The legacy X11 version lives on
 | gdk-pixbuf | `gdk-pixbuf2` |
 | Box2D 3.x | `box2d` |
 | CMake + pkg-config | `cmake`, `pkgconf` |
+| Xwayland (runtime) | `xorg-xwayland` |
+
+wlroots must be built with Xwayland support — CMake refuses to configure otherwise. Xwayland itself starts lazily, only when the first X11 client appears.
 
 ---
 
@@ -132,6 +151,18 @@ gravity               = 981.0   # px/s^2; 981 = Earth at 100 px/m
 mass_density          = 0.0005  # window mass = area * density
 throw_speed_multiplier = 0.65
 max_throw_speed       = 1800.0
+stop_speed_threshold  = 1.0     # below this a window is considered at rest
+tick_rate             = 60.0    # physics steps per second
+
+[input]
+# Several layouts + a grp:* option gives you layout switching for free.
+# Keep a Latin layout FIRST: binds fall back to it, so ctrl+c and super+q
+# keep working while you are typing in another script.
+kbd_layout   = "us,ru"
+kbd_options  = "grp:alt_shift_toggle"
+kbd_variant  = ""
+repeat_rate  = 25
+repeat_delay = 600
 
 [tiling]
 gaps_in    = 6       # px between tiles
@@ -158,6 +189,9 @@ col_active   = "#7aa2f7"   # "#RRGGBB" or "#RRGGBBAA"
 col_inactive = "#3b4261"
 fade_in_ms   = 260.0       # window appear/close animation; 0 disables
 wallpaper_fade_ms = 420.0  # cross-fade on runtime wallpaper swap; 0 = cut
+tray_opacity     = 0.92    # island fill opacity (0..1)
+launcher_opacity = 0.92
+icon_theme   = ""          # launcher icons; "" = auto (gtk settings, hicolor)
 # Where the UI palette comes from:
 #   "config"    — the colours above plus the built-in dark scheme (default)
 #   "wallpaper" — tint the tray/panels toward the wallpaper's dominant hue and
@@ -187,7 +221,7 @@ fit  = "pan"
 
 [binds]
 "super+Return"       = "spawn:kitty"
-"super+space"        = "spawn:rofi -show drun -normal-window"
+"super+space"        = "launcher"
 "super+q"            = "killclient"
 "super+t"            = "toggle_tiling"
 "super+d"            = "fake_fullscreen"
@@ -199,12 +233,18 @@ fit  = "pan"
 "super+g"            = "cycle_gravity"
 "super+s"            = "toggle_split"
 "super+shift+c"      = "calm_all"
-"super+shift+question" = "show_hints"
+"super+shift+n"      = "toggle_nocollide_all"
+"super+shift+t"      = "toggle_tiling_all"
+"super+shift+slash"  = "show_hints"
 "super+shift+r"      = "reload_config"
 "super+shift+p"      = "wallpaper_picker"
+"super+shift+l"      = "spawn:hyprlock"
 "super+shift+Escape" = "EXIT"
 "super+Left"         = "tile_focus:l"    # Right/Up/Down likewise
 "super+shift+Left"   = "tile_move:l"
+"super+w"            = "group_toggle"    # tab-stacks
+"super+Tab"          = "group_next"
+"super+shift+w"      = "group_add"
 "super+1"            = "view:0"          # ... "super+0" = "view:9"
 ```
 
@@ -222,6 +262,9 @@ fit  = "pan"
 | `tile_move:l\|r\|u\|d` | swap tile in direction |
 | `toggle_split` | flip split orientation of the focused tile |
 | `pin_window`, `toggle_nocollide`, `calm_all`, `cycle_gravity` | physics toggles |
+| `toggle_nocollide_all` / `toggle_tiling_all` | same, but every window / every desktop at once |
+| `group_toggle`, `group_add`, `group_next`, `group_prev` | tab-stacks: make a stack, join it, cycle tabs |
+| `launcher` | built-in app launcher |
 | `show_hints` | keybind cheat-sheet overlay |
 | `reload_config` | re-read the config file and apply it without restarting |
 | `wallpaper_picker` | built-in wallpaper browser; Enter applies the image at once |

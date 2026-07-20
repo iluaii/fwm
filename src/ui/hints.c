@@ -61,6 +61,7 @@ static const char *key_display(const char *name, char *buf, size_t cap) {
     if (!strcmp(name, "space"))  return "Space";
     if (!strcmp(name, "Escape")) return "Esc";
     if (!strcmp(name, "question")) return "?";
+    if (!strcmp(name, "slash"))    return "/";
     if (strlen(name) == 1 && name[0] >= 'a' && name[0] <= 'z') {
         buf[0] = (char)(name[0] - 'a' + 'A');
         buf[1] = '\0';
