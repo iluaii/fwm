@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "tray.h"
 #include "cairo_overlay.h"
 #include "../theme.h"
@@ -30,6 +31,31 @@ int tray_error_pill_hit(double x, double y) {
     return g_err_pill.valid &&
            x >= g_err_pill.x && x <= g_err_pill.x + g_err_pill.w &&
            y >= g_err_pill.y && y <= g_err_pill.y + g_err_pill.h;
+}
+
+/* Same idea for the desktop island: the indicator geometry is decided during
+ * the draw (it depends on the pill width), so it is recorded there. */
+static struct {
+    double x, y, w, h;   /* the whole island */
+    double first_cx;     /* centre of indicator 0 */
+    double spacing;
+    int valid;
+} g_desk;
+
+int tray_desktop_island_hit(double x, double y) {
+    return g_desk.valid &&
+           x >= g_desk.x && x <= g_desk.x + g_desk.w &&
+           y >= g_desk.y && y <= g_desk.y + g_desk.h;
+}
+
+int tray_desktop_hit(double x, double y) {
+    if (!tray_desktop_island_hit(x, y)) return -1;
+    /* Snap to the nearest indicator rather than demanding a hit on the dot
+     * itself: the dots are 4-7px across, which is not a clickable target. */
+    int i = (int)lround((x - g_desk.first_cx) / g_desk.spacing);
+    if (i < 0) i = 0;
+    if (i > 9) i = 9;
+    return i;
 }
 
 /* Island with pointed (chevron) ends: same silhouette family as the old bar. */
@@ -138,6 +164,11 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
         double pw = PILL_PAD * 2 + spacing * 9 + 6;
         double px = (w - pw) / 2.0;
         draw_pill(cr, px, 0, pw, h, data->opacity);
+
+        g_desk.x = px; g_desk.y = 0; g_desk.w = pw; g_desk.h = h;
+        g_desk.first_cx = px + PILL_PAD + 3;
+        g_desk.spacing = spacing;
+        g_desk.valid = 1;
 
         for (int i = 0; i < 10; i++) {
             double cx = px + PILL_PAD + 3 + i * spacing;

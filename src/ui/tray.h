@@ -29,4 +29,13 @@ void tray_redraw(struct wlr_scene_buffer *tray_buf, const TrayData *data);
  * Valid once the pill has been drawn; returns 0 when no pill is on screen. */
 int tray_error_pill_hit(double x, double y);
 
+/* Desktop indicators. Both take TRAY-BUFFER-LOCAL coordinates: subtract
+ * tray_buffer->node.x/y before calling, like the error pill.
+ * tray_desktop_hit returns the desktop under the point (snapped to the nearest
+ * indicator anywhere inside the island) or -1 when the point is elsewhere.
+ * tray_desktop_island_hit is the same test without picking an index, for
+ * scroll-over-the-island. */
+int tray_desktop_hit(double x, double y);
+int tray_desktop_island_hit(double x, double y);
+
 #endif /* FWM_TRAY_H */

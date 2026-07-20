@@ -1130,6 +1130,20 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         }
     }
 
+    // Desktop indicators: a left click jumps to that desktop.
+    if (event->state == WL_POINTER_BUTTON_STATE_PRESSED && event->button == BTN_LEFT &&
+        server->interactive.action == FWM_ACTION_NONE && server->tray_buffer) {
+        double tx = server->cursor->x - server->tray_buffer->node.x;
+        double ty = server->cursor->y - server->tray_buffer->node.y;
+        int d = tray_desktop_hit(tx, ty);
+        if (d >= 0) {
+            server->target_camera_x = d * server->screen_width;
+            server->cam_free = 0;    /* discrete jump: the eased slide */
+            server->group_click = 1; /* swallow the matching release */
+            return;
+        }
+    }
+
     // Tab-stack bars: a left click on a tab switches the stack's window and
     // stays in the compositor (its release is swallowed too).
     if (event->state == WL_POINTER_BUTTON_STATE_PRESSED && event->button == BTN_LEFT &&
@@ -1293,6 +1307,29 @@ static void handle_cursor_axis(struct wl_listener *listener, void *data) {
     struct wlr_pointer_axis_event *event = data;
     server_notify_activity(server);
     if (lock_is_active(server)) return;
+
+    // Scrolling over the desktop island steps between desktops. Consumed, so
+    // it never also scrolls whatever window happens to be under the tray.
+    // Vertical only: a touchpad sends both axes in one frame, and honouring
+    // horizontal too would step two desktops per gesture.
+    if (server->tray_buffer && event->delta != 0.0 &&
+        event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
+        double tx = server->cursor->x - server->tray_buffer->node.x;
+        double ty = server->cursor->y - server->tray_buffer->node.y;
+        if (tray_desktop_island_hit(tx, ty)) {
+            /* Step from where the camera is HEADED, not where it is: spinning
+             * the wheel several notches must advance several desktops rather
+             * than fight the slide still in flight. */
+            int d = server->target_camera_x / server->screen_width;
+            d += event->delta > 0.0 ? 1 : -1;
+            if (d < 0) d = 0;
+            if (d > 9) d = 9;
+            server->target_camera_x = d * server->screen_width;
+            server->cam_free = 0;
+            return;
+        }
+    }
+
     wlr_seat_pointer_notify_axis(server->seat, event->time_msec, event->orientation, event->delta, event->delta_discrete, event->source, event->relative_direction);
 }
 
