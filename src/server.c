@@ -31,6 +31,7 @@
 #include <wlr/types/wlr_output_power_management_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/render/color.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_relative_pointer_v1.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
@@ -597,7 +598,7 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
     struct wlr_scene_output *scene_output = wlr_scene_get_scene_output(output->server->scene, output->wlr_output);
     server_animate(output->server);
     wlr_scene_output_commit(scene_output, NULL);
-    
+
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     wlr_scene_output_send_frame_done(scene_output, &now);
@@ -1549,29 +1550,6 @@ static void handle_output_power_set_mode(struct wl_listener *listener, void *dat
     wlr_output_state_finish(&state);
 }
 
-/* wlsunset / gammastep. wlroots keeps the ramp; we only have to commit it. */
-static void handle_gamma_set(struct wl_listener *listener, void *data) {
-    FwmServer *server = wl_container_of(listener, server, gamma_set);
-    const struct wlr_gamma_control_manager_v1_set_gamma_event *event = data;
-    if (!event->output) return;
-
-    struct wlr_gamma_control_v1 *control =
-        wlr_gamma_control_manager_v1_get_control(server->gamma_control, event->output);
-
-    struct wlr_output_state state;
-    wlr_output_state_init(&state);
-    if (!wlr_gamma_control_v1_apply(control, &state)) {
-        wlr_output_state_finish(&state);
-        return;
-    }
-    if (!wlr_output_commit_state(event->output, &state)) {
-        /* Tell the client its ramp was rejected rather than leaving it to
-         * believe a night-light filter is applied when it is not. */
-        wlr_gamma_control_v1_send_failed_and_destroy(control);
-    }
-    wlr_output_state_finish(&state);
-}
-
 /* cursor-shape-v1: clients name a cursor ("text", "grab") instead of supplying
  * a surface. Older clients keep using wl_pointer.set_cursor, which still works. */
 static void handle_cursor_shape_request(struct wl_listener *listener, void *data) {
@@ -1747,6 +1725,13 @@ static int server_is_busy(FwmServer *server) {
         if (v->open_anim || v->tile_anim || v->squash_buf) return 1;
     }
     return 0;
+}
+
+void server_schedule_frames(FwmServer *server) {
+    struct FwmOutput *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        wlr_output_schedule_frame(output->wlr_output);
+    }
 }
 
 static int physics_tick_cb(void *data) {
@@ -1931,10 +1916,7 @@ static int physics_tick_cb(void *data) {
      * change what is on screen without damaging the scene, the screen is stale
      * for at most one beat instead of forever. */
     int busy = server_is_busy(server);
-    struct FwmOutput *output;
-    wl_list_for_each(output, &server->outputs, link) {
-        wlr_output_schedule_frame(output->wlr_output);
-    }
+    server_schedule_frames(server);
 
     /* physics_step always advances a FIXED 1/60 regardless of when we are
      * called, so slowing the timer cannot hand Box2D an enormous dt — idle
@@ -2610,8 +2592,11 @@ bool server_init(FwmServer *server) {
     }
     server->gamma_control = wlr_gamma_control_manager_v1_create(server->wl_display);
     if (server->gamma_control) {
-        server->gamma_set.notify = handle_gamma_set;
-        wl_signal_add(&server->gamma_control->events.set_gamma, &server->gamma_set);
+        /* The scene applies client ramps itself, including re-applying them
+         * when an output comes back — far less to get wrong than committing
+         * them by hand. We only watch the event to stand our own night light
+         * down when a client takes the ramp over. */
+        wlr_scene_set_gamma_control_manager_v1(server->scene, server->gamma_control);
     }
     server->cursor_shape = wlr_cursor_shape_manager_v1_create(server->wl_display, 1);
     if (server->cursor_shape) {
@@ -2644,7 +2629,7 @@ bool server_init(FwmServer *server) {
     server_state_apply_wallpaper(server);
     // Palette for every overlay and window border; may sample the wallpaper.
     theme_build(&server->config);
-    
+
     // Init physics
     physics_init(&server->physics);
     server->physics.friction = server->config.physics.friction;

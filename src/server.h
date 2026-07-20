@@ -153,7 +153,6 @@ typedef struct FwmServer {
     struct wlr_output_power_manager_v1 *output_power;
     struct wl_listener output_power_set_mode;
     struct wlr_gamma_control_manager_v1 *gamma_control;
-    struct wl_listener gamma_set;
     struct wlr_cursor_shape_manager_v1 *cursor_shape;
     struct wl_listener cursor_shape_request;
 
@@ -240,6 +239,10 @@ bool server_init(FwmServer *server);
 void server_run(FwmServer *server);
 void server_destroy(FwmServer *server);
 
+/* Ask every output for a frame. The scene schedules frames off its own damage,
+ * so this is only for changes that damage nothing — a colour transform, or the
+ * idle heartbeat. */
+void server_schedule_frames(FwmServer *server);
 void server_focus_view(FwmServer *server, struct FwmView *view);
 void server_apply_tiling(FwmServer *server, int desktop);
 void server_start_interactive_move(FwmServer *server, struct FwmView *view, uint32_t serial);
