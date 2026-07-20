@@ -137,7 +137,44 @@ like while the session you actually work in never notices.
 Because keys cannot be injected into a nested compositor, a few env hooks stand
 in for them: `FWM_TEST_ACTION`, `FWM_TEST_GRAVITY` (fwm boots in zero-g),
 `FWM_TEST_CAMERA`, `FWM_OPEN_PICKER`, `FWM_SHOW_HINTS`, `FWM_DEBUG`. `dev.sh`
-wraps each in a flag.
+wraps each in a flag. For anything you can express as an action, `fwmctl`
+(below) reaches a *running* nested instance and needs no restart at all.
+
+## Scripting — `fwmctl`
+
+fwm listens on a control socket, so you do not have to be a C programmer to
+change how it behaves. Anything a keybind can do, a script can do:
+
+```sh
+fwmctl state                    # compositor state as JSON
+fwmctl windows                  # open windows as JSON
+fwmctl dispatch view:3          # run any action from config.toml
+fwmctl reload                   # reload the config
+```
+
+Replies are JSON, so `jq` does the rest:
+
+```sh
+# how many windows are open?
+fwmctl windows | jq '.windows | length'
+
+# jump to whichever desktop Firefox is on
+fwmctl dispatch view:$(fwmctl windows | jq -r '
+    .windows[] | select(.app_id=="firefox") | .desktop' | head -1)
+
+# turn gravity on from a script, a panel button, a hotkey daemon…
+fwmctl dispatch cycle_gravity
+```
+
+`dispatch` takes exactly the action names the `[keys]` section uses, so
+anything you can bind you can also script. Commands that change state are
+refused while the session is locked.
+
+The socket is `$XDG_RUNTIME_DIR/fwm-$WAYLAND_DISPLAY.sock` and is also exported
+as `$FWM_SOCKET`, which children inherit — a program spawned from a keybind can
+talk back to the compositor that started it without being told where it is.
+Naming the socket after the Wayland display means a nested dev instance and
+your real session never collide.
 
 ## Configuration
 

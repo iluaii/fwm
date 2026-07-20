@@ -38,6 +38,7 @@ set(SOURCES
     src/lock.c
     src/foreign.c
     src/group.c
+    src/ipc.c
     src/server.c
     src/ui/cairo_overlay.c
     src/ui/tray.c
@@ -100,3 +101,7 @@ target_link_libraries(fwm-wayland PRIVATE
 )
 
 target_compile_definitions(fwm-wayland PRIVATE WLR_USE_UNSTABLE)
+
+# Control-socket CLI. Deliberately links nothing: it speaks plain text over a
+# unix socket, so it stays usable even if the compositor's deps change.
+add_executable(fwmctl tools/fwmctl.c)

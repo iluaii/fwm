@@ -118,6 +118,9 @@ build() {
 install_files() {
     msg "Installing to $PREFIX"
     $SUDO install -Dm755 "$REPO_DIR/build/fwm-wayland" "$PREFIX/bin/fwm-wayland"
+    # The control-socket CLI. Without it on PATH, scripting fwm means finding
+    # the binary in a build directory, which nobody will do.
+    $SUDO install -Dm755 "$REPO_DIR/build/fwmctl" "$PREFIX/bin/fwmctl"
     # Substitute the real binary path rather than shipping a bare "fwm-wayland":
     # display managers run sessions with a trimmed PATH that need not contain
     # $PREFIX/bin, and the failure mode is the worst kind — the session shows up
@@ -155,7 +158,7 @@ update)
     ;;
 uninstall)
     msg "Uninstalling"
-    $SUDO rm -f "$PREFIX/bin/fwm-wayland" /usr/share/wayland-sessions/fwm.desktop
+    $SUDO rm -f "$PREFIX/bin/fwm-wayland" "$PREFIX/bin/fwmctl" /usr/share/wayland-sessions/fwm.desktop
     msg "Removed (user config in ~/.config/fwm kept)"
     ;;
 *)

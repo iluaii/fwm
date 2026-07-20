@@ -6,6 +6,8 @@
 #include "layer.h"
 #include "lock.h"
 #include "foreign.h"
+#include "ipc.h"
+#include <signal.h>
 #include "ui/tray.h"
 #include "ui/hints.h"
 #include "ui/errors.h"
@@ -115,6 +117,18 @@ static struct FwmView *view_at(FwmServer *server, double lx, double ly,
 }
 
 static void server_dispatch_action(FwmServer *server, const char *action);
+
+/* SIGTERM/SIGINT arrive when the session ends or a dev run is killed. Without
+ * these the process dies where it stands, server_destroy never runs, and the
+ * control socket is left behind as a dead file. Terminating the display loop
+ * instead makes the normal teardown path the only exit path. */
+static int handle_signal(int signal, void *data) {
+    FwmServer *server = data;
+    wlr_log(WLR_INFO, "caught signal %d, shutting down", signal);
+    server->running = 0;
+    wl_display_terminate(server->wl_display);
+    return 0;
+}
 
 static int test_action_cb(void *data) {
     FwmServer *server = data;
@@ -2556,6 +2570,17 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
     }
 }
 
+/* Run a config action on behalf of something that is not the keyboard (the
+ * control socket). Deliberately the SAME entry point as a keybind, so an
+ * action never behaves differently depending on how it was triggered.
+ *
+ * The caller is responsible for the locked-session check; the keyboard path
+ * does its own before it ever reaches here. */
+void server_dispatch_action_external(FwmServer *server, const char *action) {
+    wlr_log(WLR_DEBUG, "ipc: dispatch %s", action);
+    server_dispatch_action(server, action);
+}
+
 bool server_init(FwmServer *server) {
     memset(server, 0, sizeof(*server));
     server->wl_display = wl_display_create();
@@ -2565,6 +2590,19 @@ bool server_init(FwmServer *server) {
     }
     
     struct wl_event_loop *event_loop = wl_display_get_event_loop(server->wl_display);
+
+    /* MUST happen before the backend/renderer, and thus before the GPU driver
+     * spawns its worker threads. wl_event_loop_add_signal blocks the signal
+     * with sigprocmask, and a thread inherits the mask AS IT IS AT CREATION —
+     * threads that already exist keep accepting the signal. The kernel hands a
+     * process-directed signal to any thread that does not block it, so with
+     * this registered later the driver's threads took SIGTERM and the default
+     * disposition killed us (exit 143) with server_destroy never running.
+     * Verified by reading SigBlk from each thread's status under
+     * /proc/<pid>/task: it was 0 on those threads. */
+    wl_event_loop_add_signal(event_loop, SIGTERM, handle_signal, server);
+    wl_event_loop_add_signal(event_loop, SIGINT, handle_signal, server);
+
     server->wlr_backend = wlr_backend_autocreate(event_loop, &server->session);
     if (!server->wlr_backend) {
         wlr_log(WLR_ERROR, "failed to create backend");
@@ -2796,6 +2834,11 @@ bool server_init(FwmServer *server) {
     wlr_log(WLR_INFO, "Wayland socket: %s", socket);
     setenv("WAYLAND_DISPLAY", socket, 1);
 
+    /* Control socket. Named after the Wayland display so several fwm
+     * instances (a nested dev run inside a real session) never collide.
+     * Failure is non-fatal: fwm works without it, just not scriptably. */
+    server->ipc = ipc_create(server, socket);
+
     server->running = 1;
     return true;
 }
@@ -2805,11 +2848,23 @@ void server_run(FwmServer *server) {
         wlr_log(WLR_ERROR, "failed to start backend");
         return;
     }
-    
+
     wl_display_run(server->wl_display);
 }
 
+/* Detach a listener that may never have been attached: server_init memsets the
+ * whole struct, so an unused one still has a zeroed link and wl_list_remove
+ * would walk a NULL pointer. */
+static void server_remove_listener(struct wl_listener *l) {
+    if (l->link.prev) wl_list_remove(&l->link);
+}
+
 void server_destroy(FwmServer *server) {
+    /* Before anything else: stop accepting commands that would touch state we
+     * are about to free, and take the socket file with us. */
+    ipc_destroy(server->ipc);
+    server->ipc = NULL;
+
     config_free(&server->config);
     
     // Clean overlays
@@ -2838,7 +2893,45 @@ void server_destroy(FwmServer *server) {
     }
 
     // Xwayland must go down before the clients/display it hangs off.
-    if (server->xwayland) wlr_xwayland_destroy(server->xwayland);
+    if (server->xwayland) {
+        wl_list_remove(&server->xwl_ready.link);
+        wl_list_remove(&server->xwl_new_surface.link);
+        wlr_xwayland_destroy(server->xwayland);
+        server->xwayland = NULL;
+    }
+
+    /* Every wlroots global we listen to asserts on destroy that its signals
+     * have no listeners left (xdg_shell was the one that caught us), so all of
+     * ours have to come off before wl_display_destroy runs them down.
+     *
+     * None of this ever ran before: without a signal handler the process was
+     * killed outright and server_destroy was dead code on the normal exit
+     * path. server_init memsets the struct, so a listener that was never added
+     * still has a NULL link and is skipped. */
+    server_remove_listener(&server->new_xdg_toplevel);
+    server_remove_listener(&server->new_xdg_popup);
+    server_remove_listener(&server->new_toplevel_decoration);
+    server_remove_listener(&server->new_input);
+    server_remove_listener(&server->new_output);
+    server_remove_listener(&server->cursor_motion);
+    server_remove_listener(&server->cursor_motion_absolute);
+    server_remove_listener(&server->cursor_button);
+    server_remove_listener(&server->cursor_axis);
+    server_remove_listener(&server->cursor_frame);
+    server_remove_listener(&server->request_cursor);
+    server_remove_listener(&server->seat_request_set_selection);
+    server_remove_listener(&server->seat_request_set_primary_selection);
+    server_remove_listener(&server->seat_request_start_drag);
+    server_remove_listener(&server->seat_start_drag);
+    server_remove_listener(&server->new_pointer_constraint);
+    server_remove_listener(&server->constraint_destroy);
+    server_remove_listener(&server->output_power_set_mode);
+    server_remove_listener(&server->cursor_shape_request);
+    server_remove_listener(&server->xdg_activation_request_activate);
+    /* Owned by other modules but attached to globals just the same. */
+    server_remove_listener(&server->new_layer_surface);
+    server_remove_listener(&server->new_lock);
+
     wl_display_destroy_clients(server->wl_display);
     wl_display_destroy(server->wl_display);
 }

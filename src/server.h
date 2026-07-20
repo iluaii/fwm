@@ -162,6 +162,9 @@ typedef struct FwmServer {
 
     /* ext-session-lock-v1. `locked` stays set if the lock client dies, which
      * is what keeps a crashed locker from becoming an unlock — see src/lock.h. */
+    /* Control socket (src/ipc.h). NULL if it could not be created. */
+    struct FwmIpc *ipc;
+
     struct wlr_session_lock_manager_v1 *lock_manager;
     struct wlr_session_lock_v1 *lock;      /* NULL once the client is gone */
     int locked;
@@ -266,6 +269,8 @@ void server_request_tray_redraw(FwmServer *server);
  * (physics, decor, tiling, keymap, wallpaper, binds). Errors are reported
  * through the tray pill, never by failing. */
 void server_reload_config(FwmServer *server);
+/* Run a keybind action from outside the keyboard path (see src/ipc.c). */
+void server_dispatch_action_external(FwmServer *server, const char *action);
 /* Swap the wallpaper at runtime: rebuilds the layers, recomputes the palette
  * when [decor] color_source = "wallpaper", and remembers the choice in the
  * state file so it survives a restart. Replaces the FIRST [[wallpaper]] layer;
