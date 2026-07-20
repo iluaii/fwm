@@ -99,6 +99,27 @@ WLR_BACKENDS=wayland ./build/fwm-wayland  # nested Wayland window
 
 ---
 
+## Development
+
+A compositor cannot hot-restart the way an X11 window manager can: it *is* the
+display server, so when the process exits every client's connection dies with
+it and no amount of saved state brings the windows back. Nesting is the working
+substitute — run fwm inside your current session and restart it as often as you
+like while the session you actually work in never notices.
+
+```sh
+./dev.sh                      # rebuild and run nested
+./dev.sh -n 2 -g 1            # ... with two terminals, gravity on
+./dev.sh -a toggle_tiling_all # ... firing one action after startup
+./dev.sh -s shot.png          # screenshot after a few seconds, then quit
+./dev.sh -h                   # all options
+```
+
+Because keys cannot be injected into a nested compositor, a few env hooks stand
+in for them: `FWM_TEST_ACTION`, `FWM_TEST_GRAVITY` (fwm boots in zero-g),
+`FWM_TEST_CAMERA`, `FWM_OPEN_PICKER`, `FWM_SHOW_HINTS`, `FWM_DEBUG`. `dev.sh`
+wraps each in a flag.
+
 ## Configuration
 
 Everything lives in `~/.config/fwm/config.toml`. All sections are optional — missing values fall back to sane defaults.
