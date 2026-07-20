@@ -168,11 +168,13 @@ static void load_tiling(toml_table_t *root, TilingConfig *t) {
 
 static void load_camera(toml_table_t *root, CameraConfig *c) {
     c->anim_ms = 350.0;
+    c->free_speed = 14.0;
 
     toml_table_t *tbl = toml_table_in(root, "camera");
     if (!tbl) return;
 
     LOAD_DOUBLE(tbl, "anim_ms", c->anim_ms);
+    LOAD_DOUBLE(tbl, "free_speed", c->free_speed);
 }
 
 /* ── decor section ───────────────────────────────────────────────────── */
@@ -500,7 +502,7 @@ static void load_wallpaper(toml_table_t *root, FwmConfig *cfg) {
 void config_load(FwmConfig *cfg, const char *path) {
     cfg->physics         = physics_defaults;
     cfg->tiling          = (TilingConfig){ .gaps_in = 6, .gaps_out = 12, .anim_speed = 12.0 };
-    cfg->camera          = (CameraConfig){ .anim_ms = 350.0 };
+    cfg->camera          = (CameraConfig){ .anim_ms = 350.0, .free_speed = 14.0 };
     // Defaults for the no-config-file path; load_decor re-applies them anyway.
     cfg->decor.border_width = 2;
     parse_hex_color("#7aa2f7", cfg->decor.col_active);

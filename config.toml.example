@@ -51,8 +51,11 @@ gaps_out   = 12
 anim_speed = 12.0
 
 # Desktop-switch camera slide (ease-in-out). 0 = instant snap.
+# free_speed is a different motion: how tightly the camera follows a HELD
+# move_camera: bind (1/s, higher = tighter, lower = more coasting).
 [camera]
-anim_ms = 350.0
+anim_ms    = 350.0
+free_speed = 14.0
 
 [input]
 # xkb keyboard: several layouts + a grp:* option = layout switching.

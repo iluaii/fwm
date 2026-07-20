@@ -960,8 +960,10 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
             int current_d = server->target_camera_x / server->screen_width;
             if (lx >= server->screen_width - 10 && current_d < 9) {
                 server->target_camera_x = (current_d + 1) * server->screen_width;
+                server->cam_free = 0; // discrete jump: use the eased slide
             } else if (lx <= 10 && current_d > 0) {
                 server->target_camera_x = (current_d - 1) * server->screen_width;
+                server->cam_free = 0;
             }
         }
     } else if (server->interactive.action == FWM_ACTION_RESIZE) {
@@ -1274,28 +1276,57 @@ static int physics_tick_cb(void *data) {
     // old exponential chase (fast jump + 1px/tick crawl tail). If the target
     // changes mid-flight, restart from the current position so it stays smooth.
     if (server->camera_x != server->target_camera_x || server->cam_anim) {
-        if (!server->cam_anim || server->cam_anim_to != server->target_camera_x) {
-            server->cam_anim = 1;
-            server->cam_anim_from = server->camera_x;
-            server->cam_anim_to = server->target_camera_x;
-            server->cam_anim_t = 0.0;
-        }
-        double cam_ms = server->config.camera.anim_ms;
-        server->cam_anim_t += cam_ms > 0.0 ? dt * 1000.0 / cam_ms : 1.0;
-        double t = server->cam_anim_t;
-        if (t >= 1.0) {
-            server->camera_x = server->cam_anim_to;
+        // X11 clients place popups from their last-configured root coords;
+        // tell them where they are once the camera comes to rest.
+        int cam_settled = 0;
+
+        if (server->cam_free) {
+            // Continuous pan under a held bind: framerate-independent
+            // exponential chase, same form as the tile glide. Unlike the slide
+            // below it has no notion of "start over", so a target that moves
+            // every 40ms costs nothing — the camera tracks it immediately and
+            // coasts the last few px once the key is released.
             server->cam_anim = 0;
-            // X11 clients place popups from their last-configured root coords;
-            // tell them where they are on the new desktop.
+            int gap = server->target_camera_x - server->camera_x;
+            if (gap != 0) {
+                double speed = server->config.camera.free_speed;
+                double k = speed > 0.0 ? 1.0 - exp(-speed * dt) : 1.0;
+                int step = (int)lround(gap * k);
+                if (step == 0) step = gap > 0 ? 1 : -1; // never stall sub-pixel
+                server->camera_x += step;
+                // Snap the last pixel: edge auto-scroll only ever fires while
+                // camera_x == target_camera_x exactly.
+                if (abs(server->target_camera_x - server->camera_x) <= 1) {
+                    server->camera_x = server->target_camera_x;
+                }
+                cam_settled = server->camera_x == server->target_camera_x;
+            }
+        } else {
+            if (!server->cam_anim || server->cam_anim_to != server->target_camera_x) {
+                server->cam_anim = 1;
+                server->cam_anim_from = server->camera_x;
+                server->cam_anim_to = server->target_camera_x;
+                server->cam_anim_t = 0.0;
+            }
+            double cam_ms = server->config.camera.anim_ms;
+            server->cam_anim_t += cam_ms > 0.0 ? dt * 1000.0 / cam_ms : 1.0;
+            double t = server->cam_anim_t;
+            if (t >= 1.0) {
+                server->camera_x = server->cam_anim_to;
+                server->cam_anim = 0;
+                cam_settled = 1;
+            } else {
+                // Cubic ease-in-out.
+                double e = t < 0.5 ? 4.0 * t * t * t
+                                   : 1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0;
+                server->camera_x = server->cam_anim_from
+                    + (int)lround((server->cam_anim_to - server->cam_anim_from) * e);
+            }
+        }
+
+        if (cam_settled) {
             FwmView *xv;
             wl_list_for_each(xv, &server->views, link) view_sync_position(xv);
-        } else {
-            // Cubic ease-in-out.
-            double e = t < 0.5 ? 4.0 * t * t * t
-                               : 1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0;
-            server->camera_x = server->cam_anim_from
-                + (int)lround((server->cam_anim_to - server->cam_anim_from) * e);
         }
         
         // Sync non-dragged windows relative to camera
@@ -1880,6 +1911,7 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
         if (new_target < 0) new_target = 0;
         if (new_target > 9 * server->screen_width) new_target = 9 * server->screen_width;
         server->target_camera_x = new_target;
+        server->cam_free = 1; // continuous pan, not a desktop jump
     } else if (strcmp(action, "launcher") == 0) {
         bool was_open = launcher_is_open(server->launcher);
         launcher_toggle(server->launcher);
@@ -1888,6 +1920,7 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
         int desktop = atoi(action + 5);
         if (desktop >= 0 && desktop < 10) {
             server->target_camera_x = desktop * server->screen_width;
+            server->cam_free = 0; // discrete jump: use the eased slide
         }
     }
 }

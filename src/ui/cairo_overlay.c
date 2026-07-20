@@ -33,6 +33,9 @@ struct CairoOverlayInfo {
      * (opacity + position), so it costs nothing per frame and works on static
      * overlays that can never be redrawn. */
     int    anim;
+    int    out;   /* running in reverse; destroys the overlay when it lands */
+    void (*on_done)(void *);
+    void  *done_data;
     double t, dur_ms, rise;
     int    base_x, base_y;
     struct wlr_scene_buffer *buf; /* the node being animated */
@@ -188,6 +191,9 @@ void cairo_overlay_animate_in(struct wlr_scene_buffer *scene_buffer,
     anim_stop(info);
 
     info->anim   = 1;
+    info->out    = 0;
+    info->on_done = NULL;
+    info->done_data = NULL;
     info->buf    = scene_buffer;
     info->t      = 0.0;
     info->dur_ms = duration_ms;
@@ -201,6 +207,41 @@ void cairo_overlay_animate_in(struct wlr_scene_buffer *scene_buffer,
     wl_list_insert(&g_anims, &info->link);
 }
 
+void cairo_overlay_animate_out(struct wlr_scene_buffer *scene_buffer,
+                               double duration_ms, double sink_px,
+                               void (*on_done)(void *), void *user_data) {
+    if (!scene_buffer) {
+        if (on_done) on_done(user_data);
+        return;
+    }
+    struct CairoOverlayInfo *info = scene_buffer->node.data;
+    if (!info || duration_ms <= 0.0) {
+        cairo_overlay_destroy(scene_buffer);
+        if (on_done) on_done(user_data);
+        return;
+    }
+    anims_init();
+    /* If an appear is still running, its base_x/base_y already hold the RESTING
+     * position; the node itself is somewhere along the rise, so reading the
+     * node would make the sink start from the wrong place. */
+    int mid_appear = info->anim && !info->out;
+    int base_x = mid_appear ? info->base_x : scene_buffer->node.x;
+    int base_y = mid_appear ? info->base_y : scene_buffer->node.y;
+    anim_stop(info);
+
+    info->anim   = 1;
+    info->out    = 1;
+    info->on_done   = on_done;
+    info->done_data = user_data;
+    info->buf    = scene_buffer;
+    info->t      = 0.0;
+    info->dur_ms = duration_ms;
+    info->rise   = sink_px;
+    info->base_x = base_x;
+    info->base_y = base_y;
+    wl_list_insert(&g_anims, &info->link);
+}
+
 void cairo_overlay_tick(double dt) {
     anims_init();
     struct CairoOverlayInfo *info, *tmp;
@@ -209,14 +250,30 @@ void cairo_overlay_tick(double dt) {
         int done = info->t >= 1.0;
         if (done) info->t = 1.0;
 
-        /* Cubic ease-out: quick to arrive, soft to settle. */
-        double e = 1.0 - pow(1.0 - info->t, 3.0);
+        /* Cubic ease-out: quick to arrive, soft to settle. The outgoing form is
+         * the same curve played backwards — ease_out(1-t) — so closing looks
+         * exactly like opening reversed. */
+        double e = info->out ? 1.0 - pow(info->t, 3.0)
+                             : 1.0 - pow(1.0 - info->t, 3.0);
 
         wlr_scene_node_set_position(&info->buf->node, info->base_x,
                                     info->base_y + (int)lround(info->rise * (1.0 - e)));
         wlr_scene_buffer_set_opacity(info->buf, (float)e);
 
-        if (done) anim_stop(info);
+        if (!done) continue;
+
+        if (info->out) {
+            /* Ownership was handed to the animation: tear the overlay down.
+             * Read the callback out first — the destroy frees `info`. The
+             * _safe iterator already holds the next link, so removing this
+             * entry from inside the loop is fine. */
+            void (*cb)(void *) = info->on_done;
+            void *cb_data = info->done_data;
+            cairo_overlay_destroy(info->buf);
+            if (cb) cb(cb_data);
+        } else {
+            anim_stop(info);
+        }
     }
 }
 

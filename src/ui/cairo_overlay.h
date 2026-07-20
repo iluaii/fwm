@@ -17,6 +17,15 @@ void cairo_overlay_destroy(struct wlr_scene_buffer *scene_buffer);
 void cairo_overlay_animate_in(struct wlr_scene_buffer *scene_buffer,
                               double duration_ms, double rise_px);
 
+/* Exact mirror of animate_in: fade out while sinking `sink_px`, then DESTROY
+ * the overlay and call on_done (may be NULL). Ownership of `scene_buffer`
+ * passes to the animation — the caller must drop its pointer immediately and
+ * never draw into it again. on_done exists so the caller can clear whatever
+ * pointer it kept. Falls back to an immediate destroy if duration_ms <= 0. */
+void cairo_overlay_animate_out(struct wlr_scene_buffer *scene_buffer,
+                               double duration_ms, double sink_px,
+                               void (*on_done)(void *), void *user_data);
+
 /* Advance every running overlay animation. Call once per frame. */
 void cairo_overlay_tick(double dt);
 

@@ -152,6 +152,12 @@ typedef struct FwmServer {
     int cam_anim;
     int cam_anim_from, cam_anim_to;
     double cam_anim_t;
+    /* Continuous free pan (a held move_camera: bind). Must NOT use the slide
+     * above: that animator restarts its fixed-duration ease every time the
+     * target moves, and a held bind moves it every 40ms, so the camera only
+     * ever completed the slowest ~1% of an ease-in-out and then caught up in
+     * one jump on release. Free pan chases the target exponentially instead. */
+    int cam_free;
     int screen_width;
     int screen_height;
     

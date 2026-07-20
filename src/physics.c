@@ -285,13 +285,26 @@ static b2Vec2 body_center_m(const PhysicsBody *m) {
     };
 }
 
+/* Collision categories. "No collide" means "pass through other WINDOWS", never
+ * "leave the play area": a body whose category or mask is zero fails Box2D's
+ * two-way filter test against everything, walls included, so such windows used
+ * to sail straight out past the top and the desktop-1 / desktop-10 edges.
+ * Walls therefore get their own bit that even a no-collide window keeps. */
+#define CAT_WINDOW 0x0001u
+#define CAT_WALL   0x0002u
+
 static b2Filter filter_for(int no_collide) {
     b2Filter f = b2DefaultFilter();
-    if (no_collide) {
-        // Collide with nothing (still integrates / falls under gravity).
-        f.categoryBits = 0;
-        f.maskBits = 0;
-    }
+    f.categoryBits = CAT_WINDOW;
+    // Walls always; other windows only when collision is enabled.
+    f.maskBits = no_collide ? CAT_WALL : (CAT_WALL | CAT_WINDOW);
+    return f;
+}
+
+static b2Filter filter_for_wall(void) {
+    b2Filter f = b2DefaultFilter();
+    f.categoryBits = CAT_WALL;
+    f.maskBits = CAT_WINDOW;
     return f;
 }
 
@@ -329,6 +342,7 @@ static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w,
         // floor/wall actually grinds to a stop instead of gliding like on ice.
         // (The old "sticking" bug was the pull-back clamp, not this friction.)
         sd.material.friction = 0.35f;
+        sd.filter = filter_for_wall();
         b2Polygon box = b2MakeBox(px2m(specs[i][2]), px2m(specs[i][3]));
         b2CreatePolygonShape(eng->walls[i], &sd, &box);
     }

@@ -33,7 +33,8 @@ typedef struct {
 /* ── camera ──────────────────────────────────────────────────────────── */
 
 typedef struct {
-    double anim_ms; /* desktop-switch slide duration; <= 0 = instant snap */
+    double anim_ms;    /* desktop-switch slide duration; <= 0 = instant snap */
+    double free_speed; /* held move_camera: chase rate, 1/s; higher = tighter */
 } CameraConfig;
 
 /* ── decorations ─────────────────────────────────────────────────────── */

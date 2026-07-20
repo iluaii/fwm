@@ -76,6 +76,10 @@ struct Launcher {
     int  sel;        /* selection among the first MAX_SHOW matches */
 
     struct wlr_scene_buffer *overlay;
+    /* Panel that is fading out. It is no longer ours to draw into — the
+     * animation owns and destroys it — we only keep the pointer so a reopen
+     * can cut it short instead of leaving a ghost under the new panel. */
+    struct wlr_scene_buffer *closing;
     int panel_w, panel_h;
     int bar_w, tile_w;
     int px, py;
@@ -702,23 +706,63 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
 
 /* ── open / close ────────────────────────────────────────────────────── */
 
-static void launcher_close(Launcher *l) {
+/* Appear/disappear of the panel itself. The tiles have always had their spring
+ * fly-in, but the panel used to pop in and vanish instantly. */
+#define PANEL_ANIM_MS 170.0
+#define PANEL_RISE_PX 12.0
+
+static void closing_done(void *data) {
+    Launcher *l = data;
+    l->closing = NULL;
+}
+
+/* Drop the outgoing panel this instant (reopen, or teardown: the callback must
+ * not outlive the Launcher). */
+static void closing_cancel(Launcher *l) {
+    if (!l->closing) return;
+    struct wlr_scene_buffer *buf = l->closing;
+    l->closing = NULL;
+    cairo_overlay_destroy(buf);
+}
+
+/* `animate` false tears the panel down synchronously — required from
+ * launcher_destroy, where a pending callback would reference freed memory. */
+static void launcher_close_ex(Launcher *l, bool animate) {
     if (!l->open) return;
+    /* Input state goes back to the client NOW; only the pixels linger, so the
+     * keyboard grab and pointer routing never wait on the animation. */
     l->open = false;
     if (l->overlay) {
-        cairo_overlay_destroy(l->overlay);
+        closing_cancel(l); /* at most one outgoing panel at a time */
+        if (animate) {
+            l->closing = l->overlay;
+            cairo_overlay_animate_out(l->overlay, PANEL_ANIM_MS, PANEL_RISE_PX,
+                                      closing_done, l);
+        } else {
+            cairo_overlay_destroy(l->overlay);
+        }
         l->overlay = NULL;
     }
     if (l->world_ok) {
+        /* Safe to drop while the panel is still fading: the last frame the
+         * tiles drew is already in the buffer, and the fade only touches the
+         * scene node. */
         b2DestroyWorld(l->world); /* frees tiles and walls */
         l->world_ok = false;
         l->tile_count = 0;
     }
 }
 
+static void launcher_close(Launcher *l) {
+    launcher_close_ex(l, true);
+}
+
 static void launcher_open(Launcher *l) {
     if (l->open) return;
     FwmServer *server = l->server;
+    /* A mode switch closes then immediately reopens; without this the old
+     * panel would fade out underneath the new one. */
+    closing_cancel(l);
     if (l->mode == LMODE_WALLPAPERS) {
         /* Rescanned on every open: the folder's contents are expected to
          * change between openings, unlike the installed .desktop set. */
@@ -751,6 +795,7 @@ static void launcher_open(Launcher *l) {
         return;
     }
     wlr_scene_node_set_position(&l->overlay->node, l->px, l->py);
+    cairo_overlay_animate_in(l->overlay, PANEL_ANIM_MS, PANEL_RISE_PX);
     l->open = true;
     l->dirty = true;
 }
@@ -770,7 +815,8 @@ Launcher *launcher_create(struct FwmServer *server) {
 
 void launcher_destroy(Launcher *l) {
     if (!l) return;
-    launcher_close(l);
+    launcher_close_ex(l, false);
+    closing_cancel(l);
     for (int i = 0; i < l->app_count; i++) {
         if (l->apps[i].icon_surf) cairo_surface_destroy(l->apps[i].icon_surf);
     }
