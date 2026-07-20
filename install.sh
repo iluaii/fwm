@@ -118,8 +118,15 @@ build() {
 install_files() {
     msg "Installing to $PREFIX"
     $SUDO install -Dm755 "$REPO_DIR/build/fwm-wayland" "$PREFIX/bin/fwm-wayland"
-    $SUDO install -Dm644 "$REPO_DIR/session/fwm.desktop" \
-        /usr/share/wayland-sessions/fwm.desktop
+    # Substitute the real binary path rather than shipping a bare "fwm-wayland":
+    # display managers run sessions with a trimmed PATH that need not contain
+    # $PREFIX/bin, and the failure mode is the worst kind — the session shows up
+    # in the list, you pick it, and it drops straight back to the login screen
+    # with nothing to explain why.
+    $SUDO install -d /usr/share/wayland-sessions
+    sed "s|^Exec=.*|Exec=$PREFIX/bin/fwm-wayland|" "$REPO_DIR/session/fwm.desktop" \
+        | $SUDO tee /usr/share/wayland-sessions/fwm.desktop >/dev/null
+    $SUDO chmod 644 /usr/share/wayland-sessions/fwm.desktop
 
     # User config: never overwrite an existing one.
     local cfg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fwm"
