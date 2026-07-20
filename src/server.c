@@ -1666,11 +1666,18 @@ static void handle_seat_request_start_drag(struct wl_listener *listener, void *d
 #define SHAKE_FULL_SPEED  2000.0  /* px/s that produces a full-strength shake */
 #define SHAKE_DECAY       9.0     /* 1/s; ~0.3s until it dies out */
 
-/* Peak deformation for a window taking `speed`. LINEAR in speed, unlike the
- * shake: squaring it (measured) turned an ordinary landing at ~600 px/s into a
- * 3.7% dent, i.e. invisible, which defeats the whole effect. The shake wants
- * gentle impacts damped because it is intrusive; the squash wants them seen. */
-#define SQUASH_FULL_SPEED 1200.0
+/* Peak deformation for a window taking `speed`. The shake wants gentle impacts
+ * damped because it is intrusive; the squash wants them SEEN, so the curve
+ * bends the other way — squaring it (measured) turned an ordinary landing at
+ * ~600 px/s into a 3.7% dent.
+ *
+ * Linear was still too flat at the low end: window-on-window contacts in real
+ * use land around 200-300 px/s (measured in a nested run: 0.053 and 0.067,
+ * i.e. 5-7%, which reads as "there is no animation between windows"), while
+ * only a long fall onto the floor reaches four figures. sqrt lifts the gentle
+ * half of the range without touching the cap: 200 px/s -> 14%, 500 -> 22%,
+ * 900+ -> the full 30%. */
+#define SQUASH_FULL_SPEED 900.0
 #define SQUASH_MAX_AMOUNT 0.30
 
 static void server_squash_from_impact(FwmServer *server, uint32_t id,
@@ -1682,7 +1689,7 @@ static void server_squash_from_impact(FwmServer *server, uint32_t id,
 
     double f = speed / SQUASH_FULL_SPEED;
     if (f > 1.0) f = 1.0;
-    view_start_squash(v, nx, ny, strength * SQUASH_MAX_AMOUNT * f);
+    view_start_squash(v, nx, ny, strength * SQUASH_MAX_AMOUNT * sqrt(f));
 }
 
 static void server_consume_impacts(FwmServer *server) {
