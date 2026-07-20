@@ -72,6 +72,19 @@ typedef struct FwmView {
      * close-animation snapshot (FwmGhost) after the client buffer is gone. */
     struct wlr_buffer *last_buffer;
 
+    /* Impact squash & stretch. Deforms a SNAPSHOT of the last committed frame,
+     * never the live surface: wlroots' scene resets a surface buffer's
+     * dest_size on every client commit, so a live deformation would be wiped
+     * out the moment the client redraws. The real content is hidden for the
+     * ~250ms this runs; the window is effectively a still frame, which is
+     * imperceptible at impact speed and is the same trade the close ghost
+     * already makes. */
+    struct wlr_scene_buffer *squash_buf;
+    struct wlr_buffer *squash_lock;   /* our own lock on the snapshot */
+    double squash_t;                  /* seconds since the impact */
+    double squash_amount;             /* peak deformation, 0..1 */
+    double squash_nx, squash_ny;      /* impact normal, points at the contact */
+
     /* Tab-stack membership; NULL when not grouped (see group.h). */
     struct FwmGroup *group;
 
@@ -105,6 +118,15 @@ void view_sync_position(FwmView *view);
 
 /* Border helpers (no-ops when borders are disabled or the view is unmapped). */
 void view_update_border_geometry(FwmView *view);
+
+/* Impact squash & stretch (see the squash_* fields above).
+ * `nx`,`ny` is the contact normal pointing from the window toward whatever it
+ * hit; `amount` is the peak deformation, 0..1. Starting one while another runs
+ * restarts it. Safe to call when the view has no snapshot to deform — it is
+ * simply ignored. */
+void view_start_squash(FwmView *view, double nx, double ny, double amount);
+void view_squash_tick(FwmView *view, double dt);
+void view_stop_squash(FwmView *view);
 void view_set_border_color(FwmView *view, const float color[4]);
 void view_set_border_enabled(FwmView *view, int enabled);
 

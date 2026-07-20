@@ -110,6 +110,7 @@ static struct FwmView *view_at(FwmServer *server, double lx, double ly,
 static void server_dispatch_action(FwmServer *server, const char *action);
 static void drag_icon_update_position(FwmServer *server);
 static void server_shake_tick(FwmServer *server, double dt);
+static FwmView *server_find_view(FwmServer *server, uint32_t id);
 
 /* Any real user input resets the idle timers of ext-idle-notify clients
  * (swayidle and friends). Must be called from every input path, or the session
@@ -472,6 +473,12 @@ static void server_animate(FwmServer *server) {
 
     server_shake_tick(server, dt);
 
+    /* Squash rides frame time with the other visual ramps. */
+    if (server->config.effects.squash > 0.0) {
+        FwmView *sv;
+        wl_list_for_each(sv, &server->views, link) view_squash_tick(sv, dt);
+    }
+
     // Window open animation. The client's surface is never blended: it is
     // hidden until it has content, then shown fully opaque while a cover rect
     // we draw ourselves fades out over it and the window rises into place.
@@ -651,6 +658,18 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
             server->camera_x = d * server->screen_width;
             server->target_camera_x = server->camera_x;
             if (server->wallpaper) wallpaper_update(server->wallpaper, server->camera_x);
+        }
+
+        // Debug: FWM_TEST_GRAVITY=<scale> starts with gravity on. fwm boots in
+        // zero-g and gravity is only reachable through cycle_gravity, so a
+        // nested run can otherwise never make a window fall — which means the
+        // impact effects (shake, squash) cannot be exercised at all.
+        const char *tg = getenv("FWM_TEST_GRAVITY");
+        if (tg) {
+            double g = atof(tg);
+            if (g < 0.0) g = 0.0;
+            if (g > 2.0) g = 2.0;
+            server->physics.gravity_scale = g;
         }
 
         // Debug: FWM_OPEN_PICKER=1 opens the wallpaper picker at startup —
@@ -1428,9 +1447,29 @@ static void handle_seat_request_start_drag(struct wl_listener *listener, void *d
 #define SHAKE_FULL_SPEED  2000.0  /* px/s that produces a full-strength shake */
 #define SHAKE_DECAY       9.0     /* 1/s; ~0.3s until it dies out */
 
+/* Peak deformation for a window taking `speed`. LINEAR in speed, unlike the
+ * shake: squaring it (measured) turned an ordinary landing at ~600 px/s into a
+ * 3.7% dent, i.e. invisible, which defeats the whole effect. The shake wants
+ * gentle impacts damped because it is intrusive; the squash wants them seen. */
+#define SQUASH_FULL_SPEED 1200.0
+#define SQUASH_MAX_AMOUNT 0.30
+
+static void server_squash_from_impact(FwmServer *server, uint32_t id,
+                                      double nx, double ny, double speed) {
+    double strength = server->config.effects.squash;
+    if (strength <= 0.0 || id == 0) return;  /* id 0 is a wall, nothing to squash */
+    FwmView *v = server_find_view(server, id);
+    if (!v) return;
+
+    double f = speed / SQUASH_FULL_SPEED;
+    if (f > 1.0) f = 1.0;
+    view_start_squash(v, nx, ny, strength * SQUASH_MAX_AMOUNT * f);
+}
+
 static void server_consume_impacts(FwmServer *server) {
-    double strength = server->config.effects.camera_shake;
-    if (strength <= 0.0) { server->physics.impact_count = 0; return; }
+    double shake = server->config.effects.camera_shake;
+    double squash = server->config.effects.squash;
+    if (shake <= 0.0 && squash <= 0.0) { server->physics.impact_count = 0; return; }
 
     int visible_d = (server->camera_x + server->screen_width / 2) / server->screen_width;
     double want = 0.0;
@@ -1439,12 +1478,18 @@ static void server_consume_impacts(FwmServer *server) {
         int impact_d = (int)(im->x / server->screen_width);
         if (impact_d != visible_d) continue;
 
+        /* The normal points from A to B, so it faces the contact for A and
+         * away from it for B — flip it for B. */
+        server_squash_from_impact(server, im->id_a,  im->nx,  im->ny, im->speed);
+        server_squash_from_impact(server, im->id_b, -im->nx, -im->ny, im->speed);
+
         double f = im->speed / SHAKE_FULL_SPEED;
         if (f > 1.0) f = 1.0;
         /* Squared so gentle bumps stay subtle and only real slams shake hard. */
-        double mag = strength * SHAKE_MAX_PX * f * f;
+        double mag = shake * SHAKE_MAX_PX * f * f;
         if (mag > want) want = mag;
     }
+    if (shake <= 0.0) want = 0.0;
     /* Take the strongest impact of the frame rather than summing: three windows
      * landing together should not triple the shake. */
     if (want > server->shake_mag) {

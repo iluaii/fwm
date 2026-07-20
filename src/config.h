@@ -88,6 +88,7 @@ typedef struct {
 
 typedef struct {
     double camera_shake;  /* impact shake strength; 0 disables, 1 = default */
+    double squash;        /* impact squash & stretch; 0 disables, 1 = default */
 } EffectsConfig;
 
 /* ── binds ───────────────────────────────────────────────────────────── */

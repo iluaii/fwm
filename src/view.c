@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include <math.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/util/log.h>
 
@@ -45,6 +46,119 @@ static void handle_commit(struct wl_listener *listener, void *data) {
         if (view->last_buffer) wlr_buffer_unlock(view->last_buffer);
         view->last_buffer = &surface->buffer->base;
     }
+}
+
+static void view_place_borders(FwmView *view, int x, int y, int w, int h);
+static void view_border_box(FwmView *view, int *w, int *h);
+
+/* ── impact squash & stretch ──────────────────────────────────────────── */
+
+#define SQUASH_DECAY  11.0   /* 1/s */
+#define SQUASH_OMEGA  26.0   /* rad/s — roughly two visible wobbles */
+#define SQUASH_BULGE  0.6    /* how much the perpendicular axis bulges */
+#define SQUASH_MAX_S  0.45   /* hard cap on deformation, both directions */
+
+/* Show or hide the live content while keeping the borders (and our snapshot)
+ * visible: the borders are the only children we own besides squash_buf. */
+static void view_set_content_enabled(FwmView *view, bool enabled) {
+    if (!view->scene_tree) return;
+    struct wlr_scene_node *node;
+    wl_list_for_each(node, &view->scene_tree->children, link) {
+        bool ours = false;
+        for (int i = 0; i < 4; i++) {
+            if (view->border[i] && node == &view->border[i]->node) ours = true;
+        }
+        if (view->squash_buf && node == &view->squash_buf->node) ours = true;
+        if (!ours) wlr_scene_node_set_enabled(node, enabled);
+    }
+}
+
+void view_stop_squash(FwmView *view) {
+    if (!view->squash_buf) return;
+    wlr_scene_node_destroy(&view->squash_buf->node);
+    view->squash_buf = NULL;
+    if (view->squash_lock) {
+        wlr_buffer_unlock(view->squash_lock);
+        view->squash_lock = NULL;
+    }
+    view->squash_t = 0.0;
+    view->squash_amount = 0.0;
+    view_set_content_enabled(view, true);
+    view_update_border_geometry(view); /* back to the real box */
+}
+
+void view_start_squash(FwmView *view, double nx, double ny, double amount) {
+    if (!view->scene_tree || !view->last_buffer) return;
+    if (amount <= 0.001) return;
+
+    if (view->squash_buf) {
+        /* Already deforming: retarget rather than stacking a second snapshot,
+         * and keep whichever impact was stronger. */
+        if (amount > view->squash_amount) {
+            view->squash_amount = amount;
+            view->squash_nx = nx;
+            view->squash_ny = ny;
+            view->squash_t = 0.0;
+        }
+        return;
+    }
+
+    /* Our own lock: view_unmap's close ghost may want the same buffer. */
+    view->squash_lock = wlr_buffer_lock(view->last_buffer);
+    view->squash_buf = wlr_scene_buffer_create(view->scene_tree, view->squash_lock);
+    if (!view->squash_buf) {
+        wlr_buffer_unlock(view->squash_lock);
+        view->squash_lock = NULL;
+        return;
+    }
+    /* Under the borders, so the frame still reads as the window's outline. */
+    wlr_scene_node_lower_to_bottom(&view->squash_buf->node);
+
+    view->squash_t = 0.0;
+    view->squash_amount = amount;
+    view->squash_nx = nx;
+    view->squash_ny = ny;
+    view_set_content_enabled(view, false);
+    wlr_log(WLR_DEBUG, "squash: view %u amount %.3f normal (%.2f,%.2f)",
+            view->id, amount, nx, ny);
+}
+
+void view_squash_tick(FwmView *view, double dt) {
+    if (!view->squash_buf) return;
+    view->squash_t += dt;
+
+    /* Damped oscillation: a hard squash that springs back through a smaller
+     * overshoot, rather than a single linear dent.
+     * The end test MUST look at the envelope, not at `a`: the cosine crosses
+     * zero on every half-wobble, so testing `a` ended the animation ~60ms in,
+     * at the exact instant of zero deformation — the spring-back never ran. */
+    double env = view->squash_amount * exp(-SQUASH_DECAY * view->squash_t);
+    if (env < 0.004) { view_stop_squash(view); return; }
+    double a = env * cos(SQUASH_OMEGA * view->squash_t);
+    if (a >  SQUASH_MAX_S) a =  SQUASH_MAX_S;
+    if (a < -SQUASH_MAX_S) a = -SQUASH_MAX_S;
+
+    int w, h;
+    view_border_box(view, &w, &h);
+    if (w <= 0 || h <= 0) { view_stop_squash(view); return; }
+
+    /* Compress along the contact normal, bulge across it. */
+    double ax = fabs(view->squash_nx), ay = fabs(view->squash_ny);
+    double sx = 1.0 - a * ax + a * SQUASH_BULGE * ay;
+    double sy = 1.0 - a * ay + a * SQUASH_BULGE * ax;
+
+    int dw = (int)lround(w * sx), dh = (int)lround(h * sy);
+    if (dw < 1) dw = 1;
+    if (dh < 1) dh = 1;
+
+    /* Keep the edge that took the hit planted: a window landing on the floor
+     * must compress into the floor, not hover above it. */
+    int ox = view->squash_nx > 0 ? w - dw : 0;
+    int oy = view->squash_ny > 0 ? h - dh : 0;
+
+    wlr_scene_buffer_set_dest_size(view->squash_buf, dw, dh);
+    wlr_scene_node_set_position(&view->squash_buf->node, ox, oy);
+    view_place_borders(view, ox, oy, dw, dh);
 }
 
 /* ── shell-agnostic accessors ─────────────────────────────────────────── */
@@ -102,30 +216,43 @@ void view_set_fullscreen_hint(FwmView *view, bool fullscreen) {
 
 /* ── focus border ─────────────────────────────────────────────────────── */
 
-void view_update_border_geometry(FwmView *view) {
+/* Border box in scene-tree-local coordinates. Split out so the squash can hug
+ * a deformed, offset box instead of the window's real geometry. */
+static void view_place_borders(FwmView *view, int x, int y, int w, int h) {
     if (!view->border[0]) return;
     int bw = view->server->config.decor.border_width;
-    int w, h;
-    if (view->type == FWM_VIEW_XDG) {
-        w = view->xdg_toplevel->base->current.geometry.width;
-        h = view->xdg_toplevel->base->current.geometry.height;
-    } else {
-        struct wlr_surface *s = view->xwl_surface->surface;
-        w = s ? s->current.width : 0;
-        h = s ? s->current.height : 0;
-    }
-    if (w <= 0) w = view->width;
-    if (h <= 0) h = view->height;
 
     // top, bottom, left, right — hugging the outside of the window
-    wlr_scene_node_set_position(&view->border[0]->node, -bw, -bw);
+    wlr_scene_node_set_position(&view->border[0]->node, x - bw, y - bw);
     wlr_scene_rect_set_size(view->border[0], w + 2 * bw, bw);
-    wlr_scene_node_set_position(&view->border[1]->node, -bw, h);
+    wlr_scene_node_set_position(&view->border[1]->node, x - bw, y + h);
     wlr_scene_rect_set_size(view->border[1], w + 2 * bw, bw);
-    wlr_scene_node_set_position(&view->border[2]->node, -bw, 0);
+    wlr_scene_node_set_position(&view->border[2]->node, x - bw, y);
     wlr_scene_rect_set_size(view->border[2], bw, h);
-    wlr_scene_node_set_position(&view->border[3]->node, w, 0);
+    wlr_scene_node_set_position(&view->border[3]->node, x + w, y);
     wlr_scene_rect_set_size(view->border[3], bw, h);
+}
+
+/* The window's own box, as committed. */
+static void view_border_box(FwmView *view, int *w, int *h) {
+    if (view->type == FWM_VIEW_XDG) {
+        *w = view->xdg_toplevel->base->current.geometry.width;
+        *h = view->xdg_toplevel->base->current.geometry.height;
+    } else {
+        struct wlr_surface *s = view->xwl_surface->surface;
+        *w = s ? s->current.width : 0;
+        *h = s ? s->current.height : 0;
+    }
+    if (*w <= 0) *w = view->width;
+    if (*h <= 0) *h = view->height;
+}
+
+void view_update_border_geometry(FwmView *view) {
+    if (!view->border[0]) return;
+    if (view->squash_buf) return; /* the squash owns the border box meanwhile */
+    int w, h;
+    view_border_box(view, &w, &h);
+    view_place_borders(view, 0, 0, w, h);
 }
 
 void view_set_border_color(FwmView *view, const float color[4]) {
@@ -430,6 +557,9 @@ void view_map(FwmView *view) {
 }
 
 void view_unmap(FwmView *view) {
+    /* Before anything else: the snapshot lives in scene_tree, which is about to
+     * go, and it holds a buffer lock the close ghost may want back. */
+    view_stop_squash(view);
     group_remove(view->server, view); /* no-op when not grouped */
     physics_remove_body(&view->server->physics, view->id);
     

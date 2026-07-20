@@ -67,12 +67,18 @@ free_speed = 14.0
 [focus]
 on_activate = "same_desktop"
 
-# Impact effects. camera_shake jolts the wallpaper and windows when something
-# lands hard — the tray and panels never move, since jittering UI reads as a
-# glitch rather than as impact. Scales with collision speed, so gentle bumps
-# stay subtle. Set to 0 to switch it off entirely; 4 is the capped maximum.
+# Impact effects, both scaled by collision speed so gentle bumps stay subtle.
+#
+# camera_shake jolts the wallpaper and windows when something lands hard (the
+# tray and panels never move — jittering UI reads as a glitch, not as impact).
+# OFF by default: moving the whole view on every landing is intrusive while
+# you are actually working. Set 1.0 for the default strength, up to 4.
+#
+# squash deforms a window on impact — compressed along the contact, bulging
+# across it, springing back through a smaller overshoot. 0 disables.
 [effects]
-camera_shake = 1.0
+camera_shake = 0.0
+squash       = 1.0
 
 [input]
 # xkb keyboard: several layouts + a grp:* option = layout switching.

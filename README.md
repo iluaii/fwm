@@ -122,7 +122,8 @@ anim_ms    = 350.0   # desktop-switch slide (ease-in-out); 0 = instant snap
 free_speed = 14.0    # how tightly the camera follows a held move_camera: bind
 
 [effects]
-camera_shake = 1.0   # jolt on hard impacts, scaled by speed; 0 disables
+camera_shake = 0.0   # jolt the view on hard impacts; off by default, 1.0 to enable
+squash       = 1.0   # windows deform on impact, scaled by speed; 0 disables
 
 [focus]
 # When an app asks to be raised (xdg-activation): "never" ignores it,

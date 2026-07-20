@@ -300,13 +300,19 @@ static void load_focus(toml_table_t *root, FocusConfig *f, FwmConfig *cfg) {
 }
 
 static void load_effects(toml_table_t *root, EffectsConfig *e) {
-    e->camera_shake = 1.0;
+    /* Shake is OFF by default: it moves the whole view on every hard landing,
+     * which reads as intrusive during actual work. Opt in. */
+    e->camera_shake = 0.0;
+    e->squash = 1.0;
     if (!root) return;
     toml_table_t *tbl = toml_table_in(root, "effects");
     if (!tbl) return;
     LOAD_DOUBLE(tbl, "camera_shake", e->camera_shake);
     if (e->camera_shake < 0.0) e->camera_shake = 0.0;
     if (e->camera_shake > 4.0) e->camera_shake = 4.0;  /* past this it is nausea */
+    LOAD_DOUBLE(tbl, "squash", e->squash);
+    if (e->squash < 0.0) e->squash = 0.0;
+    if (e->squash > 2.0) e->squash = 2.0;
 }
 
 /* ── binds section ───────────────────────────────────────────────────── */
