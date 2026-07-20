@@ -395,10 +395,33 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
     wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
 }
 
+// Layout-independent shortcuts INSIDE clients (ctrl+c in a terminal on a
+// Russian layout, etc.). We forward keycodes, not keysyms: the client resolves
+// them with the xkb group we announce, so on group 1 (ru) ctrl+<key C> becomes
+// ctrl+Cyrillic_es and every app-level shortcut dies. Apps cannot fix this —
+// the group is ours to report. So while a non-Shift modifier is held we
+// announce group 0 (the first entry in [input] kbd_layout — keep Latin first),
+// making the client see the Latin keysym. Typing is untouched: Shift alone
+// never triggers this, and ctrl/alt/super chords produce no text anyway.
+static void notify_client_modifiers(struct FwmKeyboard *keyboard) {
+    FwmServer *server = keyboard->server;
+    struct wlr_keyboard *kbd = keyboard->wlr_keyboard;
+    struct wlr_keyboard_modifiers mods = kbd->modifiers;
+
+    if (mods.group != 0 && kbd->xkb_state &&
+        (xkb_state_mod_name_is_active(kbd->xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0 ||
+         xkb_state_mod_name_is_active(kbd->xkb_state, XKB_MOD_NAME_ALT,  XKB_STATE_MODS_EFFECTIVE) > 0 ||
+         xkb_state_mod_name_is_active(kbd->xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0)) {
+        mods.group = 0;
+    }
+
+    wlr_seat_set_keyboard(server->seat, kbd);
+    wlr_seat_keyboard_notify_modifiers(server->seat, &mods);
+}
+
 static void handle_keyboard_modifiers(struct wl_listener *listener, void *data) {
     struct FwmKeyboard *keyboard = wl_container_of(listener, keyboard, modifiers);
-    wlr_seat_set_keyboard(keyboard->server->seat, keyboard->wlr_keyboard);
-    wlr_seat_keyboard_notify_modifiers(keyboard->server->seat, &keyboard->wlr_keyboard->modifiers);
+    notify_client_modifiers(keyboard);
     // Layout switches arrive as group changes inside the modifiers event —
     // refresh the tray's layout tag (its signature dedupes the no-op case).
     server_request_tray_redraw(keyboard->server);
