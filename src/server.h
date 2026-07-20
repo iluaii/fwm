@@ -122,6 +122,13 @@ typedef struct FwmServer {
     struct wl_listener request_cursor;
     struct wl_listener seat_request_set_selection;
     struct wl_listener seat_request_set_primary_selection;
+
+    /* Drag and drop. The data transfer itself is handled entirely by
+     * wlr_data_device; all we own is the icon drawn under the cursor. */
+    struct wl_listener seat_request_start_drag;
+    struct wl_listener seat_start_drag;
+    struct wlr_scene_tree *drag_icon;      /* NULL when no drag is running */
+    struct wl_listener drag_icon_destroy;
     
     /* Keyboard input */
     struct wl_list keyboards;

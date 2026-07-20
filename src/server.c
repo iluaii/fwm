@@ -104,6 +104,7 @@ static struct FwmView *view_at(FwmServer *server, double lx, double ly,
 }
 
 static void server_dispatch_action(FwmServer *server, const char *action);
+static void drag_icon_update_position(FwmServer *server);
 
 /* Only continuous navigation binds should auto-repeat while held. Repeating
  * one-shot actions (killclient, spawn, toggles, view/fullscreen) would be
@@ -872,6 +873,8 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
     double lx = server->cursor->x;
     double ly = server->cursor->y;
 
+    drag_icon_update_position(server);
+
     // While the launcher is open the pointer belongs to it: hover moves the
     // selection, clients get no motion (and no pointer focus).
     if (launcher_is_open(server->launcher)) {
@@ -1028,6 +1031,7 @@ static void handle_cursor_motion_absolute(struct wl_listener *listener, void *da
     FwmServer *server = wl_container_of(listener, server, cursor_motion_absolute);
     struct wlr_pointer_motion_absolute_event *event = data;
     wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
+    drag_icon_update_position(server);
     if (launcher_is_open(server->launcher)) {
         launcher_handle_motion(server->launcher, server->cursor->x, server->cursor->y);
         wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
@@ -1248,6 +1252,55 @@ static void handle_seat_request_set_primary_selection(struct wl_listener *listen
     FwmServer *server = wl_container_of(listener, server, seat_request_set_primary_selection);
     struct wlr_seat_request_set_primary_selection_event *event = data;
     wlr_seat_set_primary_selection(server->seat, event->source, event->serial);
+}
+
+/* The icon rides the cursor directly in layout coordinates. It is NOT offset by
+ * camera_x: it belongs to the pointer, not to the desktop under it, so it must
+ * not slide when the camera pans mid-drag. */
+static void drag_icon_update_position(FwmServer *server) {
+    if (!server->drag_icon) return;
+    wlr_scene_node_set_position(&server->drag_icon->node,
+                                (int)lround(server->cursor->x),
+                                (int)lround(server->cursor->y));
+}
+
+static void handle_drag_icon_destroy(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, drag_icon_destroy);
+    (void)data;
+    /* wlroots destroys the scene tree along with the icon; only drop our
+     * pointer, or the next drag would raise a dangling node. */
+    server->drag_icon = NULL;
+    wl_list_remove(&server->drag_icon_destroy.link);
+}
+
+static void handle_seat_start_drag(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, seat_start_drag);
+    struct wlr_drag *drag = data;
+    if (!drag->icon) return; /* a drag without an icon is perfectly legal */
+
+    /* layer_overlay sits above windows and holds the tray/hints/launcher;
+     * raising puts the icon above those too, so it is never covered. */
+    server->drag_icon = wlr_scene_drag_icon_create(server->layer_overlay, drag->icon);
+    if (!server->drag_icon) return;
+    wlr_scene_node_raise_to_top(&server->drag_icon->node);
+    drag_icon_update_position(server);
+
+    server->drag_icon_destroy.notify = handle_drag_icon_destroy;
+    wl_signal_add(&drag->icon->events.destroy, &server->drag_icon_destroy);
+}
+
+static void handle_seat_request_start_drag(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, seat_request_start_drag);
+    struct wlr_seat_request_start_drag_event *event = data;
+
+    /* Only honour a drag the client can prove it owns, otherwise any client
+     * could start one at will. A rejected request MUST destroy the source or
+     * the requesting client waits forever. */
+    if (wlr_seat_validate_pointer_grab_serial(server->seat, event->origin, event->serial)) {
+        wlr_seat_start_pointer_drag(server->seat, event->drag, event->serial);
+    } else if (event->drag->source) {
+        wlr_data_source_destroy(event->drag->source);
+    }
 }
 
 static int physics_tick_cb(void *data) {
@@ -2063,6 +2116,10 @@ bool server_init(FwmServer *server) {
     wl_signal_add(&server->seat->events.request_set_selection, &server->seat_request_set_selection);
     server->seat_request_set_primary_selection.notify = handle_seat_request_set_primary_selection;
     wl_signal_add(&server->seat->events.request_set_primary_selection, &server->seat_request_set_primary_selection);
+    server->seat_request_start_drag.notify = handle_seat_request_start_drag;
+    wl_signal_add(&server->seat->events.request_start_drag, &server->seat_request_start_drag);
+    server->seat_start_drag.notify = handle_seat_start_drag;
+    wl_signal_add(&server->seat->events.start_drag, &server->seat_start_drag);
     
     server->new_input.notify = handle_new_input;
     wl_signal_add(&server->wlr_backend->events.new_input, &server->new_input);
