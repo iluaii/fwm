@@ -1752,6 +1752,41 @@ static int server_is_busy(FwmServer *server) {
     return 0;
 }
 
+/* Hand focus to something sensible without waiting for the pointer to move.
+ * Prefers whatever sits under the cursor, which is what focus-follows-pointer
+ * would have chosen anyway; otherwise takes a window on `desktop` so arriving
+ * somewhere never leaves the keyboard pointing at nothing.
+ *
+ * `skip` is the view being unmapped: it is still in the list and may still own
+ * scene nodes when this runs, so it must be excluded explicitly. */
+void server_refocus(FwmServer *server, int desktop, struct FwmView *skip) {
+    struct wlr_surface *surface = NULL;
+    double sx, sy;
+    FwmView *under = view_at(server, server->cursor->x, server->cursor->y, &surface, &sx, &sy);
+    if (under && under != skip) {
+        server_focus_view(server, under);
+        return;
+    }
+
+    /* Nothing under the pointer: take the most recently mapped window on the
+     * desktop. Views are inserted at the head, so the first match is the
+     * newest — closest to what the user last worked with. */
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        if (v == skip) continue;
+        PhysicsBody *b = physics_find_body(&server->physics, v->id);
+        /* No body means a hidden tab-stack member: not a focus candidate. */
+        if (!b || b->desktop_id != desktop) continue;
+        server_focus_view(server, v);
+        return;
+    }
+
+    /* Genuinely empty desktop: drop the keyboard rather than leave it pointed
+     * at a window the user can no longer see. */
+    server->focused_view = NULL;
+    wlr_seat_keyboard_notify_clear_focus(server->seat);
+}
+
 void server_schedule_frames(FwmServer *server) {
     struct FwmOutput *output;
     wl_list_for_each(output, &server->outputs, link) {
@@ -1836,6 +1871,16 @@ static int physics_tick_cb(void *data) {
         if (cam_settled) {
             FwmView *xv;
             wl_list_for_each(xv, &server->views, link) view_sync_position(xv);
+
+            /* Arriving on a desktop should hand the keyboard to something
+             * there. Otherwise focus stays on the window you left behind and
+             * typing goes to a desktop you can no longer see. Covers every way
+             * of getting here — the view: binds, the tray, edge auto-scroll. */
+            int arrived = server->camera_x / server->screen_width;
+            if (arrived != server->focus_desktop) {
+                server->focus_desktop = arrived;
+                server_refocus(server, arrived, NULL);
+            }
         }
         
         // Sync non-dragged windows relative to camera

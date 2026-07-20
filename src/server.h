@@ -213,6 +213,7 @@ typedef struct FwmServer {
     /* FWM_TEST_ACTION debug hook: fires one action shortly after startup. */
     char *test_action;
     struct wl_event_source *test_action_timer;
+    int focus_desktop;  /* desktop server_refocus last homed the keyboard on */
     int tick_idle;      /* physics timer is on the slow heartbeat */
     double shake_mag;   /* px; decays to 0 */
     double shake_t;     /* seconds since the last impact, drives the oscillation */
@@ -246,6 +247,11 @@ void server_destroy(FwmServer *server);
  * so this is only for changes that damage nothing — a colour transform, or the
  * idle heartbeat. */
 void server_schedule_frames(FwmServer *server);
+
+/* Re-home the keyboard after the focused window disappears or the camera lands
+ * on another desktop, instead of waiting for the next pointer motion.
+ * `skip` excludes a view that is unmapping but still listed; NULL otherwise. */
+void server_refocus(FwmServer *server, int desktop, struct FwmView *skip);
 void server_focus_view(FwmServer *server, struct FwmView *view);
 void server_apply_tiling(FwmServer *server, int desktop);
 void server_start_interactive_move(FwmServer *server, struct FwmView *view, uint32_t serial);

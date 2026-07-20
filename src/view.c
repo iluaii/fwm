@@ -572,6 +572,12 @@ void view_unmap(FwmView *view) {
     /* Before anything else: the snapshot lives in scene_tree, which is about to
      * go, and it holds a buffer lock the close ghost may want back. */
     view_stop_squash(view);
+
+    /* Which desktop to re-home the keyboard on, read before the body goes. */
+    PhysicsBody *ub = physics_find_body(&view->server->physics, view->id);
+    int home_desktop = ub ? ub->desktop_id
+                          : view->server->target_camera_x / view->server->screen_width;
+
     group_remove(view->server, view); /* no-op when not grouped */
     physics_remove_body(&view->server->physics, view->id);
     
@@ -584,7 +590,8 @@ void view_unmap(FwmView *view) {
         }
     }
     
-    if (view->server->focused_view == view) {
+    int was_focused = view->server->focused_view == view;
+    if (was_focused) {
         view->server->focused_view = NULL;
     }
     if (view->server->last_touched_view == view) {
@@ -638,6 +645,14 @@ void view_unmap(FwmView *view) {
     view->open_cover = NULL;
     view->open_anim = 0;
     view->open_hold = 0;
+
+    /* Only now, with this window's scene nodes gone, is it safe to ask what is
+     * under the cursor. Without this the keyboard sits nowhere until the
+     * pointer happens to move — closing the top window of a stack left the one
+     * underneath unfocused even though the cursor was already over it. */
+    if (was_focused) {
+        server_refocus(view->server, home_desktop, view);
+    }
 
     server_request_tray_redraw(view->server);
 }
