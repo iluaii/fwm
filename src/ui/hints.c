@@ -1,4 +1,5 @@
 #include "hints.h"
+#include "../theme.h"
 #include "cairo_overlay.h"
 #include "logo.h"
 #include <stdio.h>
@@ -87,6 +88,9 @@ static const char *action_label(const char *a, char *buf, size_t cap) {
         { "group_add",        "join stack under" },
         { "launcher",         "app launcher" },
         { "show_hints",       "this help" },
+        { "reload_config",    "reload config" },
+        { "wallpaper_picker", "wallpaper picker" },
+        { "show_errors",      "config problems" },
         { "EXIT",             "exit fwm" },
     };
     for (size_t i = 0; i < sizeof(map)/sizeof(map[0]); i++) {
@@ -181,7 +185,8 @@ static void draw_hints_content(cairo_t *cr, int w, int h, void *user_data) {
     struct HintsCtx *ctx = user_data;
 
     /* Same flat near-black as the tray islands, same opacity knob. */
-    cairo_set_source_rgba(cr, 0.075, 0.082, 0.098, ctx->opacity);
+    const FwmTheme *thm = theme_get();
+    cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], ctx->opacity);
     panel_path(cr, 0, 0, w, h, HINTS_CUT);
     cairo_fill(cr);
 
@@ -242,6 +247,7 @@ struct wlr_scene_buffer *hints_show(struct wlr_scene_tree *parent, int screen_w,
         wlr_scene_node_set_position(&hints_buf->node, wx, wy);
         cairo_overlay_update(hints_buf, draw_hints_content, &ctx);
         cairo_overlay_make_static(hints_buf);
+        cairo_overlay_animate_in(hints_buf, 170.0, 14.0);
     }
     return hints_buf;
 }

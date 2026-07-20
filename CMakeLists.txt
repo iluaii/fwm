@@ -28,19 +28,35 @@ set(SOURCES
     src/bsp.c
     src/toml.c
     src/config.c
+    src/theme.c
     src/wallpaper.c
     src/view.c
+    src/layer.c
     src/group.c
     src/server.c
     src/ui/cairo_overlay.c
     src/ui/tray.c
     src/ui/hints.c
+    src/ui/errors.c
     src/ui/welcome.c
     src/ui/launcher.c
     src/ui/logo.c
 )
 
-add_executable(fwm-wayland ${SOURCES})
+# wlroots ships the layer-shell C header but not the generated protocol header
+# it includes, so produce it here. The XML is vendored in protocols/ to keep
+# the build independent of any local wlroots checkout.
+find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
+set(LAYER_SHELL_HEADER ${CMAKE_BINARY_DIR}/wlr-layer-shell-unstable-v1-protocol.h)
+add_custom_command(
+    OUTPUT ${LAYER_SHELL_HEADER}
+    COMMAND ${WAYLAND_SCANNER} server-header
+            ${CMAKE_SOURCE_DIR}/protocols/wlr-layer-shell-unstable-v1.xml
+            ${LAYER_SHELL_HEADER}
+    DEPENDS ${CMAKE_SOURCE_DIR}/protocols/wlr-layer-shell-unstable-v1.xml
+    COMMENT "Generating wlr-layer-shell-unstable-v1 protocol header")
+
+add_executable(fwm-wayland ${SOURCES} ${LAYER_SHELL_HEADER})
 
 target_include_directories(fwm-wayland PRIVATE
         ${WAYLAND_SERVER_INCLUDE_DIRS}
@@ -51,6 +67,7 @@ target_include_directories(fwm-wayland PRIVATE
         ${PANGOCAIRO_INCLUDE_DIRS}
         ${GDK_PIXBUF_INCLUDE_DIRS}
         src
+        ${CMAKE_BINARY_DIR}
         src/ui
 )
 

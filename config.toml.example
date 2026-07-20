@@ -20,12 +20,28 @@ tick_rate             = 60.0
 border_width = 2
 col_active   = "#7aa2f7"
 col_inactive = "#3b4261"
-fade_in_ms   = 150.0
+# Window appear/close animation, ms. Short values read as a pop rather than a
+# fade — 260 is a calm default; 0 disables.
+fade_in_ms   = 260.0
+# Cross-fade when the wallpaper is swapped at runtime (picker); 0 = instant cut.
+wallpaper_fade_ms = 420.0
 # Island fill opacity (0..1), separate for the tray bar and the app launcher.
 tray_opacity     = 0.92
 launcher_opacity = 0.92
 # Launcher icon theme. "" = auto: gtk-3.0 settings.ini, then hicolor.
 icon_theme = ""
+# Where the UI palette comes from.
+#   "config"    — the colours above plus the built-in dark scheme (default)
+#   "wallpaper" — derive it from the first [[wallpaper]] image: the tray,
+#                 panels, launcher and tab bars are tinted toward its dominant
+#                 hue, and the focus border / desktop marker / tab underline
+#                 take its most vivid colour. Islands are always kept dark, so
+#                 text stays readable no matter the image. A greyscale
+#                 wallpaper falls back to the colours above.
+color_source     = "config"
+# 0..1: how far the islands move toward the wallpaper hue. 0 = untinted
+# (accent only), 1 = as far as the palette allows.
+tint_strength    = 0.4
 
 # Hyprland-style tiling: gaps and the tile-glide animation.
 # anim_speed is 1/s (12 ~ 250ms glide); 0 disables the animation.
@@ -52,7 +68,12 @@ repeat_delay = 600
 # mod keys: super, alt, shift, ctrl
 # system actions: killclient, toggle_tiling, fake_fullscreen, real_fullscreen,
 #                 pin_window, toggle_nocollide, calm_all, cycle_gravity,
-#                 show_hints, EXIT
+#                 show_hints, show_errors, reload_config,
+#                 wallpaper_picker, EXIT
+#
+# A broken config never costs you the session: fwm falls back to built-in
+# keybindings, reports the problem in a tray pill (click it for details) and
+# keeps running. Fix the file and press super+shift+r to reload.
 # spawn actions:  spawn:command arg1 arg2 ...
 # camera:         move_camera:-50  move_camera:50
 # workspace:      view:0 .. view:9
@@ -72,6 +93,8 @@ repeat_delay = 600
 "super+g"            = "cycle_gravity"
 "super+shift+Escape" = "EXIT"
 "super+shift+question" = "show_hints"
+"super+shift+r"      = "reload_config"
+"super+shift+p"      = "wallpaper_picker"
 # Tiling control (Hyprland-style; only active on tiling desktops)
 "super+Left"         = "tile_focus:l"
 "super+Right"        = "tile_focus:r"
@@ -98,10 +121,22 @@ repeat_delay = 600
 "super+9"            = "view:8"
 "super+0"            = "view:9"
 
+# Built-in wallpaper picker: which folder to browse (flat, no recursion).
+# The pick is remembered in ~/.local/state/fwm/wallpaper and overrides the
+# first [[wallpaper]] layer on the next start; this file is never rewritten.
+# Deleting that state file goes back to the wallpaper configured here.
+[wallpaper_picker]
+dir = "~/Pictures"
+
 # Wallpaper. fit = "cover" (fill+crop, static) | "contain" (whole image,
 # letterboxed, static) | "pan" (walk across the image as you switch desktops).
-# For "pan": leave zoom unset for max sharpness (image shown at native size),
-# or set zoom > 1 for a longer walk at the cost of some softness, e.g. zoom = 1.5
+# "pan" moves only images wide enough to stick out past the screen at native
+# scale (roughly: wider than your screen's aspect). Those walk with nothing
+# cropped. A narrower image is shown still rather than zoomed in, because
+# buying travel means cropping its height — that trade is yours to make:
+#   pan_crop = 0.25   # give up 25% of the height in exchange for travel
+#   zoom     = 1.6    # or set the render width directly (screen_w * zoom)
+# The log line for each layer reports the travel and crop you ended up with.
 
 [[wallpaper]]
 path = "/path/to/wallpaper.png"

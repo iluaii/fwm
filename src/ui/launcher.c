@@ -1,4 +1,5 @@
 #include "launcher.h"
+#include "../theme.h"
 #include "cairo_overlay.h"
 #include "../server.h"
 
@@ -12,6 +13,9 @@
 #include <math.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <wlr/util/log.h>
+#include <strings.h>
+#include <sys/stat.h>
 
 /* Search-bar launcher in the tray's "sharp islands" style: a chevron-ended
  * bar in the upper third; result tiles are Box2D bodies, each pulled to its
@@ -32,13 +36,15 @@
 
 #define QUERY_MAX   120
 
-static const double COL_PILL[3]  = {0.075, 0.082, 0.098};
-static const double COL_SEL[3]   = {0.145, 0.155, 0.195};
-static const double COL_TEXT[3]  = {0.91, 0.92, 0.94};
-static const double COL_MUTED[3] = {0.54, 0.57, 0.63};
+/* Palette follows the live theme (src/theme.h). */
 
 #define ICON_SZ 24
+#define THUMB_W 50.0   /* wallpaper preview width inside a tile (16:9-ish) */
+#define THUMB_H 28.0
 
+/* One row in the list. The launcher has two modes and both use this struct:
+ * in LMODE_APPS it is a .desktop entry; in LMODE_WALLPAPERS `exec` holds the
+ * image path, `icon`/`terminal` are unused and `icon_surf` is the thumbnail. */
 typedef struct {
     char name[128];
     char exec[512];
@@ -48,14 +54,21 @@ typedef struct {
     int  icon_tried;
 } LApp;
 
+enum { LMODE_APPS = 0, LMODE_WALLPAPERS = 1 };
+
 struct Launcher {
     struct FwmServer *server;
     bool open;
     bool scanned;
     bool dirty; /* state changed since the last drawn frame */
 
+    int   mode;      /* LMODE_* — which list is showing */
+
     LApp *apps;
     int   app_count;
+    LApp *walls;      /* wallpaper files, scanned from config wallpaper_dir */
+    int   wall_count;
+    bool  wall_scanned;
 
     char query[QUERY_MAX + 8];
     int *match;      /* indices into apps, ranked */
@@ -76,6 +89,11 @@ struct Launcher {
 
 static inline float px2m(double px) { return (float)(px / 100.0); }
 static inline double m2px(float m)  { return (double)m * 100.0; }
+
+/* The list currently on screen. Everything below (filtering, ranking, tiles,
+ * drawing) works through these two so both modes share one code path. */
+static LApp *items(Launcher *l)     { return l->mode == LMODE_WALLPAPERS ? l->walls : l->apps; }
+static int   item_count(Launcher *l) { return l->mode == LMODE_WALLPAPERS ? l->wall_count : l->app_count; }
 
 /* ── desktop entry scan ──────────────────────────────────────────────── */
 
@@ -155,7 +173,6 @@ static void scan_dir(Launcher *l, const char *dir,
 
 static void scan_apps(Launcher *l) {
     l->apps = calloc(MAX_APPS, sizeof(LApp));
-    l->match = calloc(MAX_APPS, sizeof(int));
     l->app_count = 0;
 
     char **seen = NULL;
@@ -301,6 +318,101 @@ static void ensure_icon(Launcher *l, LApp *app) {
     g_object_unref(pb);
 }
 
+/* Thumbnail for a wallpaper row. gdk-pixbuf scales while decoding, so a 4K
+ * image costs a decode and a 50x28 surface, not a full-size copy. */
+static void ensure_thumb(Launcher *l, LApp *item) {
+    (void)l;
+    if (item->icon_tried) return;
+    item->icon_tried = 1;
+
+    /* Aspect preserved: the preview is meant to tell wallpapers apart, and a
+     * squashed portrait image defeats that. It is centred in the THUMB box by
+     * the draw code, so rows stay aligned whatever the shape. */
+    GdkPixbuf *pb = gdk_pixbuf_new_from_file_at_scale(item->exec, (int)THUMB_W, (int)THUMB_H,
+                                                      TRUE, NULL);
+    if (!pb) return;
+    item->icon_surf = icon_surface_from_pixbuf(pb);
+    g_object_unref(pb);
+}
+
+static int has_image_ext(const char *name) {
+    const char *dot = strrchr(name, '.');
+    if (!dot) return 0;
+    static const char *ext[] = { ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", NULL };
+    for (int i = 0; ext[i]; i++)
+        if (strcasecmp(dot, ext[i]) == 0) return 1;
+    return 0;
+}
+
+static int wall_name_cmp(const void *va, const void *vb) {
+    return strcasecmp(((const LApp *)va)->name, ((const LApp *)vb)->name);
+}
+
+/* One flat scan of the configured directory — no recursion: a wallpaper folder
+ * is a wallpaper folder, and descending into it risks walking a whole Pictures
+ * tree on every open. */
+static void scan_wallpapers(Launcher *l) {
+    /* Thumbnails are expensive (a full image decode each), so carry the ones
+     * already decoded over to the new listing instead of freeing and redoing
+     * them — reopening the picker is then instant. */
+    LApp *old = l->walls;
+    int old_count = l->wall_count;
+
+    l->wall_scanned = true;
+    l->wall_count = 0;
+    l->walls = calloc(MAX_APPS, sizeof(LApp));
+    if (!l->walls) { l->walls = old; l->wall_count = old_count; return; }
+
+    const char *dir = l->server->config.wallpaper_dir;
+    DIR *d = opendir(dir);
+    if (!d) return;
+
+    struct dirent *e;
+    while ((e = readdir(d)) && l->wall_count < MAX_APPS) {
+        if (e->d_name[0] == '.') continue;
+        if (!has_image_ext(e->d_name)) continue;
+
+        LApp *it = &l->walls[l->wall_count];
+        memset(it, 0, sizeof(*it));
+        snprintf(it->exec, sizeof(it->exec), "%s/%s", dir, e->d_name);
+
+        struct stat st;
+        if (stat(it->exec, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+
+        /* Show the bare filename: extensions add nothing when every row is an
+         * image, and they cost width in a narrow tile. Strip the extension off
+         * the ORIGINAL name — copying first and cutting at the last dot
+         * afterwards loses the extension to truncation on long names, and then
+         * cuts at whatever dot is left ("Konachan.com - 12345 ..." collapsed to
+         * "Konachan" for every file). */
+        const char *base = e->d_name;
+        const char *ext = strrchr(base, '.');
+        size_t base_len = ext ? (size_t)(ext - base) : strlen(base);
+        if (base_len >= sizeof(it->name)) base_len = sizeof(it->name) - 1;
+        memcpy(it->name, base, base_len);
+        it->name[base_len] = '\0';
+
+        /* Reuse a previously decoded thumbnail for the same file. */
+        for (int k = 0; k < old_count; k++) {
+            if (strcmp(old[k].exec, it->exec) != 0) continue;
+            it->icon_surf = old[k].icon_surf;
+            it->icon_tried = old[k].icon_tried;
+            old[k].icon_surf = NULL;   /* ownership moved */
+            break;
+        }
+        l->wall_count++;
+    }
+    closedir(d);
+
+    /* Whatever was not carried over belonged to files that are gone. */
+    for (int k = 0; k < old_count; k++) {
+        if (old[k].icon_surf) cairo_surface_destroy(old[k].icon_surf);
+    }
+    free(old);
+
+    qsort(l->walls, l->wall_count, sizeof(LApp), wall_name_cmp);
+}
+
 /* ── filtering ───────────────────────────────────────────────────────── */
 
 /* Case-insensitive substring; returns match offset or -1. */
@@ -338,13 +450,13 @@ static int match_cmp(const void *va, const void *vb) {
 
 static void refilter(Launcher *l) {
     l->match_count = 0;
-    for (int i = 0; i < l->app_count; i++) {
+    for (int i = 0; i < item_count(l); i++) {
         int pos;
-        if (match_rank(&l->apps[i], l->query, &pos) >= 0) {
+        if (match_rank(&items(l)[i], l->query, &pos) >= 0) {
             l->match[l->match_count++] = i;
         }
     }
-    g_sort_apps = l->apps;
+    g_sort_apps = items(l);
     g_sort_query = l->query;
     qsort(l->match, l->match_count, sizeof(int), match_cmp);
     l->sel = 0;
@@ -452,6 +564,8 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
     Launcher *l = data;
     (void)w; (void)h;
 
+    const FwmTheme *thm = theme_get();
+
     PangoLayout *layout = pango_cairo_create_layout(cr);
     PangoFontDescription *desc = pango_font_description_from_string("sans 11");
     pango_layout_set_font_description(layout, desc);
@@ -461,12 +575,12 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
 
     /* ── bar ── */
     pill_path(cr, 0, 0, l->bar_w, BAR_H);
-    cairo_set_source_rgba(cr, COL_PILL[0], COL_PILL[1], COL_PILL[2], alpha);
+    cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], alpha);
     cairo_fill(cr);
 
     /* magnifier glyph */
     double gx = BAR_H / 2.0 + 4.0, gy = BAR_H / 2.0 - 2.0;
-    cairo_set_source_rgb(cr, COL_MUTED[0], COL_MUTED[1], COL_MUTED[2]);
+    cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
     cairo_set_line_width(cr, 1.8);
     cairo_new_path(cr);
     cairo_arc(cr, gx, gy, 6.0, 0, 6.2832);
@@ -480,17 +594,18 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
     int tw, th;
     if (l->query[0]) {
         pango_layout_set_text(layout, l->query, -1);
-        cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
+        cairo_set_source_rgb(cr, thm->text[0], thm->text[1], thm->text[2]);
     } else {
-        pango_layout_set_text(layout, "Search or run…", -1);
-        cairo_set_source_rgb(cr, COL_MUTED[0], COL_MUTED[1], COL_MUTED[2]);
+        pango_layout_set_text(layout,
+            l->mode == LMODE_WALLPAPERS ? "Choose a wallpaper…" : "Search or run…", -1);
+        cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
     }
     pango_layout_get_pixel_size(layout, &tw, &th);
     cairo_move_to(cr, tx, (BAR_H - th) / 2.0);
     pango_cairo_show_layout(cr, layout);
 
     double caret_x = l->query[0] ? tx + tw + 3.0 : tx;
-    cairo_set_source_rgba(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2], 0.8);
+    cairo_set_source_rgba(cr, thm->text[0], thm->text[1], thm->text[2], 0.8);
     cairo_rectangle(cr, caret_x, (BAR_H - th) / 2.0, 1.5, th);
     cairo_fill(cr);
 
@@ -500,7 +615,7 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
         snprintf(cnt, sizeof(cnt), "%d", l->match_count);
         pango_layout_set_text(layout, cnt, -1);
         pango_layout_get_pixel_size(layout, &tw, &th);
-        cairo_set_source_rgb(cr, COL_MUTED[0], COL_MUTED[1], COL_MUTED[2]);
+        cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
         cairo_move_to(cr, l->bar_w - BAR_H / 2.0 - tw - 4.0, (BAR_H - th) / 2.0);
         pango_cairo_show_layout(cr, layout);
     }
@@ -517,40 +632,67 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
         pill_path(cr, x, y, l->tile_w, TILE_H);
         if (selected) {
             double sa = alpha + 0.04 > 1.0 ? 1.0 : alpha + 0.04;
-            cairo_set_source_rgba(cr, COL_SEL[0], COL_SEL[1], COL_SEL[2], sa);
+            cairo_set_source_rgba(cr, thm->sel[0], thm->sel[1], thm->sel[2], sa);
         } else {
-            cairo_set_source_rgba(cr, COL_PILL[0], COL_PILL[1], COL_PILL[2], alpha);
+            cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], alpha);
         }
         cairo_fill(cr);
 
-        LApp *app = &l->apps[l->match[i]];
-        ensure_icon(l, app);
+        LApp *app = &items(l)[l->match[i]];
         double text_x = x + TILE_H / 2.0 + 4.0;
+        double art_w = ICON_SZ;
+        if (l->mode == LMODE_WALLPAPERS) {
+            /* No decoding here — a wallpaper thumbnail costs 15-200ms and the
+             * whole panel would freeze on its first frame. launcher_tick loads
+             * them one per frame; until then the slot shows a placeholder. */
+            art_w = THUMB_W;
+            if (!app->icon_surf) {
+                /* dim, not sel: sel is the selected row's own fill and the
+                 * placeholder would vanish on exactly that row. */
+                cairo_set_source_rgba(cr, thm->dim[0], thm->dim[1], thm->dim[2],
+                                      alpha * 0.5);
+                cairo_rectangle(cr, text_x, y + (TILE_H - THUMB_H) / 2.0,
+                                THUMB_W, THUMB_H);
+                cairo_fill(cr);
+            }
+        } else {
+            ensure_icon(l, app);
+        }
         if (app->icon_surf) {
             int iw = cairo_image_surface_get_width(app->icon_surf);
             int ih = cairo_image_surface_get_height(app->icon_surf);
+            cairo_save(cr);
             cairo_set_source_surface(cr, app->icon_surf,
-                                     text_x + (ICON_SZ - iw) / 2.0,
+                                     text_x + (art_w - iw) / 2.0,
                                      y + (TILE_H - ih) / 2.0);
             cairo_paint(cr);
+            cairo_restore(cr);
         }
-        text_x += ICON_SZ + 10.0; /* fixed text column, icon or not */
+        text_x += art_w + 10.0; /* fixed text column, art or not */
 
+        /* Names can be far wider than a tile (booru filenames carry their
+         * whole tag list), so ellipsize to the space left after the art. */
+        pango_layout_set_width(layout, (int)((x + l->tile_w - 12.0 - text_x) * PANGO_SCALE));
+        pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
         pango_layout_set_text(layout, app->name, -1);
         pango_layout_get_pixel_size(layout, &tw, &th);
         if (selected) {
-            cairo_set_source_rgb(cr, COL_TEXT[0], COL_TEXT[1], COL_TEXT[2]);
+            cairo_set_source_rgb(cr, thm->text[0], thm->text[1], thm->text[2]);
         } else {
-            cairo_set_source_rgb(cr, COL_MUTED[0], COL_MUTED[1], COL_MUTED[2]);
+            cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
         }
         cairo_move_to(cr, text_x, y + (TILE_H - th) / 2.0);
         pango_cairo_show_layout(cr, layout);
     }
 
+    /* Undo the per-tile ellipsis before anything else uses this layout. */
+    pango_layout_set_width(layout, -1);
+    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
+
     if (l->query[0] && l->match_count == 0) {
         pango_layout_set_text(layout, "nothing found", -1);
         pango_layout_get_pixel_size(layout, &tw, &th);
-        cairo_set_source_rgb(cr, COL_MUTED[0], COL_MUTED[1], COL_MUTED[2]);
+        cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
         cairo_move_to(cr, (l->bar_w - tw) / 2.0, BAR_H + BAR_GAP + 10.0);
         pango_cairo_show_layout(cr, layout);
     }
@@ -577,7 +719,13 @@ static void launcher_close(Launcher *l) {
 static void launcher_open(Launcher *l) {
     if (l->open) return;
     FwmServer *server = l->server;
-    if (!l->scanned) scan_apps(l);
+    if (l->mode == LMODE_WALLPAPERS) {
+        /* Rescanned on every open: the folder's contents are expected to
+         * change between openings, unlike the installed .desktop set. */
+        scan_wallpapers(l);
+    } else if (!l->scanned) {
+        scan_apps(l);
+    }
 
     l->bar_w = server->screen_width / 3;
     if (l->bar_w < 420) l->bar_w = 420;
@@ -611,7 +759,12 @@ static void launcher_open(Launcher *l) {
 
 Launcher *launcher_create(struct FwmServer *server) {
     Launcher *l = calloc(1, sizeof(*l));
-    if (l) l->server = server;
+    if (!l) return NULL;
+    l->server = server;
+    /* Shared by both modes, so it cannot live in scan_apps: the wallpaper
+     * picker never runs that and refilter() would write through NULL. */
+    l->match = calloc(MAX_APPS, sizeof(int));
+    if (!l->match) { free(l); return NULL; }
     return l;
 }
 
@@ -622,14 +775,34 @@ void launcher_destroy(Launcher *l) {
         if (l->apps[i].icon_surf) cairo_surface_destroy(l->apps[i].icon_surf);
     }
     free(l->apps);
+    for (int i = 0; i < l->wall_count; i++) {
+        if (l->walls[i].icon_surf) cairo_surface_destroy(l->walls[i].icon_surf);
+    }
+    free(l->walls);
     free(l->match);
     free(l);
 }
 
 void launcher_toggle(Launcher *l) {
+    launcher_toggle_mode(l, LMODE_APPS);
+}
+
+void launcher_toggle_wallpapers(Launcher *l) {
+    launcher_toggle_mode(l, LMODE_WALLPAPERS);
+}
+
+/* Toggling while the other mode is open switches to it rather than closing:
+ * hitting the wallpaper bind with the app launcher up should show wallpapers,
+ * not nothing. */
+void launcher_toggle_mode(Launcher *l, int mode) {
     if (!l) return;
+    if (l->open && l->mode == mode) {
+        launcher_close(l);
+        return;
+    }
     if (l->open) launcher_close(l);
-    else launcher_open(l);
+    l->mode = mode;
+    launcher_open(l);
 }
 
 bool launcher_is_open(Launcher *l) {
@@ -640,7 +813,12 @@ static void launch_selected(Launcher *l) {
     if (l->match_count == 0) return;
     int shown = l->match_count < MAX_SHOW ? l->match_count : MAX_SHOW;
     int sel = l->sel < shown ? l->sel : 0;
-    const LApp *app = &l->apps[l->match[sel]];
+    const LApp *app = &items(l)[l->match[sel]];
+
+    if (l->mode == LMODE_WALLPAPERS) {
+        server_set_wallpaper(l->server, app->exec);
+        return;
+    }
 
     char cmd[600];
     if (app->terminal) {
@@ -741,17 +919,34 @@ bool launcher_handle_button(Launcher *l, double lx, double ly, bool pressed) {
 void launcher_tick(Launcher *l, double dt) {
     if (!l || !l->open) return;
 
-    /* Fully settled and nothing changed -> skip the step and, above all, the
-     * per-tick reallocation + upload of the panel buffer. */
-    bool active = l->dirty;
-    for (int i = 0; i < l->tile_count && !active; i++) {
+    bool moving = false;
+    for (int i = 0; i < l->tile_count && !moving; i++) {
         b2Vec2 p = b2Body_GetPosition(l->tiles[i]);
         b2Vec2 v = b2Body_GetLinearVelocity(l->tiles[i]);
         if (fabs(m2px(p.y) - slot_cy(i)) > 0.5 || fabs(m2px(v.y)) > 2.0) {
-            active = true;
+            moving = true;
         }
     }
-    if (!active) return;
+
+    /* Wallpaper previews are decoded here rather than while drawing, one per
+     * frame, and only once the tiles have stopped moving: a single decode runs
+     * 15-200ms and would hitch the fly-in badly (the whole picker used to
+     * freeze ~600ms on its first frame). So the panel animates smoothly first,
+     * then previews fill in. */
+    if (!moving && l->mode == LMODE_WALLPAPERS) {
+        int shown = l->match_count < MAX_SHOW ? l->match_count : MAX_SHOW;
+        for (int i = 0; i < shown; i++) {
+            LApp *it = &items(l)[l->match[i]];
+            if (it->icon_tried) continue;
+            ensure_thumb(l, it);
+            l->dirty = true;   /* redraw to show it */
+            break;
+        }
+    }
+
+    /* Fully settled and nothing changed -> skip the step and, above all, the
+     * per-tick reallocation + upload of the panel buffer. */
+    if (!moving && !l->dirty) return;
     l->dirty = false;
 
     tiles_apply_springs(l);

@@ -2,8 +2,11 @@
 #include "view.h"
 #include "physics.h"
 #include "bsp.h"
+#include "theme.h"
+#include "layer.h"
 #include "ui/tray.h"
 #include "ui/hints.h"
+#include "ui/errors.h"
 #include "ui/welcome.h"
 #include "ui/launcher.h"
 #include "ui/cairo_overlay.h"
@@ -14,6 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <math.h>
 #include <wayland-server.h>
@@ -340,6 +344,30 @@ static void handle_keyboard_destroy(struct wl_listener *listener, void *data) {
     free(keyboard);
 }
 
+/* Build the keymap from [input] and hand it to one keyboard. Shared by device
+ * hotplug and config reload, so a reloaded layout reaches keyboards already
+ * attached. */
+static void keyboard_apply_input_config(FwmServer *server, struct wlr_keyboard *kb) {
+    struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    // [input] config: multiple layouts + a grp:* switch option give layout
+    // switching for free — xkb tracks the active group internally.
+    const InputConfig *in = &server->config.input;
+    struct xkb_rule_names rules = {
+        .layout  = in->kbd_layout[0]  ? in->kbd_layout  : NULL,
+        .variant = in->kbd_variant[0] ? in->kbd_variant : NULL,
+        .options = in->kbd_options[0] ? in->kbd_options : NULL,
+    };
+    struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, &rules, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (!keymap) {
+        wlr_log(WLR_ERROR, "bad [input] xkb config, falling back to environment");
+        keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    }
+    wlr_keyboard_set_keymap(kb, keymap);
+    xkb_keymap_unref(keymap);
+    xkb_context_unref(context);
+    wlr_keyboard_set_repeat_info(kb, in->repeat_rate, in->repeat_delay);
+}
+
 static void handle_new_input(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, new_input);
     struct wlr_input_device *device = data;
@@ -349,25 +377,7 @@ static void handle_new_input(struct wl_listener *listener, void *data) {
         keyboard->server = server;
         keyboard->wlr_keyboard = wlr_keyboard_from_input_device(device);
         
-        struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-        // [input] config: multiple layouts + a grp:* switch option give layout
-        // switching for free — xkb tracks the active group internally.
-        const InputConfig *in = &server->config.input;
-        struct xkb_rule_names rules = {
-            .layout  = in->kbd_layout[0]  ? in->kbd_layout  : NULL,
-            .variant = in->kbd_variant[0] ? in->kbd_variant : NULL,
-            .options = in->kbd_options[0] ? in->kbd_options : NULL,
-        };
-        struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, &rules, XKB_KEYMAP_COMPILE_NO_FLAGS);
-        if (!keymap) {
-            wlr_log(WLR_ERROR, "bad [input] xkb config, falling back to environment");
-            keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
-        }
-        wlr_keyboard_set_keymap(keyboard->wlr_keyboard, keymap);
-        xkb_keymap_unref(keymap);
-        xkb_context_unref(context);
-        wlr_keyboard_set_repeat_info(keyboard->wlr_keyboard,
-                                     in->repeat_rate, in->repeat_delay);
+        keyboard_apply_input_config(server, keyboard->wlr_keyboard);
         
         keyboard->modifiers.notify = handle_keyboard_modifiers;
         keyboard->key.notify = handle_keyboard_key;
@@ -390,9 +400,137 @@ static void handle_new_input(struct wl_listener *listener, void *data) {
     wlr_seat_set_capabilities(server->seat, caps);
 }
 
+
+/* Purely visual animations advance HERE, immediately before the scene is
+ * committed — NOT on the physics timer.
+ *
+ * The timer runs free at 60Hz while the output presents on its own vsync. Two
+ * unsynchronised 60Hz clocks beat against each other: some presented frames
+ * repeat the previous opacity step and others skip one, so a fade that is
+ * perfectly even in the log arrives on screen visibly uneven ("the brightness
+ * jumps"). Advancing from measured time at frame time gives every presented
+ * frame a correctly timed value.
+ *
+ * Called once per output frame; a second output in the same instant sees
+ * dt ~= 0 and changes nothing. */
+/* How far a window rises into place as it opens. */
+#define OPEN_RISE_PX 16.0
+
+static void server_animate(FwmServer *server) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (!server->last_anim.tv_sec && !server->last_anim.tv_nsec) {
+        server->last_anim = now;
+        return;
+    }
+    double dt = (double)(now.tv_sec - server->last_anim.tv_sec)
+              + (double)(now.tv_nsec - server->last_anim.tv_nsec) / 1e9;
+    if (dt <= 0.0) return;
+    /* After a stall (VT switch, a big image decode) do not teleport every
+     * animation to its end. */
+    if (dt > 0.25) dt = 0.25;
+    server->last_anim = now;
+
+    // Window open animation. The client's surface is never blended: it is
+    // hidden until it has content, then shown fully opaque while a cover rect
+    // we draw ourselves fades out over it and the window rises into place.
+    if (server->config.decor.fade_in_ms > 0.0) {
+        double step = dt * 1000.0 / server->config.decor.fade_in_ms;
+        FwmView *fv;
+        wl_list_for_each(fv, &server->views, link) {
+            if (!fv->open_anim || !fv->scene_tree) continue;
+
+            /* Waiting for the client's first real frame. Capped, so a client
+             * that draws once and never commits again still appears. */
+            if (fv->open_hold > 0) {
+                fv->open_hold_ms += dt * 1000.0;
+                if (fv->open_hold_ms < 150.0) continue;
+                fv->open_hold = 0;
+            }
+
+            /* First frame with content: reveal the window at full opacity and
+             * put the cover on top of it. */
+            if (!fv->open_cover) {
+                const FwmTheme *thm = theme_get();
+                float cover[4] = { (float)thm->pill[0], (float)thm->pill[1],
+                                   (float)thm->pill[2], 1.0f };
+                int cw = fv->width > 0 ? fv->width : 1;
+                int ch = fv->height > 0 ? fv->height : 1;
+                fv->open_cover = wlr_scene_rect_create(fv->scene_tree, cw, ch, cover);
+                if (!fv->open_cover) {   /* no cover: just show the window */
+                    fv->open_anim = 0;
+                    wlr_scene_node_set_enabled(&fv->scene_tree->node, true);
+                    continue;
+                }
+                wlr_scene_node_raise_to_top(&fv->open_cover->node);
+                wlr_scene_node_set_enabled(&fv->scene_tree->node, true);
+            }
+
+            fv->open_t += step;
+            int done = fv->open_t >= 1.0;
+            if (done) fv->open_t = 1.0;
+
+            double t = fv->open_t;
+            double e = t * t * (3.0 - 2.0 * t);   /* smoothstep */
+
+            /* Cover fades away; the window rises the last few px into place. */
+            const FwmTheme *thm = theme_get();
+            float a = (float)(1.0 - e);
+            float cover[4] = { (float)thm->pill[0] * a, (float)thm->pill[1] * a,
+                               (float)thm->pill[2] * a, a };
+            wlr_scene_rect_set_size(fv->open_cover,
+                                    fv->width > 0 ? fv->width : 1,
+                                    fv->height > 0 ? fv->height : 1);
+            wlr_scene_rect_set_color(fv->open_cover, cover);
+            wlr_scene_node_set_position(&fv->scene_tree->node,
+                                        fv->x - server->camera_x,
+                                        fv->y + (int)lround(OPEN_RISE_PX * (1.0 - e)));
+
+            if (done) {
+                wlr_scene_node_destroy(&fv->open_cover->node);
+                fv->open_cover = NULL;
+                fv->open_anim = 0;
+                wlr_scene_node_set_position(&fv->scene_tree->node,
+                                            fv->x - server->camera_x, fv->y);
+            }
+        }
+
+        // Window fade-out: ghost snapshots of closed windows ramp 1 -> 0
+        // over the same duration, then die (node destroyed, buffer released).
+        FwmGhost *g, *g_tmp;
+        wl_list_for_each_safe(g, g_tmp, &server->ghosts, link) {
+            g->t += step;
+            if (g->t >= 1.0) {
+                wlr_scene_node_destroy(&g->scene_buffer->node);
+                wlr_buffer_unlock(g->buffer);
+                wl_list_remove(&g->link);
+                free(g);
+                continue;
+            }
+            // Mirror of the fade-in, so closing feels like the reverse of
+            // opening rather than a different effect.
+            double gt = g->t;
+            double o = 1.0 - gt * gt * (3.0 - 2.0 * gt);
+            wlr_scene_buffer_set_opacity(g->scene_buffer, (float)o);
+            wlr_scene_node_set_position(&g->scene_buffer->node,
+                                        (int)lround(g->x) - server->camera_x, (int)lround(g->y));
+        }
+    }
+
+    // Panel appear animations (hints, errors, welcome).
+    cairo_overlay_tick(dt);
+
+    // Wallpaper cross-fade: drop the outgoing set once the new one is opaque.
+    if (server->wallpaper_prev && wallpaper_fade_tick(server->wallpaper, dt)) {
+        wallpaper_destroy(server->wallpaper_prev);
+        server->wallpaper_prev = NULL;
+    }
+}
+
 static void handle_output_frame(struct wl_listener *listener, void *data) {
     struct FwmOutput *output = wl_container_of(listener, output, frame);
     struct wlr_scene_output *scene_output = wlr_scene_get_scene_output(output->server->scene, output->wlr_output);
+    server_animate(output->server);
     wlr_scene_output_commit(scene_output, NULL);
     
     struct timespec now;
@@ -451,6 +589,35 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
         server_request_tray_redraw(server);
 
         server->welcome_buffer = welcome_show(server->layer_overlay, server->screen_width, server->screen_height, &server->config);
+
+        // A config so broken that the built-in binds had to stand in is worth
+        // explaining up front — the user's own keys will not work. Lesser
+        // problems only light up the tray pill.
+        if (server->config.fallback_binds && server->config.error_count > 0) {
+            server->errors_buffer = errors_show(server->layer_overlay, server->screen_width,
+                                                server->screen_height, &server->config);
+            server_request_tray_redraw(server);
+        }
+
+        // Debug: FWM_TEST_CAMERA=N parks the camera on desktop N at startup.
+        // Wallpaper panning and the desktop slide are otherwise only reachable
+        // through keybinds, which a nested test run cannot press.
+        const char *tc = getenv("FWM_TEST_CAMERA");
+        if (tc) {
+            int d = atoi(tc);
+            if (d < 0) d = 0;
+            if (d > 9) d = 9;
+            server->camera_x = d * server->screen_width;
+            server->target_camera_x = server->camera_x;
+            if (server->wallpaper) wallpaper_update(server->wallpaper, server->camera_x);
+        }
+
+        // Debug: FWM_OPEN_PICKER=1 opens the wallpaper picker at startup —
+        // same purpose as FWM_SHOW_HINTS, since a nested run has no way to
+        // press the bind.
+        if (getenv("FWM_OPEN_PICKER")) {
+            launcher_toggle_wallpapers(server->launcher);
+        }
 
         // Debug: FWM_SHOW_HINTS=1 opens the bind help at startup, so the
         // overlay can be checked in a nested run without a keyboard.
@@ -669,12 +836,18 @@ static void handle_new_xdg_popup(struct wl_listener *listener, void *data) {
     struct wlr_xdg_popup *popup = data;
 
     if (!popup->parent) return;
-    struct wlr_xdg_surface *parent = wlr_xdg_surface_try_from_wlr_surface(popup->parent);
     // parent->data is the parent's scene tree: set in view_map for toplevels
-    // and below for nested popups. NULL means the parent isn't mapped into
-    // the scene — nowhere to draw the popup.
-    if (!parent || !parent->data) return;
-    struct wlr_scene_tree *parent_tree = parent->data;
+    // and below for nested popups. A layer surface is not an xdg_surface, so
+    // layer.c stashes its popup tree on the wlr_surface instead.
+    struct wlr_scene_tree *parent_tree = NULL;
+    struct wlr_xdg_surface *parent = wlr_xdg_surface_try_from_wlr_surface(popup->parent);
+    if (parent && parent->data) {
+        parent_tree = parent->data;
+    } else if (popup->parent->data) {
+        parent_tree = popup->parent->data;
+    }
+    // NULL means the parent isn't mapped into the scene — nowhere to draw it.
+    if (!parent_tree) return;
 
     struct wlr_scene_tree *tree = wlr_scene_xdg_surface_create(parent_tree, popup->base);
     if (!tree) return;
@@ -869,6 +1042,20 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
                                event->state == WL_POINTER_BUTTON_STATE_PRESSED)) {
         launcher_grab_sync(server, l_was_open); /* click may have closed it */
         return; /* launcher consumed the click; nothing reaches clients */
+    }
+
+    // Config-error pill in the tray: toggles the detail panel. Handled before
+    // anything else so the click never reaches a window underneath.
+    if (event->state == WL_POINTER_BUTTON_STATE_PRESSED && event->button == BTN_LEFT &&
+        server->interactive.action == FWM_ACTION_NONE && server->tray_buffer &&
+        server->config.error_count > 0) {
+        double tx = server->cursor->x - server->tray_buffer->node.x;
+        double ty = server->cursor->y - server->tray_buffer->node.y;
+        if (tray_error_pill_hit(tx, ty)) {
+            server_dispatch_action(server, "show_errors");
+            server->group_click = 1; /* swallow the matching release */
+            return;
+        }
     }
 
     // Tab-stack bars: a left click on a tab switches the stack's window and
@@ -1150,42 +1337,6 @@ static int physics_tick_cb(void *data) {
         }
     }
 
-    // Window fade-in: ramp buffer opacity 0 -> 1 after map.
-    if (server->config.decor.fade_in_ms > 0.0) {
-        double step = dt * 1000.0 / server->config.decor.fade_in_ms;
-        FwmView *fv;
-        wl_list_for_each(fv, &server->views, link) {
-            if (!fv->fade_anim) continue;
-            fv->fade_t += step;
-            if (fv->fade_t >= 1.0) {
-                fv->fade_t = 1.0;
-                fv->fade_anim = 0;
-            }
-            // Ease-out: fast start, soft landing.
-            double t = fv->fade_t;
-            view_set_opacity(fv, 1.0 - (1.0 - t) * (1.0 - t));
-        }
-
-        // Window fade-out: ghost snapshots of closed windows ramp 1 -> 0
-        // over the same duration, then die (node destroyed, buffer released).
-        FwmGhost *g, *g_tmp;
-        wl_list_for_each_safe(g, g_tmp, &server->ghosts, link) {
-            g->t += step;
-            if (g->t >= 1.0) {
-                wlr_scene_node_destroy(&g->scene_buffer->node);
-                wlr_buffer_unlock(g->buffer);
-                wl_list_remove(&g->link);
-                free(g);
-                continue;
-            }
-            // Ease-in (mirror of the fade-in's ease-out): slow start, fast end.
-            double o = (1.0 - g->t) * (1.0 - g->t);
-            wlr_scene_buffer_set_opacity(g->scene_buffer, (float)o);
-            wlr_scene_node_set_position(&g->scene_buffer->node,
-                                        (int)lround(g->x) - server->camera_x, (int)lround(g->y));
-        }
-    }
-
     // Tab bars follow their window's width (resize/tiling glides).
     group_tick(server);
 
@@ -1195,7 +1346,7 @@ static int physics_tick_cb(void *data) {
     // Physics step
     physics_step(&server->physics, server->screen_width, server->screen_height,
                  drag_win, resize_win, dragged_win, dt);
-                 
+
     // Synchronize scene tree nodes to physics coordinates
     FwmView *view;
     wl_list_for_each(view, &server->views, link) {
@@ -1208,7 +1359,7 @@ static int physics_tick_cb(void *data) {
             }
         }
     }
-    
+
     // Hide the tray while a real-fullscreen window occupies the active desktop
     // (overlays outrank windows in the scene, so the surface can't cover it).
     // Fake fullscreen keeps the tray — that's its point. Checking every tick
@@ -1310,6 +1461,220 @@ static int tile_action_ctx(FwmServer *server, int *out_d, BspNode **out_leaf) {
     *out_d = d;
     *out_leaf = leaf;
     return 1;
+}
+
+static void server_config_path(char *buf, size_t cap) {
+    const char *home = getenv("HOME");
+    if (home) snprintf(buf, cap, "%s%s", home, FWM_CONFIG_PATH);
+    else      snprintf(buf, cap, ".config/fwm/config.toml");
+}
+
+/* Close the error panel if it is open; the caller decides whether to reopen it
+ * against the new config. */
+static void server_close_errors_panel(FwmServer *server) {
+    if (server->errors_buffer) {
+        cairo_overlay_destroy(server->errors_buffer);
+        server->errors_buffer = NULL;
+    }
+}
+
+/* ~/.local/state/fwm/wallpaper — the picker's choice, kept out of config.toml
+ * so the user's file (comments, formatting) is never rewritten by us. */
+static void server_state_path(char *buf, size_t cap) {
+    const char *state = getenv("XDG_STATE_HOME");
+    const char *home = getenv("HOME");
+    if (state && state[0]) snprintf(buf, cap, "%s/fwm/wallpaper", state);
+    else if (home)         snprintf(buf, cap, "%s/.local/state/fwm/wallpaper", home);
+    else                   snprintf(buf, cap, ".fwm-wallpaper");
+}
+
+static void server_state_save_wallpaper(const char *path) {
+    char sp[512];
+    server_state_path(sp, sizeof(sp));
+
+    /* mkdir -p of the parent, one component at a time. */
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s", sp);
+    char *slash = strrchr(dir, '/');
+    if (slash) {
+        *slash = '\0';
+        for (char *p = dir + 1; *p; p++) {
+            if (*p != '/') continue;
+            *p = '\0';
+            mkdir(dir, 0755);
+            *p = '/';
+        }
+        mkdir(dir, 0755);
+    }
+
+    FILE *f = fopen(sp, "w");
+    if (!f) {
+        wlr_log(WLR_ERROR, "cannot save wallpaper choice to %s", sp);
+        return;
+    }
+    fprintf(f, "%s\n", path);
+    fclose(f);
+}
+
+/* Apply the remembered wallpaper over the configured one. Called after every
+ * config load, so a reload keeps the picked image rather than snapping back. */
+static void server_state_apply_wallpaper(FwmServer *server) {
+    char sp[512];
+    server_state_path(sp, sizeof(sp));
+    FILE *f = fopen(sp, "r");
+    if (!f) return;
+
+    char line[512];
+    if (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = '\0';
+        /* A stale entry (image deleted since) must not blank the wallpaper —
+         * fall through to whatever the config says. */
+        if (line[0] && access(line, R_OK) == 0) {
+            if (server->config.wallpaper_count <= 0) {
+                WallpaperLayer *w = calloc(1, sizeof(WallpaperLayer));
+                if (w) {
+                    w->fit = WALLPAPER_FIT_COVER;
+                    server->config.wallpapers = w;
+                    server->config.wallpaper_count = 1;
+                }
+            }
+            if (server->config.wallpaper_count > 0)
+                snprintf(server->config.wallpapers[0].path,
+                         sizeof(server->config.wallpapers[0].path), "%s", line);
+        }
+    }
+    fclose(f);
+}
+
+void server_set_wallpaper(FwmServer *server, const char *path) {
+    if (!path || !path[0]) return;
+    if (access(path, R_OK) != 0) {
+        wlr_log(WLR_ERROR, "wallpaper '%s' is not readable", path);
+        return;
+    }
+
+    /* No [[wallpaper]] in the config: start one, keeping "cover" — a lone
+     * layer with pan semantics would scroll an image the user never asked to
+     * walk across. */
+    if (server->config.wallpaper_count <= 0) {
+        WallpaperLayer *w = calloc(1, sizeof(WallpaperLayer));
+        if (!w) return;
+        w->fit = WALLPAPER_FIT_COVER;
+        server->config.wallpapers = w;
+        server->config.wallpaper_count = 1;
+    }
+    /* Only the path changes: fit and zoom stay as configured, so a "pan"
+     * setup keeps panning with the new image. */
+    snprintf(server->config.wallpapers[0].path,
+             sizeof(server->config.wallpapers[0].path), "%s", path);
+
+    /* Cross-fade rather than cut: the outgoing set stays underneath (the new
+     * one is created later, so the scene draws it on top) until the fade ends.
+     * A swap still in flight is finished immediately, so rapid picking cannot
+     * pile up wallpapers. */
+    if (server->wallpaper_prev) {
+        wallpaper_destroy(server->wallpaper_prev);
+        server->wallpaper_prev = NULL;
+    }
+    server->wallpaper_prev = server->wallpaper;
+    server->wallpaper = wallpaper_create(server->layer_background, &server->config,
+                                         server->screen_width, server->screen_height);
+    if (server->wallpaper) {
+        wallpaper_update(server->wallpaper, server->camera_x);
+        if (server->wallpaper_prev) {
+            wallpaper_fade_in(server->wallpaper, server->config.decor.wallpaper_fade_ms);
+        }
+    }
+    if (!server->wallpaper || server->config.decor.wallpaper_fade_ms <= 0.0) {
+        if (server->wallpaper_prev) {
+            wallpaper_destroy(server->wallpaper_prev);
+            server->wallpaper_prev = NULL;
+        }
+    }
+
+    /* The palette may be derived from the image that just changed. */
+    theme_build(&server->config);
+    server_request_tray_redraw(server);
+
+    server_state_save_wallpaper(path);
+    wlr_log(WLR_INFO, "wallpaper set to %s", path);
+}
+
+void server_reload_config(FwmServer *server) {
+    /* Held-key repeat points into config.keys[].action, which is about to be
+     * freed — disarm it before the old config goes away. */
+    server->repeat_action = NULL;
+    server->repeat_keycode = 0;
+    if (server->key_repeat_timer) wl_event_source_timer_update(server->key_repeat_timer, 0);
+
+    /* Panels are rebuilt from the new config rather than patched. */
+    server_close_errors_panel(server);
+    if (server->hints_buffer) {
+        cairo_overlay_destroy(server->hints_buffer);
+        server->hints_buffer = NULL;
+    }
+
+    char path[512];
+    server_config_path(path, sizeof(path));
+    config_free(&server->config);
+    config_load(&server->config, path);
+    server_state_apply_wallpaper(server);
+    /* Before anything reads colours: a new wallpaper or color_source repaints
+     * the whole system. */
+    theme_build(&server->config);
+
+    /* Physics knobs are plain scalars on the live world. */
+    server->physics.friction              = server->config.physics.friction;
+    server->physics.mass_density          = server->config.physics.mass_density;
+    server->physics.throw_speed_multiplier = server->config.physics.throw_speed_multiplier;
+    server->physics.max_throw_speed       = server->config.physics.max_throw_speed;
+    server->physics.stop_speed_threshold  = server->config.physics.stop_speed_threshold;
+    server->physics.restitution           = server->config.physics.restitution;
+    server->physics.gravity               = server->config.physics.gravity;
+
+    /* Keyboards: layout/variant/options/repeat may all have changed. */
+    struct FwmKeyboard *kb;
+    wl_list_for_each(kb, &server->keyboards, link) {
+        keyboard_apply_input_config(server, kb->wlr_keyboard);
+    }
+
+    /* Borders: width and colours are read per view. */
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        view_update_border_geometry(view);
+        view_set_border_color(view, view == server->focused_view
+                                    ? theme_get()->border_active
+                                    : theme_get()->border_inactive);
+    }
+
+    /* Wallpaper layers are baked at load time, so rebuild them wholesale. */
+    if (server->wallpaper_prev) {
+        wallpaper_destroy(server->wallpaper_prev);
+        server->wallpaper_prev = NULL;
+    }
+    if (server->wallpaper) {
+        wallpaper_destroy(server->wallpaper);
+        server->wallpaper = NULL;
+    }
+    if (server->config.wallpaper_count > 0) {
+        server->wallpaper = wallpaper_create(server->layer_background, &server->config,
+                                             server->screen_width, server->screen_height);
+        if (server->wallpaper) wallpaper_update(server->wallpaper, server->camera_x);
+    }
+
+    /* New gaps / anim settings take effect on tiled desktops. */
+    for (int d = 0; d < 10; d++) {
+        if (server->desktop_mode[d] == DESKTOP_MODE_TILING) server_apply_tiling(server, d);
+    }
+
+    /* Surface whatever the new file got wrong straight away. */
+    if (server->config.error_count > 0) {
+        server->errors_buffer = errors_show(server->layer_overlay, server->screen_width,
+                                            server->screen_height, &server->config);
+    }
+    server_request_tray_redraw(server);
+    wlr_log(WLR_INFO, "config reloaded from %s (%d problem(s))",
+            path, server->config.error_total);
 }
 
 static void server_dispatch_action(FwmServer *server, const char *action) {
@@ -1422,6 +1787,20 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
         } else {
             server->hints_buffer = hints_show(server->layer_overlay, server->screen_width, server->screen_height, &server->config);
         }
+    } else if (strcmp(action, "wallpaper_picker") == 0) {
+        bool was_open = launcher_is_open(server->launcher);
+        launcher_toggle_wallpapers(server->launcher);
+        launcher_grab_sync(server, was_open);
+    } else if (strcmp(action, "reload_config") == 0) {
+        server_reload_config(server);
+    } else if (strcmp(action, "show_errors") == 0) {
+        if (server->errors_buffer) {
+            server_close_errors_panel(server);
+        } else {
+            server->errors_buffer = errors_show(server->layer_overlay, server->screen_width,
+                                                server->screen_height, &server->config);
+        }
+        server_request_tray_redraw(server);
     } else if (strcmp(action, "group_toggle") == 0) {
         FwmView *v = server->focused_view;
         if (v) {
@@ -1569,6 +1948,23 @@ bool server_init(FwmServer *server) {
     server->layer_background = wlr_scene_tree_create(&server->scene->tree);
     server->layer_windows = wlr_scene_tree_create(&server->scene->tree);
     server->layer_overlay = wlr_scene_tree_create(&server->scene->tree);
+
+    // Layer-shell trees are woven between ours. Creation order alone cannot
+    // express this (new trees always land on top), so place them explicitly:
+    // wallpaper < ls_background < ls_bottom < windows < ls_top < our overlays
+    // < ls_overlay. A layer-shell overlay therefore outranks even the tray,
+    // which is what clients like a screen locker or a menu expect.
+    server->ls_background = wlr_scene_tree_create(&server->scene->tree);
+    server->ls_bottom = wlr_scene_tree_create(&server->scene->tree);
+    server->ls_top = wlr_scene_tree_create(&server->scene->tree);
+    server->ls_overlay = wlr_scene_tree_create(&server->scene->tree);
+    wlr_scene_node_place_above(&server->ls_background->node, &server->layer_background->node);
+    wlr_scene_node_place_above(&server->ls_bottom->node, &server->ls_background->node);
+    wlr_scene_node_place_above(&server->layer_windows->node, &server->ls_bottom->node);
+    wlr_scene_node_place_above(&server->ls_top->node, &server->layer_windows->node);
+    wlr_scene_node_place_above(&server->layer_overlay->node, &server->ls_top->node);
+    wlr_scene_node_place_above(&server->ls_overlay->node, &server->layer_overlay->node);
+
     server->launcher = launcher_create(server);
 
     wl_list_init(&server->views);
@@ -1580,6 +1976,8 @@ bool server_init(FwmServer *server) {
     server->new_xdg_toplevel.notify = handle_new_xdg_toplevel;
     server->xdg_shell = wlr_xdg_shell_create(server->wl_display, 3); // xdg-shell v3/v6 depending on wlroots version (v3 is standard in 0.17+)
     wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
+    layer_shell_init(server);
+
     server->new_xdg_popup.notify = handle_new_xdg_popup;
     wl_signal_add(&server->xdg_shell->events.new_popup, &server->new_xdg_popup);
 
@@ -1641,13 +2039,11 @@ bool server_init(FwmServer *server) {
     
     // Load config
     char path[512];
-    const char *home = getenv("HOME");
-    if (home) {
-        snprintf(path, sizeof(path), "%s%s", home, FWM_CONFIG_PATH);
-    } else {
-        snprintf(path, sizeof(path), ".config/fwm/config.toml");
-    }
+    server_config_path(path, sizeof(path));
     config_load(&server->config, path);
+    server_state_apply_wallpaper(server);
+    // Palette for every overlay and window border; may sample the wallpaper.
+    theme_build(&server->config);
     
     // Init physics
     physics_init(&server->physics);
@@ -1702,6 +2098,8 @@ void server_destroy(FwmServer *server) {
     if (server->tray_buffer) cairo_overlay_destroy(server->tray_buffer);
     if (server->hints_buffer) cairo_overlay_destroy(server->hints_buffer);
     if (server->welcome_buffer) cairo_overlay_destroy(server->welcome_buffer);
+    if (server->errors_buffer) cairo_overlay_destroy(server->errors_buffer);
+    if (server->wallpaper_prev) wallpaper_destroy(server->wallpaper_prev);
     if (server->wallpaper) wallpaper_destroy(server->wallpaper);
     launcher_destroy(server->launcher);
     
@@ -1748,7 +2146,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
         if (pb) {
             pb->corner_mode = CORNER_ROUND;
         }
-        view_set_border_color(view, server->config.decor.col_active);
+        view_set_border_color(view, theme_get()->border_active);
     } else {
         wlr_seat_keyboard_clear_focus(server->seat);
     }
@@ -1760,7 +2158,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
             int d = pb->desktop_id;
             pb->corner_mode = (server->desktop_mode[d] == DESKTOP_MODE_PHYSICS) ? CORNER_CHAMFER : CORNER_SHARP;
         }
-        view_set_border_color(prev_focus, server->config.decor.col_inactive);
+        view_set_border_color(prev_focus, theme_get()->border_inactive);
     }
     
     server_request_tray_redraw(server);
@@ -1770,11 +2168,21 @@ void server_apply_tiling(FwmServer *server, int desktop) {
     int cx = desktop * server->screen_width;
     int gin  = server->config.tiling.gaps_in;
     int gout = server->config.tiling.gaps_out;
-    int top = TRAY_HEIGHT + gout;
-    int usable_h = server->screen_height - top - gout;
-    int usable_w = server->screen_width - gout * 2;
+    /* Start from the area layer-shell clients left us (a bar with an
+     * exclusive zone shrinks it), never letting tiles run under our own tray. */
+    struct wlr_box work = server->usable_area;
+    if (work.width <= 0 || work.height <= 0) {
+        work = (struct wlr_box){ 0, 0, server->screen_width, server->screen_height };
+    }
+    if (work.y < TRAY_HEIGHT) {
+        work.height -= TRAY_HEIGHT - work.y;
+        work.y = TRAY_HEIGHT;
+    }
+    int top = work.y + gout;
+    int usable_h = work.height - gout * 2;
+    int usable_w = work.width - gout * 2;
 
-    bsp_recalc(server->bsp_roots[desktop], cx + gout, top, usable_w, usable_h, gin);
+    bsp_recalc(server->bsp_roots[desktop], cx + work.x + gout, top, usable_w, usable_h, gin);
 
     BspNode *leaves[MAX_WINDOWS];
     int count = 0;
@@ -1901,10 +2309,16 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
         
         // Real fullscreen covers the whole output; fake fullscreen fills the
         // work area below the status bar so the tray stays visible.
-        int top = real ? 0 : (TRAY_HEIGHT + 20);
-        view->x = d * server->screen_width;
+        /* Fake fullscreen fills the work area: below our tray and clear of
+         * any layer-shell bar that reserved space. */
+        struct wlr_box work = server->usable_area;
+        if (work.width <= 0 || work.height <= 0) {
+            work = (struct wlr_box){ 0, 0, server->screen_width, server->screen_height };
+        }
+        int top = real ? 0 : (work.y > TRAY_HEIGHT + 20 ? work.y : TRAY_HEIGHT + 20);
+        view->x = d * server->screen_width + (real ? 0 : work.x);
         view->y = top;
-        view->width = server->screen_width;
+        view->width = real ? server->screen_width : work.width;
         view->height = server->screen_height - top;
         
         // Keep the physics body in sync with the fullscreen geometry, otherwise
@@ -1995,6 +2409,8 @@ void server_request_tray_redraw(FwmServer *server) {
     }
 
     data.opacity = server->config.decor.tray_opacity;
+    data.error_count = server->config.error_total;
+    data.error_expanded = server->errors_buffer != NULL;
     data.active_pos = (double)server->camera_x / server->screen_width;
     if (data.active_pos < 0.0) data.active_pos = 0.0;
     if (data.active_pos > 9.0) data.active_pos = 9.0;

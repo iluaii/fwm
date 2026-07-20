@@ -10,6 +10,16 @@ void cairo_overlay_update(struct wlr_scene_buffer *scene_buffer,
                           void (*draw_func)(cairo_t *cr, int w, int h, void *data), void *user_data);
 void cairo_overlay_destroy(struct wlr_scene_buffer *scene_buffer);
 
+/* Fade the overlay in while it rises `rise_px` into place, instead of simply
+ * appearing. Call AFTER positioning it: the current node position is taken as
+ * the resting one. Safe on a make_static'd overlay — this animates the scene
+ * node, it never redraws. */
+void cairo_overlay_animate_in(struct wlr_scene_buffer *scene_buffer,
+                              double duration_ms, double rise_px);
+
+/* Advance every running overlay animation. Call once per frame. */
+void cairo_overlay_tick(double dt);
+
 /* For overlays that are drawn once and never updated again (wallpaper layers,
  * welcome, hints): free the CPU-side pixel copy and keep only the GPU texture.
  * Do not call cairo_overlay_update() on the overlay afterwards. */

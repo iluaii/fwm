@@ -1,4 +1,5 @@
 #include "welcome.h"
+#include "../theme.h"
 #include "cairo_overlay.h"
 #include "logo.h"
 #include <stdio.h>
@@ -57,7 +58,8 @@ static void draw_welcome_content(cairo_t *cr, int w, int h, void *user_data) {
     double opacity = *(double *)user_data;
 
     // Same flat near-black as the tray islands, same opacity knob.
-    cairo_set_source_rgba(cr, 0.075, 0.082, 0.098, opacity);
+    const FwmTheme *thm = theme_get();
+    cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], opacity);
     panel_path(cr, 0, 0, w, h, WELCOME_CUT);
     cairo_fill(cr);
     
@@ -109,6 +111,7 @@ struct wlr_scene_buffer *welcome_show(struct wlr_scene_tree *parent, int screen_
         wlr_scene_node_set_position(&welcome_buf->node, wx, wy);
         cairo_overlay_update(welcome_buf, draw_welcome_content, &opacity);
         cairo_overlay_make_static(welcome_buf);
+        cairo_overlay_animate_in(welcome_buf, 240.0, 18.0);
     }
     return welcome_buf;
 }

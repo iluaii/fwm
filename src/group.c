@@ -5,14 +5,13 @@
 #include "bsp.h"
 #include "ui/cairo_overlay.h"
 #include <pango/pangocairo.h>
+#include "theme.h"
+
 #include <stdlib.h>
 #include <string.h>
 
-/* Tray-island look: flat near-black chevron pills, no gradients/outlines. */
-static const double COL_BG[3]     = {0.075, 0.082, 0.098};
-static const double COL_ACTIVE[3] = {0.92, 0.94, 0.96};
-static const double COL_MUTED[3]  = {0.56, 0.60, 0.67};
-static const double COL_GOLD[3]   = {0.816, 0.659, 0.173};
+/* Tray-island look: flat near-black chevron pills, no gradients/outlines.
+ * Colours come from the live theme so tab-stacks follow the system palette. */
 #define TAB_GAP 4.0
 
 static void pill_path(cairo_t *cr, double x, double y, double w, double h) {
@@ -37,6 +36,8 @@ static void draw_bar(cairo_t *cr, int w, int h, void *user) {
     FwmGroup *g = ctx->group;
     if (g->count <= 0) return;
 
+    const FwmTheme *thm = theme_get();
+
     double tab_w = ((double)w - TAB_GAP * (g->count - 1)) / g->count;
 
     PangoLayout *layout = pango_cairo_create_layout(cr);
@@ -48,7 +49,7 @@ static void draw_bar(cairo_t *cr, int w, int h, void *user) {
     for (int i = 0; i < g->count; i++) {
         double x = i * (tab_w + TAB_GAP);
 
-        cairo_set_source_rgba(cr, COL_BG[0], COL_BG[1], COL_BG[2], ctx->opacity);
+        cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], ctx->opacity);
         pill_path(cr, x, 0, tab_w, h - 3);
         cairo_fill(cr);
 
@@ -60,16 +61,16 @@ static void draw_bar(cairo_t *cr, int w, int h, void *user) {
         int tw, th;
         pango_layout_get_pixel_size(layout, &tw, &th);
         if (i == g->active) {
-            cairo_set_source_rgba(cr, COL_ACTIVE[0], COL_ACTIVE[1], COL_ACTIVE[2], 1.0);
+            cairo_set_source_rgba(cr, thm->text[0], thm->text[1], thm->text[2], 1.0);
         } else {
-            cairo_set_source_rgba(cr, COL_MUTED[0], COL_MUTED[1], COL_MUTED[2], 1.0);
+            cairo_set_source_rgba(cr, thm->muted[0], thm->muted[1], thm->muted[2], 1.0);
         }
         cairo_move_to(cr, x + (tab_w - tw) / 2.0, (h - 3 - th) / 2.0);
         pango_cairo_show_layout(cr, layout);
 
         // Active tab: gold underline bar, same accent as the tray marker.
         if (i == g->active) {
-            cairo_set_source_rgba(cr, COL_GOLD[0], COL_GOLD[1], COL_GOLD[2], 1.0);
+            cairo_set_source_rgba(cr, thm->accent[0], thm->accent[1], thm->accent[2], 1.0);
             cairo_rectangle(cr, x + tab_w / 2.0 - 10, h - 2, 20, 2);
             cairo_fill(cr);
         }

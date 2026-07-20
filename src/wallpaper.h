@@ -1,6 +1,7 @@
 #ifndef FWM_WALLPAPER_H
 #define FWM_WALLPAPER_H
 
+#include <stdbool.h>
 #include <wlr/types/wlr_scene.h>
 #include "config.h"
 
@@ -14,6 +15,14 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
 
 /* Reposition every layer for the current horizontal camera offset. */
 void wallpaper_update(FwmWallpaper *wp, int camera_x);
+
+/* Start the layers transparent and ramp them to opaque over `duration_ms`.
+ * The caller keeps the previous wallpaper alive underneath until
+ * wallpaper_fade_tick reports the fade finished. */
+void wallpaper_fade_in(FwmWallpaper *wp, double duration_ms);
+
+/* Advance a running cross-fade. Returns true on the frame it completes. */
+bool wallpaper_fade_tick(FwmWallpaper *wp, double dt);
 
 void wallpaper_destroy(FwmWallpaper *wp);
 

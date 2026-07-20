@@ -7,6 +7,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <wlr/util/log.h>
+
+/* `fit = "pan"` with no explicit zoom pans ONLY images wide enough to stick
+ * out past the screen on their own, at native scale with nothing cropped.
+ *
+ * Anything narrower can only be made to travel by zooming in, which pushes the
+ * height past the screen and eats the composition — for an image near the
+ * screen's own aspect that costs 25-40% of the height for a few hundred px of
+ * movement, which reads as "the picture is barely there". That trade is the
+ * user's to make per wallpaper, via [[wallpaper]] pan_crop (or zoom for exact
+ * control), so the default budget is zero. */
+#define PAN_MIN_TRAVEL  24    /* below this, movement is not worth any crop */
 
 /* Runtime layer. `slack` (= buffer_width - screen_width) is how far the layer can
  * scroll left before its right edge would enter view; `wallpaper_update` clamps
@@ -21,6 +33,11 @@ struct FwmWallpaper {
     struct WallpaperRT *layers;
     int count;
     int pan_range; /* camera_x span mapped to a full-slack traversal (all desktops) */
+
+    /* Cross-fade in, used when the picker swaps wallpapers at runtime: the
+     * outgoing set stays on screen underneath until this reaches 1. */
+    int    fading;
+    double fade_t, fade_ms;
 };
 
 struct DrawCtx {
@@ -148,22 +165,50 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
             contain = 1;                 // whole image, letterboxed, no pan
             break;
         case WALLPAPER_FIT_PAN:
-            // Walkable background: scale the image uniformly so its height
-            // exactly fills the screen, buffer width = the scaled image width;
-            // the width beyond screen_w becomes the pan travel. A positive
-            // zoom widens the render to `screen_w * zoom` for more travel at
-            // the cost of extra upscale (cover semantics fill that buffer).
+            // Walkable background. The buffer is wider than the screen and the
+            // overhang is the pan travel.
             if (layer->zoom > 0.0) {
+                // Explicit zoom always wins: the user asked for exactly this
+                // much travel and accepted the upscale that comes with it.
                 buf_w = (int)lround(screen_w * layer->zoom);
                 if (buf_w < screen_w) buf_w = screen_w;
             } else if (ih > 0) {
-                scale = (double)screen_h / ih;
-                buf_w = (int)lround(iw * scale);
-                if (buf_w < screen_w) {
-                    // Scaled image narrower than the screen: nothing to pan
-                    // across, fall back to cover so no edge is exposed.
+                // Auto. Fitting to screen height keeps the image at native
+                // scale, which is sharpest — but only wide images stick out
+                // past the screen that way. A 4:3-ish image fitted to a 16:9
+                // screen ends up NARROWER than the screen, and panning it was
+                // silently dropped, which just reads as "parallax is broken".
+                // So: pan at native scale when the image is wide enough,
+                // otherwise zoom in just enough to buy some travel, capped by
+                // an upscale budget so it never turns to mush.
+                double fit_scale = (double)screen_h / ih;
+                int fitted_w = (int)lround(iw * fit_scale);
+
+                if (fitted_w >= screen_w + PAN_MIN_TRAVEL) {
+                    buf_w = fitted_w;
+                    scale = fit_scale;   // native size, nothing cropped
+                } else if (layer->pan_crop > 0.0) {
+                    // Opted in: spend exactly the configured slice of height
+                    // and take whatever travel it buys.
+                    double max_scale = fit_scale / (1.0 - layer->pan_crop);
+                    buf_w = (int)lround(iw * max_scale);
+                    scale = 0.0;         // cover semantics fill the wider buffer
+                    if (buf_w < screen_w + PAN_MIN_TRAVEL) {
+                        buf_w = screen_w;
+                        wlr_log(WLR_INFO, "wallpaper layer %d: pan_crop %.2f still "
+                                "buys no travel for %dx%d on %dx%d — static fill",
+                                i + 1, layer->pan_crop, iw, ih, screen_w, screen_h);
+                    }
+                } else {
+                    // Not wide enough to pan and no crop allowed: show it whole
+                    // and still. Cropping it uninvited is what made the last
+                    // version unusable.
                     buf_w = screen_w;
                     scale = 0.0;
+                    wlr_log(WLR_INFO, "wallpaper layer %d: %dx%d is not wide enough "
+                            "to pan on %dx%d — static fill (set pan_crop or zoom "
+                            "to trade height for travel)", i + 1, iw, ih,
+                            screen_w, screen_h);
                 }
             }
             break;
@@ -183,6 +228,10 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
             int idx = wp->count++;
             wp->layers[idx].buffer = buf;
             wp->layers[idx].slack  = buf_w - screen_w;
+            wlr_log(WLR_INFO, "wallpaper layer %d: buffer %dpx, pan travel %dpx, "
+                    "height cropped %.0f%%", i + 1, buf_w, buf_w - screen_w,
+                    100.0 * (scale > 0.0 ? 0.0
+                             : 1.0 - (double)screen_h / ((double)ih * buf_w / iw)));
             wlr_scene_node_set_position(&buf->node, 0, 0);
         }
         cairo_surface_destroy(img);
@@ -210,6 +259,33 @@ void wallpaper_update(FwmWallpaper *wp, int camera_x) {
         int shift = (int)lround(l->slack * t);
         wlr_scene_node_set_position(&l->buffer->node, -shift, 0);
     }
+}
+
+void wallpaper_fade_in(FwmWallpaper *wp, double duration_ms) {
+    if (!wp || duration_ms <= 0.0) return;
+    wp->fading = 1;
+    wp->fade_t = 0.0;
+    wp->fade_ms = duration_ms;
+    for (int i = 0; i < wp->count; i++) {
+        wlr_scene_buffer_set_opacity(wp->layers[i].buffer, 0.0f);
+    }
+}
+
+bool wallpaper_fade_tick(FwmWallpaper *wp, double dt) {
+    if (!wp || !wp->fading) return false;
+    wp->fade_t += dt * 1000.0 / wp->fade_ms;
+    int done = wp->fade_t >= 1.0;
+    if (done) wp->fade_t = 1.0;
+
+    /* Smoothstep: no hard start or stop, which is what made the instant swap
+     * feel like a cut. */
+    double t = wp->fade_t;
+    double e = t * t * (3.0 - 2.0 * t);
+    for (int i = 0; i < wp->count; i++) {
+        wlr_scene_buffer_set_opacity(wp->layers[i].buffer, (float)e);
+    }
+    if (done) wp->fading = 0;
+    return done;
 }
 
 void wallpaper_destroy(FwmWallpaper *wp) {

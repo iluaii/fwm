@@ -121,14 +121,34 @@ anim_speed = 12.0    # tile glide speed (1/s); 0 = instant
 border_width = 2
 col_active   = "#7aa2f7"   # "#RRGGBB" or "#RRGGBBAA"
 col_inactive = "#3b4261"
-fade_in_ms   = 150.0       # window fade-in; 0 disables
+fade_in_ms   = 260.0       # window appear/close animation; 0 disables
+wallpaper_fade_ms = 420.0  # cross-fade on runtime wallpaper swap; 0 = cut
+# Where the UI palette comes from:
+#   "config"    — the colours above plus the built-in dark scheme (default)
+#   "wallpaper" — tint the tray/panels toward the wallpaper's dominant hue and
+#                 take the accent (focus border, desktop marker, tab underline)
+#                 from its most vivid colour. Islands stay dark, so text keeps
+#                 its contrast whatever the image looks like.
+color_source  = "config"
+tint_strength = 0.4        # 0..1: how far the islands move toward that hue
+
+# Where the built-in wallpaper picker (super+shift+p) looks for images.
+# The chosen image is remembered in ~/.local/state/fwm/wallpaper and overrides
+# the first [[wallpaper]] layer below on the next start — your config file is
+# never rewritten.
+[wallpaper_picker]
+dir = "~/Pictures"
 
 # Wallpaper layers, drawn back-to-front.
 # fit = "cover" (fill+crop) | "contain" (letterboxed) | "pan" (walk across)
 [[wallpaper]]
 path = "/path/to/image.png"
 fit  = "pan"
-# zoom = 1.5   # pan only: longer walk, slightly softer
+# "pan" moves only images wide enough to stick out past the screen at native
+# scale; those pan with nothing cropped. A narrower one is shown still, since
+# travel would have to be bought by cropping its height. Opt in per layer:
+# pan_crop = 0.25   # trade 25% of the height for some travel
+# zoom     = 1.6    # or set the render width directly (screen_w * zoom)
 
 [binds]
 "super+Return"       = "spawn:kitty"
@@ -145,6 +165,8 @@ fit  = "pan"
 "super+s"            = "toggle_split"
 "super+shift+c"      = "calm_all"
 "super+shift+question" = "show_hints"
+"super+shift+r"      = "reload_config"
+"super+shift+p"      = "wallpaper_picker"
 "super+shift+Escape" = "EXIT"
 "super+Left"         = "tile_focus:l"    # Right/Up/Down likewise
 "super+shift+Left"   = "tile_move:l"
@@ -166,6 +188,9 @@ fit  = "pan"
 | `toggle_split` | flip split orientation of the focused tile |
 | `pin_window`, `toggle_nocollide`, `calm_all`, `cycle_gravity` | physics toggles |
 | `show_hints` | keybind cheat-sheet overlay |
+| `reload_config` | re-read the config file and apply it without restarting |
+| `wallpaper_picker` | built-in wallpaper browser; Enter applies the image at once |
+| `show_errors` | open the config-problem panel (same as clicking the tray's ⚠ pill) |
 | `EXIT` | quit the compositor |
 
 ### Mouse

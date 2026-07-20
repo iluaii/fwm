@@ -1,4 +1,6 @@
 #include "cairo_overlay.h"
+
+#include <math.h>
 #include <stdlib.h>
 #include <wlr/interfaces/wlr_buffer.h>
 
@@ -26,7 +28,34 @@ struct CairoOverlayBuffer {
 struct CairoOverlayInfo {
     int width, height;
     struct wlr_buffer *current; /* held alive by one lock we own */
+
+    /* Appear animation, driven by cairo_overlay_tick. Purely scene-node work
+     * (opacity + position), so it costs nothing per frame and works on static
+     * overlays that can never be redrawn. */
+    int    anim;
+    double t, dur_ms, rise;
+    int    base_x, base_y;
+    struct wlr_scene_buffer *buf; /* the node being animated */
+    struct wl_list link;          /* g_anims, only while anim is set */
 };
+
+/* Overlays currently animating. A plain list: there are never more than a
+ * handful (hints, errors, welcome) on screen at once. */
+static struct wl_list g_anims;
+static int g_anims_ready = 0;
+
+static void anims_init(void) {
+    if (!g_anims_ready) {
+        wl_list_init(&g_anims);
+        g_anims_ready = 1;
+    }
+}
+
+static void anim_stop(struct CairoOverlayInfo *info) {
+    if (!info || !info->anim) return;
+    info->anim = 0;
+    wl_list_remove(&info->link);
+}
 
 static void overlay_buffer_destroy(struct wlr_buffer *wlr_buffer) {
     struct CairoOverlayBuffer *buffer = wl_container_of(wlr_buffer, buffer, base);
@@ -150,9 +179,51 @@ void cairo_overlay_make_static(struct wlr_scene_buffer *scene_buffer) {
     }
 }
 
+void cairo_overlay_animate_in(struct wlr_scene_buffer *scene_buffer,
+                              double duration_ms, double rise_px) {
+    if (!scene_buffer || duration_ms <= 0.0) return;
+    struct CairoOverlayInfo *info = scene_buffer->node.data;
+    if (!info) return;
+    anims_init();
+    anim_stop(info);
+
+    info->anim   = 1;
+    info->buf    = scene_buffer;
+    info->t      = 0.0;
+    info->dur_ms = duration_ms;
+    info->rise   = rise_px;
+    info->base_x = scene_buffer->node.x;
+    info->base_y = scene_buffer->node.y;
+
+    wlr_scene_buffer_set_opacity(scene_buffer, 0.0f);
+    wlr_scene_node_set_position(&scene_buffer->node, info->base_x,
+                                info->base_y + (int)lround(rise_px));
+    wl_list_insert(&g_anims, &info->link);
+}
+
+void cairo_overlay_tick(double dt) {
+    anims_init();
+    struct CairoOverlayInfo *info, *tmp;
+    wl_list_for_each_safe(info, tmp, &g_anims, link) {
+        info->t += dt * 1000.0 / info->dur_ms;
+        int done = info->t >= 1.0;
+        if (done) info->t = 1.0;
+
+        /* Cubic ease-out: quick to arrive, soft to settle. */
+        double e = 1.0 - pow(1.0 - info->t, 3.0);
+
+        wlr_scene_node_set_position(&info->buf->node, info->base_x,
+                                    info->base_y + (int)lround(info->rise * (1.0 - e)));
+        wlr_scene_buffer_set_opacity(info->buf, (float)e);
+
+        if (done) anim_stop(info);
+    }
+}
+
 void cairo_overlay_destroy(struct wlr_scene_buffer *scene_buffer) {
     if (!scene_buffer) return;
     struct CairoOverlayInfo *info = scene_buffer->node.data;
+    anim_stop(info);
     wlr_scene_node_destroy(&scene_buffer->node);
     if (info) {
         if (info->current) {

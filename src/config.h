@@ -43,10 +43,19 @@ typedef struct {
     float col_active[4];     /* RGBA 0..1, focused window */
     float col_inactive[4];   /* RGBA 0..1, unfocused windows */
     double fade_in_ms;       /* window fade-in duration; <= 0 disables */
+    double wallpaper_fade_ms;/* wallpaper cross-fade duration; <= 0 = instant cut */
     double tray_opacity;     /* island fill alpha 0..1 for the tray bar */
     double launcher_opacity; /* island fill alpha 0..1 for the app launcher */
     char   icon_theme[64];   /* launcher icon theme; "" = auto (gtk3 setting, then hicolor) */
+    int    color_source;     /* COLOR_SOURCE_* — where the UI palette comes from */
+    double tint_strength;    /* 0..1: how far the island fill moves toward the
+                              * wallpaper hue when color_source = wallpaper */
 } DecorConfig;
+
+enum {
+    COLOR_SOURCE_CONFIG    = 0, /* col_active/col_inactive + built-in dark scheme */
+    COLOR_SOURCE_WALLPAPER = 1, /* tint + accent derived from the wallpaper image */
+};
 
 /* ── input ───────────────────────────────────────────────────────────── */
 
@@ -101,10 +110,28 @@ enum {
 typedef struct {
     char   path[512];
     int    fit;    /* WALLPAPER_FIT_* */
+    double pan_crop; /* "pan" only, 0..0.9: how much of the image height may be
+                      * given up to buy pan travel when the image is not wide
+                      * enough to pan on its own. 0 (default) = never crop, so
+                      * only genuinely wide images move. */
     double zoom;   /* "pan" only: render width = screen_w * zoom; <= 0 = auto
                     * (image's native width — sharpest, no upscaling). Larger
                     * zoom = more travel but the image is scaled up (softer). */
 } WallpaperLayer;
+
+/* ── config diagnostics ──────────────────────────────────────────────── */
+
+/* A broken config must never leave the compositor unusable: config_load always
+ * produces a working FwmConfig (defaults, plus built-in binds when the file
+ * yielded none) and records what went wrong here. The tray surfaces the count
+ * as a clickable pill; the expanded panel lists these messages. */
+
+#define CONFIG_MAX_ERRORS 24
+#define CONFIG_ERR_LEN    200
+
+typedef struct {
+    char msg[CONFIG_ERR_LEN];
+} ConfigError;
 
 /* ── top-level config ────────────────────────────────────────────────── */
 
@@ -118,12 +145,27 @@ typedef struct {
     int             key_count;
     WallpaperLayer *wallpapers;
     int             wallpaper_count;
+    /* [wallpaper_picker] dir — where the built-in picker looks for images.
+     * "~" is expanded at load. */
+    char            wallpaper_dir[512];
+
+    /* diagnostics from the last config_load */
+    ConfigError     errors[CONFIG_MAX_ERRORS];
+    int             error_count;    /* messages stored in errors[] */
+    int             error_total;    /* problems seen (may exceed the stored cap) */
+    int             fallback_binds; /* built-in binds in use (file had none usable) */
+    char            source[512];    /* file this config was loaded from */
 } FwmConfig;
 
 /* ── api ─────────────────────────────────────────────────────────────── */
 
 void config_load(FwmConfig *cfg, const char *path);
 void config_free(FwmConfig *cfg);
+
+/* Record a config problem for the tray pill. Used by config.c itself and by
+ * consumers that only discover a mistake when they act on the value (e.g. the
+ * theme asking for wallpaper colours when no wallpaper is set). */
+void config_report_error(FwmConfig *cfg, const char *fmt, ...);
 
 #define FWM_CONFIG_PATH "/.config/fwm/config.toml"
 

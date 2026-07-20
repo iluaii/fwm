@@ -1,11 +1,14 @@
 #include "view.h"
+#include "theme.h"
 #include "server.h"
 #include "physics.h"
 #include "bsp.h"
 #include "group.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <time.h>
 #include <wlr/types/wlr_buffer.h>
+#include <wlr/util/log.h>
 
 static void handle_map(struct wl_listener *listener, void *data) {
     FwmView *view = wl_container_of(listener, view, map);
@@ -25,6 +28,11 @@ static void handle_commit(struct wl_listener *listener, void *data) {
     if (view->type == FWM_VIEW_XDG && view->xdg_toplevel->base->initial_commit) {
         wlr_xdg_toplevel_set_size(view->xdg_toplevel, 0, 0);
     }
+    // The mapping commit lands here immediately after view_map; the one after
+    // it is the first with content the client actually drew, which is when the
+    // fade may start.
+    if (view->open_hold > 0) view->open_hold--;
+
     // Track the actual committed surface size so borders hug the real window.
     view_update_border_geometry(view);
 
@@ -122,6 +130,9 @@ void view_update_border_geometry(FwmView *view) {
 
 void view_set_border_color(FwmView *view, const float color[4]) {
     if (!view->border[0]) return;
+
+    /* No fade compensation needed: during the open animation the window is
+     * either hidden entirely or fully opaque under our own cover rect. */
     for (int i = 0; i < 4; i++) {
         wlr_scene_rect_set_color(view->border[i], color);
     }
@@ -135,16 +146,6 @@ void view_set_border_enabled(FwmView *view, int enabled) {
 }
 
 /* ── fade-in ──────────────────────────────────────────────────────────── */
-
-static void set_opacity_iter(struct wlr_scene_buffer *buffer, int sx, int sy, void *user) {
-    (void)sx; (void)sy;
-    wlr_scene_buffer_set_opacity(buffer, *(double *)user > 1.0 ? 1.0f : (float)*(double *)user);
-}
-
-void view_set_opacity(FwmView *view, double opacity) {
-    if (!view->scene_tree) return;
-    wlr_scene_node_for_each_buffer(&view->scene_tree->node, set_opacity_iter, &opacity);
-}
 
 static void handle_destroy(struct wl_listener *listener, void *data) {
     FwmView *view = wl_container_of(listener, view, destroy);
@@ -362,15 +363,19 @@ void view_map(FwmView *view) {
     if (bw > 0) {
         for (int i = 0; i < 4; i++) {
             view->border[i] = wlr_scene_rect_create(view->scene_tree, 1, 1,
-                                                    view->server->config.decor.col_inactive);
+                                                    theme_get()->border_inactive);
         }
     }
 
-    // Fade-in from fully transparent.
+    // Open animation: hide the window outright until the client has painted
+    // something real. Disabling the node is absolute — unlike opacity 0 it
+    // cannot be undone by a new scene node appearing on a client commit.
     if (view->server->config.decor.fade_in_ms > 0.0) {
-        view->fade_anim = 1;
-        view->fade_t = 0.0;
-        view_set_opacity(view, 0.0);
+        view->open_anim = 1;
+        view->open_t = 0.0;
+        view->open_hold = 2;
+        view->open_hold_ms = 0.0;
+        wlr_scene_node_set_enabled(&view->scene_tree->node, false);
     }
 
     int initial_w, initial_h;
@@ -414,7 +419,13 @@ void view_map(FwmView *view) {
     } else {
         physics_push_overlapping(&view->server->physics, view->id, 300.0);
     }
-    
+
+    /* Focus, tiling and sizing above may have re-enabled or repositioned
+     * things; the window must stay hidden until its content is ready. */
+    if (view->open_anim && view->open_hold > 0) {
+        wlr_scene_node_set_enabled(&view->scene_tree->node, false);
+    }
+
     server_request_tray_redraw(view->server);
 }
 
@@ -479,9 +490,12 @@ void view_unmap(FwmView *view) {
         view->scene_tree = NULL;
         if (view->type == FWM_VIEW_XDG) view->xdg_toplevel->base->data = NULL;
     }
-    // Border rects were children of scene_tree — destroyed with it.
+    // Border rects and the open-animation cover were children of scene_tree —
+    // destroyed with it.
     for (int i = 0; i < 4; i++) view->border[i] = NULL;
-    view->fade_anim = 0;
+    view->open_cover = NULL;
+    view->open_anim = 0;
+    view->open_hold = 0;
 
     server_request_tray_redraw(view->server);
 }

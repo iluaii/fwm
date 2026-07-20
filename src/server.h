@@ -1,6 +1,8 @@
 #ifndef FWM_SERVER_H
 #define FWM_SERVER_H
 
+#include <time.h>
+#include <wlr/util/box.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/render/wlr_renderer.h>
@@ -77,10 +79,23 @@ typedef struct FwmServer {
     struct wlr_scene_tree *layer_background;
     struct wlr_scene_tree *layer_windows;
     struct wlr_scene_tree *layer_overlay;
+    /* wlr-layer-shell trees, interleaved with ours (bottom to top):
+     * wallpaper < ls_background < ls_bottom < windows < ls_top < our overlays
+     * < ls_overlay. See src/layer.h. */
+    struct wlr_scene_tree *ls_background;
+    struct wlr_scene_tree *ls_bottom;
+    struct wlr_scene_tree *ls_top;
+    struct wlr_scene_tree *ls_overlay;
     struct FwmWallpaper *wallpaper;
+    struct FwmWallpaper *wallpaper_prev; /* outgoing set, alive during a cross-fade */
     struct wlr_output_layout *output_layout;
     struct wlr_scene_output_layout *scene_layout;
     struct wlr_xdg_shell *xdg_shell;
+    struct wlr_layer_shell_v1 *layer_shell;
+    struct wl_listener new_layer_surface;
+    struct wl_list layer_surfaces;             /* FwmLayerSurface.link */
+    struct FwmLayerSurface *focused_layer;     /* owns the keyboard, if any */
+    struct wlr_box usable_area;                /* screen minus exclusive zones */
     struct wlr_compositor *compositor;
     struct wlr_xwayland *xwayland;
     
@@ -147,11 +162,13 @@ typedef struct FwmServer {
     FwmInteractiveState interactive;
     
     struct wl_event_source *physics_timer;
+    struct timespec last_anim; /* frame-time clock for visual animations */
     
     /* UI scene nodes */
     struct wlr_scene_buffer *tray_buffer;
     struct wlr_scene_buffer *hints_buffer;
     struct wlr_scene_buffer *welcome_buffer;
+    struct wlr_scene_buffer *errors_buffer; /* config-error detail panel */
     struct Launcher *launcher;
     
     int running;
@@ -171,5 +188,14 @@ void server_start_interactive_resize(FwmServer *server, struct FwmView *view, ui
  * fullscreen=false. */
 void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscreen, bool real);
 void server_request_tray_redraw(FwmServer *server);
+/* Re-read the config file and re-apply everything that can change at runtime
+ * (physics, decor, tiling, keymap, wallpaper, binds). Errors are reported
+ * through the tray pill, never by failing. */
+void server_reload_config(FwmServer *server);
+/* Swap the wallpaper at runtime: rebuilds the layers, recomputes the palette
+ * when [decor] color_source = "wallpaper", and remembers the choice in the
+ * state file so it survives a restart. Replaces the FIRST [[wallpaper]] layer;
+ * further parallax layers keep their images. */
+void server_set_wallpaper(FwmServer *server, const char *path);
 
 #endif /* FWM_SERVER_H */

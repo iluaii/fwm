@@ -49,9 +49,24 @@ typedef struct FwmView {
      * so they move with the window for free. NULL when borders are disabled. */
     struct wlr_scene_rect *border[4];
 
-    /* Map fade-in: opacity ramps 0 -> 1 over decor.fade_in_ms. */
-    int fade_anim;
-    double fade_t;
+    /* Open animation.
+     *
+     * The client's surface is NEVER blended at partial opacity: ramping it was
+     * tried and kept producing a visible flash at the start, because a client's
+     * first frames (blank, white, half-drawn) get composited mid-ramp. Instead:
+     *
+     *   1. the whole scene tree is DISABLED at map, so nothing shows at all;
+     *   2. `open_hold` counts commits until the client has painted real
+     *      content (commit #1 is the mapping commit itself);
+     *   3. the tree is then enabled fully opaque, and a solid cover rect that
+     *      we draw ourselves fades out over it while the window rises into
+     *      place. Everything that blends is ours, so a client frame can never
+     *      appear half-transparent. */
+    int open_anim;
+    double open_t;
+    int open_hold;
+    double open_hold_ms;
+    struct wlr_scene_rect *open_cover;
 
     /* Last committed buffer, kept locked so view_unmap can leave a fading
      * close-animation snapshot (FwmGhost) after the client buffer is gone. */
@@ -94,6 +109,5 @@ void view_set_border_color(FwmView *view, const float color[4]);
 void view_set_border_enabled(FwmView *view, int enabled);
 
 /* Set opacity (0..1) on every surface buffer of the view (fade-in). */
-void view_set_opacity(FwmView *view, double opacity);
 
 #endif /* FWM_VIEW_H */
