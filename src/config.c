@@ -46,7 +46,8 @@ static int action_is_known(const char *a) {
         "killclient", "toggle_tiling", "toggle_split", "EXIT", "show_hints",
         "show_errors", "reload_config", "wallpaper_picker", "group_toggle", "group_next",
         "group_prev", "group_add", "cycle_gravity", "pin_window",
-        "toggle_nocollide", "calm_all", "fake_fullscreen", "real_fullscreen",
+        "toggle_nocollide", "toggle_nocollide_all", "toggle_tiling_all",
+        "calm_all", "fake_fullscreen", "real_fullscreen",
         "launcher", NULL
     };
     static const char *prefixes[] = {

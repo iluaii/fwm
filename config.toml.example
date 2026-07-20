@@ -93,7 +93,8 @@ repeat_delay = 600
 # format: "mod+key" = "action"
 # mod keys: super, alt, shift, ctrl
 # system actions: killclient, toggle_tiling, fake_fullscreen, real_fullscreen,
-#                 pin_window, toggle_nocollide, calm_all, cycle_gravity,
+#                 pin_window, toggle_nocollide, toggle_nocollide_all,
+#                 toggle_tiling_all, calm_all, cycle_gravity,
 #                 show_hints, show_errors, reload_config,
 #                 wallpaper_picker, EXIT
 #
@@ -115,6 +116,10 @@ repeat_delay = 600
 "super+l"            = "move_camera:50"
 "super+p"            = "pin_window"
 "super+n"            = "toggle_nocollide"
+# Global versions: every window / every desktop at once, for when an app
+# launcher opens a pile of windows and toggling them one by one is hopeless.
+"super+shift+n"      = "toggle_nocollide_all"
+"super+shift+t"      = "toggle_tiling_all"
 "super+shift+c"      = "calm_all"
 "super+g"            = "cycle_gravity"
 "super+shift+Escape" = "EXIT"

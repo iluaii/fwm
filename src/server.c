@@ -115,6 +115,17 @@ static struct FwmView *view_at(FwmServer *server, double lx, double ly,
 }
 
 static void server_dispatch_action(FwmServer *server, const char *action);
+
+static int test_action_cb(void *data) {
+    FwmServer *server = data;
+    if (server->test_action) {
+        wlr_log(WLR_INFO, "FWM_TEST_ACTION: %s", server->test_action);
+        server_dispatch_action(server, server->test_action);
+        free(server->test_action);
+        server->test_action = NULL;
+    }
+    return 0;
+}
 static void drag_icon_update_position(FwmServer *server);
 static void server_shake_tick(FwmServer *server, double dt);
 static FwmView *server_find_view(FwmServer *server, uint32_t id);
@@ -676,6 +687,20 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
             server->camera_x = d * server->screen_width;
             server->target_camera_x = server->camera_x;
             if (server->wallpaper) wallpaper_update(server->wallpaper, server->camera_x);
+        }
+
+        // Debug: FWM_TEST_ACTION=<action> dispatches one action a second after
+        // startup. Key injection into a nested run is impossible, so this is
+        // the only way to exercise a bind's code path in a test.
+        const char *ta = getenv("FWM_TEST_ACTION");
+        if (ta) {
+            struct wl_event_loop *el = wl_display_get_event_loop(server->wl_display);
+            server->test_action = strdup(ta);
+            server->test_action_timer =
+                wl_event_loop_add_timer(el, test_action_cb, server);
+            if (server->test_action_timer) {
+                wl_event_source_timer_update(server->test_action_timer, 1500);
+            }
         }
 
         // Debug: FWM_TEST_GRAVITY=<scale> starts with gravity on. fwm boots in
@@ -2206,82 +2231,89 @@ void server_reload_config(FwmServer *server) {
             path, server->config.error_total);
 }
 
+/* Switch one desktop between physics and tiling. Extracted so the per-desktop
+ * bind and the all-desktops bind cannot drift apart — the restore path in
+ * particular (saved geometry, cleared tile state, the outward shove) is easy to
+ * get subtly wrong twice. */
+static void server_toggle_desktop_tiling(FwmServer *server, int d) {
+    if (server->desktop_mode[d] == DESKTOP_MODE_PHYSICS) {
+        server->desktop_mode[d] = DESKTOP_MODE_TILING;
+        
+        // Save state for physics
+        FwmView *view;
+        wl_list_for_each(view, &server->views, link) {
+            PhysicsBody *b = physics_find_body(&server->physics, view->id);
+            if (b && b->desktop_id == d) {
+                if (!b->tiling_saved) {
+                    b->sav_x = b->x; b->sav_y = b->y;
+                    b->sav_w = b->width; b->sav_h = b->height;
+                    b->tiling_saved = 1;
+                }
+            }
+        }
+        
+        bsp_free(server->bsp_roots[d]);
+        server->bsp_roots[d] = NULL;
+        
+        // Insert views to BSP tree
+        wl_list_for_each(view, &server->views, link) {
+            PhysicsBody *b = physics_find_body(&server->physics, view->id);
+            if (b && !b->shaped && !b->fullscreen && b->desktop_id == d) {
+                bsp_insert(&server->bsp_roots[d], 0, view->id);
+            }
+        }
+        server_apply_tiling(server, d);
+    } else {
+        server->desktop_mode[d] = DESKTOP_MODE_PHYSICS;
+        
+        // Restore physics coordinates
+        FwmView *view;
+        wl_list_for_each(view, &server->views, link) {
+            PhysicsBody *b = physics_find_body(&server->physics, view->id);
+            if (b && b->desktop_id == d) {
+                if (b->tiling_saved) {
+                    b->x = b->sav_x; b->y = b->sav_y;
+                    b->width = b->sav_w; b->height = b->sav_h;
+                    b->tiling_saved = 0;
+                } else {
+                    b->width = server->screen_width / 2;
+                    b->height = server->screen_height / 2;
+                    b->x = d * server->screen_width + (server->screen_width - b->width) / 2;
+                    b->y = (server->screen_height - b->height) / 2;
+                }
+                b->vx = 0; b->vy = 0; b->flying = 0;
+                b->tiled = 0;
+                view->tile_anim = 0;
+
+                view->x = b->x; view->y = b->y;
+                view->width = b->width; view->height = b->height;
+                view_set_size(view, view->width, view->height);
+                if (view->scene_tree) {
+                    wlr_scene_node_set_position(&view->scene_tree->node, (int)lround(view->x - server->camera_x), (int)lround(view->y));
+                }
+            }
+        }
+        
+        // Push views flying
+        wl_list_for_each(view, &server->views, link) {
+            PhysicsBody *b = physics_find_body(&server->physics, view->id);
+            if (b && b->desktop_id == d) {
+                double angle = ((double)(view->id % 628)) / 100.0;
+                b->vx = cos(angle) * 200.0;
+                b->vy = sin(angle) * 200.0;
+                b->flying = 1;
+            }
+        }
+    }
+}
+
 static void server_dispatch_action(FwmServer *server, const char *action) {
     if (strcmp(action, "killclient") == 0) {
         if (server->focused_view) {
             view_send_close(server->focused_view);
         }
     } else if (strcmp(action, "toggle_tiling") == 0) {
-        int d = server->target_camera_x / server->screen_width;
-        if (server->desktop_mode[d] == DESKTOP_MODE_PHYSICS) {
-            server->desktop_mode[d] = DESKTOP_MODE_TILING;
-            
-            // Save state for physics
-            FwmView *view;
-            wl_list_for_each(view, &server->views, link) {
-                PhysicsBody *b = physics_find_body(&server->physics, view->id);
-                if (b && b->desktop_id == d) {
-                    if (!b->tiling_saved) {
-                        b->sav_x = b->x; b->sav_y = b->y;
-                        b->sav_w = b->width; b->sav_h = b->height;
-                        b->tiling_saved = 1;
-                    }
-                }
-            }
-            
-            bsp_free(server->bsp_roots[d]);
-            server->bsp_roots[d] = NULL;
-            
-            // Insert views to BSP tree
-            wl_list_for_each(view, &server->views, link) {
-                PhysicsBody *b = physics_find_body(&server->physics, view->id);
-                if (b && !b->shaped && !b->fullscreen && b->desktop_id == d) {
-                    bsp_insert(&server->bsp_roots[d], 0, view->id);
-                }
-            }
-            server_apply_tiling(server, d);
-        } else {
-            server->desktop_mode[d] = DESKTOP_MODE_PHYSICS;
-            
-            // Restore physics coordinates
-            FwmView *view;
-            wl_list_for_each(view, &server->views, link) {
-                PhysicsBody *b = physics_find_body(&server->physics, view->id);
-                if (b && b->desktop_id == d) {
-                    if (b->tiling_saved) {
-                        b->x = b->sav_x; b->y = b->sav_y;
-                        b->width = b->sav_w; b->height = b->sav_h;
-                        b->tiling_saved = 0;
-                    } else {
-                        b->width = server->screen_width / 2;
-                        b->height = server->screen_height / 2;
-                        b->x = d * server->screen_width + (server->screen_width - b->width) / 2;
-                        b->y = (server->screen_height - b->height) / 2;
-                    }
-                    b->vx = 0; b->vy = 0; b->flying = 0;
-                    b->tiled = 0;
-                    view->tile_anim = 0;
-
-                    view->x = b->x; view->y = b->y;
-                    view->width = b->width; view->height = b->height;
-                    view_set_size(view, view->width, view->height);
-                    if (view->scene_tree) {
-                        wlr_scene_node_set_position(&view->scene_tree->node, (int)lround(view->x - server->camera_x), (int)lround(view->y));
-                    }
-                }
-            }
-            
-            // Push views flying
-            wl_list_for_each(view, &server->views, link) {
-                PhysicsBody *b = physics_find_body(&server->physics, view->id);
-                if (b && b->desktop_id == d) {
-                    double angle = ((double)(view->id % 628)) / 100.0;
-                    b->vx = cos(angle) * 200.0;
-                    b->vy = sin(angle) * 200.0;
-                    b->flying = 1;
-                }
-            }
-        }
+        server_toggle_desktop_tiling(server, server->target_camera_x / server->screen_width);
     } else if (strncmp(action, "tile_focus:", 11) == 0) {
         int d; BspNode *leaf;
         if (tile_action_ctx(server, &d, &leaf)) {
@@ -2377,6 +2409,32 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
         if (server->focused_view) {
             PhysicsBody *pb = physics_find_body(&server->physics, server->focused_view->id);
             if (pb) pb->no_collide ^= 1;
+        }
+    } else if (strcmp(action, "toggle_nocollide_all") == 0) {
+        /* For app launchers that spit out a pile of windows at once, where
+         * turning collision off one window at a time is hopeless. Uniform
+         * rather than per-window XOR: after any press every window is in the
+         * same state, which is the only predictable meaning of "all". */
+        int all_off = 1;
+        for (int i = 0; i < server->physics.body_count; i++) {
+            const PhysicsBody *b = &server->physics.bodies[i];
+            if (b->active && !b->no_collide) { all_off = 0; break; }
+        }
+        int want = all_off ? 0 : 1;
+        for (int i = 0; i < server->physics.body_count; i++) {
+            PhysicsBody *b = &server->physics.bodies[i];
+            if (b->active) b->no_collide = want;
+        }
+    } else if (strcmp(action, "toggle_tiling_all") == 0) {
+        /* Same rule: bring every desktop to one mode rather than flipping each
+         * independently. Tiling wins unless everything is already tiled. */
+        int all_tiled = 1;
+        for (int d = 0; d < 10; d++) {
+            if (server->desktop_mode[d] != DESKTOP_MODE_TILING) { all_tiled = 0; break; }
+        }
+        int want = all_tiled ? DESKTOP_MODE_PHYSICS : DESKTOP_MODE_TILING;
+        for (int d = 0; d < 10; d++) {
+            if (server->desktop_mode[d] != want) server_toggle_desktop_tiling(server, d);
         }
     } else if (strcmp(action, "calm_all") == 0) {
         for (int i = 0; i < server->physics.body_count; i++) {

@@ -79,6 +79,8 @@ static const char *action_label(const char *a, char *buf, size_t cap) {
         { "real_fullscreen",  "fullscreen" },
         { "pin_window",       "pin window" },
         { "toggle_nocollide", "toggle no-collide" },
+        { "toggle_nocollide_all", "no-collide: all windows" },
+        { "toggle_tiling_all", "tiling: all desktops" },
         { "calm_all",         "calm all windows" },
         { "cycle_gravity",    "cycle gravity" },
         { "toggle_split",     "flip split" },
