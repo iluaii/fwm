@@ -1724,7 +1724,15 @@ static void server_consume_impacts(FwmServer *server) {
     double want = 0.0;
     for (int i = 0; i < server->physics.impact_count; i++) {
         const PhysicsImpact *im = &server->physics.impacts[i];
+        /* A contact point sits ON the surface it hit, so a wall impact lands
+         * just OUTSIDE the play area: the right wall's inner face is at
+         * 10*screen_width, which divides to desktop 10 — a desktop that does
+         * not exist — and every hit against it was silently dropped. (The left
+         * wall only escaped because C truncates -2/1920 toward zero.) Clamp
+         * into the real range instead of trusting the division. */
         int impact_d = (int)(im->x / server->screen_width);
+        if (impact_d < 0) impact_d = 0;
+        if (impact_d > 9) impact_d = 9;
         if (impact_d != visible_d) continue;
 
         /* The normal points from A to B, so it faces the contact for A and
