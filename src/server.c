@@ -109,6 +109,7 @@ static struct FwmView *view_at(FwmServer *server, double lx, double ly,
 
 static void server_dispatch_action(FwmServer *server, const char *action);
 static void drag_icon_update_position(FwmServer *server);
+static void server_shake_tick(FwmServer *server, double dt);
 
 /* Any real user input resets the idle timers of ext-idle-notify clients
  * (swayidle and friends). Must be called from every input path, or the session
@@ -468,6 +469,8 @@ static void server_animate(FwmServer *server) {
      * animation to its end. */
     if (dt > 0.25) dt = 0.25;
     server->last_anim = now;
+
+    server_shake_tick(server, dt);
 
     // Window open animation. The client's surface is never blended: it is
     // hidden until it has content, then shown fully opaque while a cover rect
@@ -1419,6 +1422,66 @@ static void handle_seat_request_start_drag(struct wl_listener *listener, void *d
     }
 }
 
+/* Impacts only matter if the user can see them: a window landing on desktop 7
+ * must not shake the view of someone working on desktop 0. */
+#define SHAKE_MAX_PX      14.0
+#define SHAKE_FULL_SPEED  2000.0  /* px/s that produces a full-strength shake */
+#define SHAKE_DECAY       9.0     /* 1/s; ~0.3s until it dies out */
+
+static void server_consume_impacts(FwmServer *server) {
+    double strength = server->config.effects.camera_shake;
+    if (strength <= 0.0) { server->physics.impact_count = 0; return; }
+
+    int visible_d = (server->camera_x + server->screen_width / 2) / server->screen_width;
+    double want = 0.0;
+    for (int i = 0; i < server->physics.impact_count; i++) {
+        const PhysicsImpact *im = &server->physics.impacts[i];
+        int impact_d = (int)(im->x / server->screen_width);
+        if (impact_d != visible_d) continue;
+
+        double f = im->speed / SHAKE_FULL_SPEED;
+        if (f > 1.0) f = 1.0;
+        /* Squared so gentle bumps stay subtle and only real slams shake hard. */
+        double mag = strength * SHAKE_MAX_PX * f * f;
+        if (mag > want) want = mag;
+    }
+    /* Take the strongest impact of the frame rather than summing: three windows
+     * landing together should not triple the shake. */
+    if (want > server->shake_mag) {
+        server->shake_mag = want;
+        server->shake_t = 0.0;
+    }
+}
+
+/* Advanced at FRAME time, like the other purely visual ramps (see
+ * server_animate) — on the physics timer it would beat against vsync. */
+static void server_shake_tick(FwmServer *server, double dt) {
+    if (server->shake_mag <= 0.01) {
+        if (server->shake_mag != 0.0) {
+            server->shake_mag = 0.0;
+            if (server->layer_windows)
+                wlr_scene_node_set_position(&server->layer_windows->node, 0, 0);
+            if (server->layer_background)
+                wlr_scene_node_set_position(&server->layer_background->node, 0, 0);
+        }
+        return;
+    }
+    server->shake_t += dt;
+    server->shake_mag *= exp(-SHAKE_DECAY * dt);
+
+    /* Two different frequencies, or the offset would travel a straight
+     * diagonal instead of reading as a shake. */
+    int ox = (int)lround(server->shake_mag * sin(server->shake_t * 38.0));
+    int oy = (int)lround(server->shake_mag * sin(server->shake_t * 47.0 + 1.3));
+
+    /* Only the world shakes. The tray and panels stay put: UI jittering under
+     * the cursor reads as a glitch, not as impact. */
+    if (server->layer_windows)
+        wlr_scene_node_set_position(&server->layer_windows->node, ox, oy);
+    if (server->layer_background)
+        wlr_scene_node_set_position(&server->layer_background->node, ox, oy);
+}
+
 static int physics_tick_cb(void *data) {
     FwmServer *server = data;
     
@@ -1546,6 +1609,9 @@ static int physics_tick_cb(void *data) {
     // Physics step
     physics_step(&server->physics, server->screen_width, server->screen_height,
                  drag_win, resize_win, dragged_win, dt);
+
+    /* Impacts are only valid until the next step, so drain them here. */
+    server_consume_impacts(server);
 
     // Synchronize scene tree nodes to physics coordinates
     FwmView *view;

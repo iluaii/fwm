@@ -121,6 +121,9 @@ anim_speed = 12.0    # tile glide speed (1/s); 0 = instant
 anim_ms    = 350.0   # desktop-switch slide (ease-in-out); 0 = instant snap
 free_speed = 14.0    # how tightly the camera follows a held move_camera: bind
 
+[effects]
+camera_shake = 1.0   # jolt on hard impacts, scaled by speed; 0 disables
+
 [focus]
 # When an app asks to be raised (xdg-activation): "never" ignores it,
 # "same_desktop" (default) focuses it only if it is already on screen,

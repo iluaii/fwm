@@ -67,6 +67,13 @@ free_speed = 14.0
 [focus]
 on_activate = "same_desktop"
 
+# Impact effects. camera_shake jolts the wallpaper and windows when something
+# lands hard — the tray and panels never move, since jittering UI reads as a
+# glitch rather than as impact. Scales with collision speed, so gentle bumps
+# stay subtle. Set to 0 to switch it off entirely; 4 is the capped maximum.
+[effects]
+camera_shake = 1.0
+
 [input]
 # xkb keyboard: several layouts + a grp:* option = layout switching.
 # The FIRST layout must stay Latin so binds keep working on any layout.
@@ -108,6 +115,9 @@ repeat_delay = 600
 "super+shift+question" = "show_hints"
 "super+shift+r"      = "reload_config"
 "super+shift+p"      = "wallpaper_picker"
+# Lock the screen. fwm implements ext-session-lock-v1; the lock screen itself
+# is drawn by an external client (hyprlock, swaylock), so this is a plain spawn.
+"super+shift+l"      = "spawn:hyprlock"
 # Tiling control (Hyprland-style; only active on tiling desktops)
 "super+Left"         = "tile_focus:l"
 "super+Right"        = "tile_focus:r"

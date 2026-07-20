@@ -299,6 +299,16 @@ static void load_focus(toml_table_t *root, FocusConfig *f, FwmConfig *cfg) {
     free(d.u.s);
 }
 
+static void load_effects(toml_table_t *root, EffectsConfig *e) {
+    e->camera_shake = 1.0;
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "effects");
+    if (!tbl) return;
+    LOAD_DOUBLE(tbl, "camera_shake", e->camera_shake);
+    if (e->camera_shake < 0.0) e->camera_shake = 0.0;
+    if (e->camera_shake > 4.0) e->camera_shake = 4.0;  /* past this it is nausea */
+}
+
 /* ── binds section ───────────────────────────────────────────────────── */
 
 /* Built-in binds, installed whenever the config file yielded no usable ones
@@ -543,6 +553,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     snprintf(cfg->source, sizeof(cfg->source), "%s", path ? path : "");
     load_input(NULL, &cfg->input); /* defaults for the no-config-file path */
     load_focus(NULL, &cfg->focus, cfg);
+    load_effects(NULL, &cfg->effects);
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -573,6 +584,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_decor(root, cfg);
     load_input(root, &cfg->input);
     load_focus(root, &cfg->focus, cfg);
+    load_effects(root, &cfg->effects);
     load_binds(root, cfg);
     load_wallpaper(root, cfg);
     load_wallpaper_picker(root, cfg);

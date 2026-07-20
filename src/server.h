@@ -188,6 +188,11 @@ typedef struct FwmServer {
      * ever completed the slowest ~1% of an ease-in-out and then caught up in
      * one jump on release. Free pan chases the target exponentially instead. */
     int cam_free;
+    /* Impact shake. Deliberately a RENDER-ONLY offset applied to the world
+     * layer trees: camera_x must not move, because edge auto-scroll and the
+     * active-desktop test compare it against target_camera_x exactly. */
+    double shake_mag;   /* px; decays to 0 */
+    double shake_t;     /* seconds since the last impact, drives the oscillation */
     int screen_width;
     int screen_height;
     

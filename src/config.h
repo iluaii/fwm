@@ -84,6 +84,12 @@ typedef struct {
     FocusActivatePolicy on_activate;
 } FocusConfig;
 
+/* ── effects ─────────────────────────────────────────────────────────── */
+
+typedef struct {
+    double camera_shake;  /* impact shake strength; 0 disables, 1 = default */
+} EffectsConfig;
+
 /* ── binds ───────────────────────────────────────────────────────────── */
 
 /*
@@ -159,6 +165,7 @@ typedef struct {
     DecorConfig     decor;
     InputConfig     input;
     FocusConfig     focus;
+    EffectsConfig   effects;
     KeyBind        *keys;
     int             key_count;
     WallpaperLayer *wallpapers;

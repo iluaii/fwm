@@ -1,4 +1,5 @@
 #include "physics.h"
+#include "defines.h"
 
 #include <box2d/box2d.h>
 
@@ -115,6 +116,11 @@ void physics_init(PhysicsWorld *world) {
     // (default ~100 px/s) and shallow wall hits slide instead of bounce; too low
     // and bodies micro-bounce forever instead of settling with a dead "thud".
     wd.restitutionThreshold = px2m(40.0);
+    // Below this approach speed a contact produces no hit event. Set well above
+    // resting jitter so stacked windows do not emit a stream of tiny impacts,
+    // but low enough that a short drop still registers (a 200px fall under
+    // gravity 981 lands at ~630 px/s).
+    wd.hitEventThreshold = px2m(PHYSICS_HIT_MIN_SPEED);
     eng->world = b2CreateWorld(&wd);
     eng->walls_built = false;
 
@@ -342,6 +348,7 @@ static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w,
         // floor/wall actually grinds to a stop instead of gliding like on ice.
         // (The old "sticking" bug was the pull-back clamp, not this friction.)
         sd.material.friction = 0.35f;
+        sd.enableHitEvents = true;       // hitting the floor counts as an impact
         sd.filter = filter_for_wall();
         b2Polygon box = b2MakeBox(px2m(specs[i][2]), px2m(specs[i][3]));
         b2CreatePolygonShape(eng->walls[i], &sd, &box);
@@ -364,12 +371,16 @@ static void slot_create(struct Engine *eng, PhysicsWorld *world, int i, PhysicsB
     bd.linearDamping = eng->linear_damping;
     bd.isBullet = true;                  // continuous collision: never tunnel a wall
     bd.isAwake = true;
+    /* Carries the window id, so a hit event's shape resolves straight back to
+     * the mirror without searching the slot array. */
+    bd.userData = (void *)(uintptr_t)m->id;
     s->body = b2CreateBody(eng->world, &bd);
 
     b2ShapeDef sd = b2DefaultShapeDef();
     sd.density = 1.0f;
     sd.material.restitution = (float)world->restitution;
     sd.material.friction = 0.4f;
+    sd.enableHitEvents = true;           // impact effects (squash, shake, dust)
     sd.filter = filter_for(no_collide);
     b2Polygon box = b2MakeBox(px2m(m->width / 2.0), px2m(m->height / 2.0));
     s->shape = b2CreatePolygonShape(s->body, &sd, &box);
@@ -484,6 +495,24 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
 
     // --- Step ---------------------------------------------------------------
     b2World_Step(eng->world, (float)dt, 4);
+
+    // --- Collect impacts ----------------------------------------------------
+    // Refilled from scratch every step; consumers read world->impacts before
+    // the next one. A body's userData carries its window id, and walls have
+    // none, so a wall reads back as id 0.
+    world->impact_count = 0;
+    b2ContactEvents ev = b2World_GetContactEvents(eng->world);
+    for (int i = 0; i < ev.hitCount && world->impact_count < PHYSICS_MAX_IMPACTS; i++) {
+        const b2ContactHitEvent *h = &ev.hitEvents[i];
+        PhysicsImpact *im = &world->impacts[world->impact_count++];
+        im->id_a = (uint32_t)(uintptr_t)b2Body_GetUserData(b2Shape_GetBody(h->shapeIdA));
+        im->id_b = (uint32_t)(uintptr_t)b2Body_GetUserData(b2Shape_GetBody(h->shapeIdB));
+        im->x = m2px(h->point.x);
+        im->y = m2px(h->point.y);
+        im->nx = h->normal.x;
+        im->ny = h->normal.y;
+        im->speed = m2px(h->approachSpeed);
+    }
 
     // --- Pull Box2D -> mirror -----------------------------------------------
     for (int i = 0; i < world->body_count; i++) {

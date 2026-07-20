@@ -30,9 +30,24 @@ typedef struct {
     int corner_mode;
 } PhysicsBody;
 
+/* One collision hard enough to be worth reacting to, reported through the
+ * mirror so the compositor never has to talk to Box2D. Valid only until the
+ * next physics_step, which refills the list from scratch. */
+#define PHYSICS_MAX_IMPACTS 32
+
+typedef struct {
+    uint32_t id_a, id_b;   /* window ids; 0 means a play-area wall */
+    double x, y;           /* impact point, world px */
+    double nx, ny;         /* contact normal, pointing from A to B */
+    double speed;          /* approach speed, px/s — always positive */
+} PhysicsImpact;
+
 typedef struct {
     PhysicsBody bodies[MAX_WINDOWS];
     int body_count;
+
+    PhysicsImpact impacts[PHYSICS_MAX_IMPACTS];
+    int impact_count;
     double gravity_scale;
     
     /* Configurable physics parameters */
