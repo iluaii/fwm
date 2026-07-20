@@ -44,20 +44,29 @@ set(SOURCES
     src/ui/logo.c
 )
 
-# wlroots ships the layer-shell C header but not the generated protocol header
-# it includes, so produce it here. The XML is vendored in protocols/ to keep
-# the build independent of any local wlroots checkout.
+# wlroots ships the C headers for the wlr-* protocols but not the generated
+# protocol headers they include, so produce those here. The XMLs are vendored
+# in protocols/ to keep the build independent of any local wlroots checkout.
 find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
-set(LAYER_SHELL_HEADER ${CMAKE_BINARY_DIR}/wlr-layer-shell-unstable-v1-protocol.h)
-add_custom_command(
-    OUTPUT ${LAYER_SHELL_HEADER}
-    COMMAND ${WAYLAND_SCANNER} server-header
-            ${CMAKE_SOURCE_DIR}/protocols/wlr-layer-shell-unstable-v1.xml
-            ${LAYER_SHELL_HEADER}
-    DEPENDS ${CMAKE_SOURCE_DIR}/protocols/wlr-layer-shell-unstable-v1.xml
-    COMMENT "Generating wlr-layer-shell-unstable-v1 protocol header")
+set(WLR_PROTOCOLS
+    wlr-layer-shell-unstable-v1
+    wlr-output-power-management-unstable-v1
+    wlr-gamma-control-unstable-v1)
 
-add_executable(fwm-wayland ${SOURCES} ${LAYER_SHELL_HEADER})
+set(PROTOCOL_HEADERS "")
+foreach(proto ${WLR_PROTOCOLS})
+    set(header ${CMAKE_BINARY_DIR}/${proto}-protocol.h)
+    add_custom_command(
+        OUTPUT ${header}
+        COMMAND ${WAYLAND_SCANNER} server-header
+                ${CMAKE_SOURCE_DIR}/protocols/${proto}.xml
+                ${header}
+        DEPENDS ${CMAKE_SOURCE_DIR}/protocols/${proto}.xml
+        COMMENT "Generating ${proto} protocol header")
+    list(APPEND PROTOCOL_HEADERS ${header})
+endforeach()
+
+add_executable(fwm-wayland ${SOURCES} ${PROTOCOL_HEADERS})
 
 target_include_directories(fwm-wayland PRIVATE
         ${WAYLAND_SERVER_INCLUDE_DIRS}

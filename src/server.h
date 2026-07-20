@@ -137,6 +137,15 @@ typedef struct FwmServer {
 
     /* Idle: ext-idle-notify tells idle daemons (swayidle) when the user goes
      * quiet; idle-inhibit lets a client (a video player) suppress that. */
+    /* Display power (swayidle turning the screen off), gamma (wlsunset night
+     * light) and client-requested cursor shapes. */
+    struct wlr_output_power_manager_v1 *output_power;
+    struct wl_listener output_power_set_mode;
+    struct wlr_gamma_control_manager_v1 *gamma_control;
+    struct wl_listener gamma_set;
+    struct wlr_cursor_shape_manager_v1 *cursor_shape;
+    struct wl_listener cursor_shape_request;
+
     struct wlr_idle_notifier_v1 *idle_notifier;
     struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
     int idle_inhibited;                    /* last state pushed to the notifier */

@@ -27,6 +27,9 @@
 #include <wlr/types/wlr_data_device.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/types/wlr_idle_notify_v1.h>
+#include <wlr/types/wlr_output_power_management_v1.h>
+#include <wlr/types/wlr_gamma_control_v1.h>
+#include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/backend/session.h>
 #include <wlr/types/wlr_screencopy_v1.h>
@@ -1432,6 +1435,61 @@ static void idle_inhibit_refresh(FwmServer *server) {
     }
 }
 
+/* swayidle and friends turning the display off. Without this nothing can blank
+ * the screen: fwm has no idle blanking of its own and the physics tick keeps
+ * scheduling frames forever, so the monitor would stay lit indefinitely. */
+static void handle_output_power_set_mode(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, output_power_set_mode);
+    (void)server;
+    const struct wlr_output_power_v1_set_mode_event *event = data;
+    if (!event->output || !event->output->allocator) return;
+
+    struct wlr_output_state state;
+    wlr_output_state_init(&state);
+    wlr_output_state_set_enabled(&state, event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON);
+    wlr_output_commit_state(event->output, &state);
+    wlr_output_state_finish(&state);
+}
+
+/* wlsunset / gammastep. wlroots keeps the ramp; we only have to commit it. */
+static void handle_gamma_set(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, gamma_set);
+    const struct wlr_gamma_control_manager_v1_set_gamma_event *event = data;
+    if (!event->output) return;
+
+    struct wlr_gamma_control_v1 *control =
+        wlr_gamma_control_manager_v1_get_control(server->gamma_control, event->output);
+
+    struct wlr_output_state state;
+    wlr_output_state_init(&state);
+    if (!wlr_gamma_control_v1_apply(control, &state)) {
+        wlr_output_state_finish(&state);
+        return;
+    }
+    if (!wlr_output_commit_state(event->output, &state)) {
+        /* Tell the client its ramp was rejected rather than leaving it to
+         * believe a night-light filter is applied when it is not. */
+        wlr_gamma_control_v1_send_failed_and_destroy(control);
+    }
+    wlr_output_state_finish(&state);
+}
+
+/* cursor-shape-v1: clients name a cursor ("text", "grab") instead of supplying
+ * a surface. Older clients keep using wl_pointer.set_cursor, which still works. */
+static void handle_cursor_shape_request(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, cursor_shape_request);
+    const struct wlr_cursor_shape_manager_v1_request_set_shape_event *event = data;
+
+    /* Same rule as wl_pointer.set_cursor: only the client the pointer is
+     * actually over may change the cursor. */
+    struct wlr_seat_client *focused =
+        server->seat->pointer_state.focused_client;
+    if (event->seat_client != focused) return;
+
+    const char *name = wlr_cursor_shape_v1_name(event->shape);
+    if (name) wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, name);
+}
+
 static void handle_xdg_activation_request_activate(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, xdg_activation_request_activate);
     const struct wlr_xdg_activation_v1_request_activate_event *event = data;
@@ -2397,6 +2455,23 @@ bool server_init(FwmServer *server) {
     /* No listeners needed: the notifier is driven by server_notify_activity
      * from the input paths, and the inhibit manager keeps its own list, which
      * idle_inhibit_refresh polls each tick. */
+    server->output_power = wlr_output_power_manager_v1_create(server->wl_display);
+    if (server->output_power) {
+        server->output_power_set_mode.notify = handle_output_power_set_mode;
+        wl_signal_add(&server->output_power->events.set_mode, &server->output_power_set_mode);
+    }
+    server->gamma_control = wlr_gamma_control_manager_v1_create(server->wl_display);
+    if (server->gamma_control) {
+        server->gamma_set.notify = handle_gamma_set;
+        wl_signal_add(&server->gamma_control->events.set_gamma, &server->gamma_set);
+    }
+    server->cursor_shape = wlr_cursor_shape_manager_v1_create(server->wl_display, 1);
+    if (server->cursor_shape) {
+        server->cursor_shape_request.notify = handle_cursor_shape_request;
+        wl_signal_add(&server->cursor_shape->events.request_set_shape,
+                      &server->cursor_shape_request);
+    }
+
     server->idle_notifier = wlr_idle_notifier_v1_create(server->wl_display);
     server->idle_inhibit  = wlr_idle_inhibit_v1_create(server->wl_display);
     server->idle_inhibited = 0;
