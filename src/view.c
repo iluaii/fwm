@@ -10,7 +10,13 @@
 #include <time.h>
 #include <math.h>
 #include <wlr/types/wlr_buffer.h>
+#include <wlr/render/allocator.h>
+#include <wlr/render/drm_format_set.h>
+#include <wlr/render/pass.h>
+#include <wlr/render/wlr_renderer.h>
+#include <wlr/render/wlr_texture.h>
 #include <wlr/util/log.h>
+#include <drm_fourcc.h>
 
 static void handle_map(struct wl_listener *listener, void *data) {
     FwmView *view = wl_container_of(listener, view, map);
@@ -59,6 +65,115 @@ static void view_border_box(FwmView *view, int *w, int *h);
 #define SQUASH_BULGE  0.6    /* how much the perpendicular axis bulges */
 #define SQUASH_MAX_S  0.45   /* hard cap on deformation, both directions */
 
+/* ── composited snapshot of a window ──────────────────────────────────────
+ *
+ * Deforming `view->last_buffer` — the TOPLEVEL surface's buffer — is wrong for
+ * any client that paints through subsurfaces: their content lives in a
+ * different buffer entirely and is simply absent from the snapshot, while the
+ * toplevel's own ARGB alpha gets blended over the hole. That is why Firefox
+ * turned see-through during an impact and kitty (no subsurfaces) never did.
+ *
+ * So render the window's whole scene subtree into a buffer of our own, exactly
+ * as the compositor would draw it on screen, and deform THAT. All public
+ * wlroots API — no raw GLES, no scene-graph internals.
+ *
+ * (wlr_scene_node_snapshot does not exist in 0.20; if a future wlroots grows
+ * one, it replaces this wholesale.) */
+
+struct snapshot_ctx {
+    struct wlr_render_pass *pass;
+    struct wlr_renderer *renderer;
+    int origin_x, origin_y;      /* subtree's top-left in layout coords */
+};
+
+static void snapshot_add_buffer(struct wlr_scene_buffer *scene_buffer,
+                                int sx, int sy, void *data) {
+    struct snapshot_ctx *ctx = data;
+    if (!scene_buffer->buffer) return;
+
+    struct wlr_texture *tex = wlr_texture_from_buffer(ctx->renderer, scene_buffer->buffer);
+    if (!tex) return;
+
+    /* dest_size 0 means "use the buffer size", the same rule the scene follows. */
+    int w = scene_buffer->dst_width  ? scene_buffer->dst_width  : (int)tex->width;
+    int h = scene_buffer->dst_height ? scene_buffer->dst_height : (int)tex->height;
+
+    wlr_render_pass_add_texture(ctx->pass, &(struct wlr_render_texture_options){
+        .texture = tex,
+        .dst_box = { .x = sx - ctx->origin_x, .y = sy - ctx->origin_y,
+                     .width = w, .height = h },
+        .alpha = &scene_buffer->opacity,
+        .transform = scene_buffer->transform,
+        .blend_mode = WLR_RENDER_BLEND_MODE_PREMULTIPLIED,
+    });
+    wlr_texture_destroy(tex);
+}
+
+/* Returns a buffer holding the window as currently composited, or NULL. The
+ * caller owns the reference that wlr_allocator_create_buffer hands back. */
+static struct wlr_buffer *view_snapshot_content(FwmView *view) {
+    FwmServer *server = view->server;
+    if (!server->wlr_allocator || !server->wlr_renderer || !view->scene_tree) return NULL;
+
+    int w = view->width, h = view->height;
+    if (w <= 0 || h <= 0) return NULL;
+
+    /* The borders are our own nodes and must not be baked in — view_place_borders
+     * redraws them around the deformed box on every tick. */
+    bool border_was_enabled[4] = {false};
+    for (int i = 0; i < 4; i++) {
+        if (view->border[i]) {
+            border_was_enabled[i] = view->border[i]->node.enabled;
+            wlr_scene_node_set_enabled(&view->border[i]->node, false);
+        }
+    }
+
+    struct wlr_buffer *buf = NULL;
+    struct wlr_drm_format_set fmts = {0};
+    if (wlr_drm_format_set_add(&fmts, DRM_FORMAT_ARGB8888, DRM_FORMAT_MOD_INVALID)) {
+        const struct wlr_drm_format *fmt = wlr_drm_format_set_get(&fmts, DRM_FORMAT_ARGB8888);
+        if (fmt) buf = wlr_allocator_create_buffer(server->wlr_allocator, w, h, fmt);
+    }
+    wlr_drm_format_set_finish(&fmts);
+    if (!buf) goto restore;
+
+    struct wlr_render_pass *pass =
+        wlr_renderer_begin_buffer_pass(server->wlr_renderer, buf, NULL);
+    if (!pass) {
+        wlr_buffer_drop(buf);
+        buf = NULL;
+        goto restore;
+    }
+
+    /* Start from transparent: a window whose content does not cover the whole
+     * box must not pick up whatever the allocator handed us. */
+    wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
+        .box = { .x = 0, .y = 0, .width = w, .height = h },
+        .color = { .r = 0, .g = 0, .b = 0, .a = 0 },
+        .blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+    });
+
+    int lx = 0, ly = 0;
+    wlr_scene_node_coords(&view->scene_tree->node, &lx, &ly);
+    struct snapshot_ctx ctx = {
+        .pass = pass, .renderer = server->wlr_renderer,
+        .origin_x = lx, .origin_y = ly,
+    };
+    wlr_scene_node_for_each_buffer(&view->scene_tree->node, snapshot_add_buffer, &ctx);
+
+    if (!wlr_render_pass_submit(pass)) {
+        wlr_buffer_drop(buf);
+        buf = NULL;
+    }
+
+restore:
+    for (int i = 0; i < 4; i++) {
+        if (view->border[i])
+            wlr_scene_node_set_enabled(&view->border[i]->node, border_was_enabled[i]);
+    }
+    return buf;
+}
+
 /* Show or hide the live content while keeping the borders (and our snapshot)
  * visible: the borders are the only children we own besides squash_buf. */
 static void view_set_content_enabled(FwmView *view, bool enabled) {
@@ -104,14 +219,19 @@ void view_start_squash(FwmView *view, double nx, double ny, double amount) {
         return;
     }
 
-    /* Our own lock: view_unmap's close ghost may want the same buffer. */
-    view->squash_lock = wlr_buffer_lock(view->last_buffer);
-    view->squash_buf = wlr_scene_buffer_create(view->scene_tree, view->squash_lock);
+    /* A composite of the whole subtree, not the toplevel's raw buffer: see
+     * view_snapshot_content. We hold the reference the allocator gave us until
+     * the scene node has taken its own lock. */
+    struct wlr_buffer *snap = view_snapshot_content(view);
+    if (!snap) return;
+
+    view->squash_buf = wlr_scene_buffer_create(view->scene_tree, snap);
     if (!view->squash_buf) {
-        wlr_buffer_unlock(view->squash_lock);
-        view->squash_lock = NULL;
+        wlr_buffer_drop(snap);
         return;
     }
+    view->squash_lock = wlr_buffer_lock(snap);
+    wlr_buffer_drop(snap);
     /* Under the borders, so the frame still reads as the window's outline. */
     wlr_scene_node_lower_to_bottom(&view->squash_buf->node);
 
