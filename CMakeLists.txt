@@ -36,6 +36,7 @@ set(SOURCES
     src/view.c
     src/layer.c
     src/lock.c
+    src/foreign.c
     src/group.c
     src/server.c
     src/ui/cairo_overlay.c

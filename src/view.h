@@ -85,6 +85,13 @@ typedef struct FwmView {
     double squash_amount;             /* peak deformation, 0..1 */
     double squash_nx, squash_ny;      /* impact normal, points at the contact */
 
+    /* wlr-foreign-toplevel handle: this window as external panels see it
+     * (see foreign.h). NULL while unmapped. */
+    struct wlr_foreign_toplevel_handle_v1 *ftl;
+    struct wl_listener ftl_request_activate;
+    struct wl_listener ftl_request_close;
+    struct wl_listener ftl_request_fullscreen;
+
     /* Tab-stack membership; NULL when not grouped (see group.h). */
     struct FwmGroup *group;
 
@@ -107,6 +114,7 @@ void view_unmap(FwmView *view);
  * instead of poking xdg_toplevel directly (X11 views have no xdg_toplevel). */
 struct wlr_surface *view_surface(FwmView *view);
 const char *view_title(FwmView *view);
+const char *view_app_id(FwmView *view);
 void view_set_size(FwmView *view, int width, int height);
 void view_send_close(FwmView *view);
 void view_set_activated(FwmView *view, bool activated);

@@ -137,6 +137,9 @@ typedef struct FwmServer {
 
     /* Idle: ext-idle-notify tells idle daemons (swayidle) when the user goes
      * quiet; idle-inhibit lets a client (a video player) suppress that. */
+    /* Window list for external panels (waybar taskbar); see foreign.h. */
+    struct wlr_foreign_toplevel_manager_v1 *foreign_toplevel;
+
     /* Pointer capture: games and 3D viewports lock the cursor and steer from
      * raw deltas instead of its absolute position. */
     struct wlr_pointer_constraints_v1 *pointer_constraints;

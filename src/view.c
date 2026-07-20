@@ -4,6 +4,7 @@
 #include "physics.h"
 #include "bsp.h"
 #include "group.h"
+#include "foreign.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -173,6 +174,12 @@ const char *view_title(FwmView *view) {
                                       : view->xwl_surface->title;
 }
 
+/* X11's closest equivalent of an app id is the WM_CLASS class. */
+const char *view_app_id(FwmView *view) {
+    return view->type == FWM_VIEW_XDG ? view->xdg_toplevel->app_id
+                                      : view->xwl_surface->class;
+}
+
 void view_set_size(FwmView *view, int width, int height) {
     if (view->type == FWM_VIEW_XDG) {
         wlr_xdg_toplevel_set_size(view->xdg_toplevel, width, height);
@@ -304,6 +311,7 @@ static void handle_request_fullscreen(struct wl_listener *listener, void *data) 
 static void handle_set_title(struct wl_listener *listener, void *data) {
     FwmView *view = wl_container_of(listener, view, set_title);
     if (view->group) group_redraw(view->server, view->group);
+    foreign_view_title_changed(view);
     server_request_tray_redraw(view->server);
 }
 
@@ -537,8 +545,11 @@ void view_map(FwmView *view) {
         body->corner_mode = (view->server->desktop_mode[body->desktop_id] == DESKTOP_MODE_PHYSICS) ? CORNER_CHAMFER : CORNER_SHARP;
     }
     
+    /* Publish to external panels BEFORE focusing, so the activation state that
+     * server_focus_view pushes lands on an existing handle. */
+    foreign_view_map(view);
     server_focus_view(view->server, view);
-    
+
     int desktop = body ? body->desktop_id : current_desktop;
     if (view->server->desktop_mode[desktop] == DESKTOP_MODE_TILING) {
         bsp_insert(&view->server->bsp_roots[desktop], view->server->focused_view ? view->server->focused_view->id : 0, view->id);
@@ -557,6 +568,7 @@ void view_map(FwmView *view) {
 }
 
 void view_unmap(FwmView *view) {
+    foreign_view_unmap(view);
     /* Before anything else: the snapshot lives in scene_tree, which is about to
      * go, and it holds a buffer lock the close ghost may want back. */
     view_stop_squash(view);

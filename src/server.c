@@ -5,6 +5,7 @@
 #include "theme.h"
 #include "layer.h"
 #include "lock.h"
+#include "foreign.h"
 #include "ui/tray.h"
 #include "ui/hints.h"
 #include "ui/errors.h"
@@ -2482,6 +2483,7 @@ bool server_init(FwmServer *server) {
     wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
     layer_shell_init(server);
     lock_init(server);
+    foreign_init(server);
 
     server->new_xdg_popup.notify = handle_new_xdg_popup;
     wl_signal_add(&server->xdg_shell->events.new_popup, &server->new_xdg_popup);
@@ -2689,6 +2691,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
                 kbd->keycodes, kbd->num_keycodes, &kbd->modifiers);
         }
         view_set_activated(view, true);
+        foreign_view_set_activated(view, true);
         
         PhysicsBody *pb = physics_find_body(&server->physics, view->id);
         if (pb) {
@@ -2701,6 +2704,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
 
     if (prev_focus) {
         view_set_activated(prev_focus, false);
+        foreign_view_set_activated(prev_focus, false);
         PhysicsBody *pb = physics_find_body(&server->physics, prev_focus->id);
         if (pb) {
             int d = pb->desktop_id;
