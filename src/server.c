@@ -30,6 +30,8 @@
 #include <wlr/types/wlr_output_power_management_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
+#include <wlr/types/wlr_relative_pointer_v1.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/backend/session.h>
 #include <wlr/types/wlr_screencopy_v1.h>
@@ -114,6 +116,8 @@ static void server_dispatch_action(FwmServer *server, const char *action);
 static void drag_icon_update_position(FwmServer *server);
 static void server_shake_tick(FwmServer *server, double dt);
 static FwmView *server_find_view(FwmServer *server, uint32_t id);
+static FwmView *view_from_surface(FwmServer *server, struct wlr_surface *surface);
+static void constraints_follow_focus(FwmServer *server, struct wlr_surface *surface);
 
 /* Any real user input resets the idle timers of ext-idle-notify clients
  * (swayidle and friends). Must be called from every input path, or the session
@@ -929,6 +933,38 @@ static void handle_new_xdg_popup(struct wl_listener *listener, void *data) {
 static void handle_cursor_motion(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;
+
+    /* Relative motion goes out regardless of whether the cursor itself is
+     * allowed to move: a locked pointer is exactly the case where the client
+     * steers from deltas and the cursor must stay put. */
+    if (server->relative_pointer) {
+        wlr_relative_pointer_manager_v1_send_relative_motion(
+            server->relative_pointer, server->seat,
+            (uint64_t)event->time_msec * 1000, event->delta_x, event->delta_y,
+            event->unaccel_dx, event->unaccel_dy);
+    }
+
+    if (server->active_constraint && !lock_is_active(server)) {
+        if (server->active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+            /* Mouse-look: the cursor does not move at all. */
+            server_notify_activity(server);
+            return;
+        }
+        /* Confined: allow the move only while it stays inside the region. */
+        FwmView *cv = view_from_surface(server, server->active_constraint->surface);
+        if (cv) {
+            double nx = server->cursor->x + event->delta_x;
+            double ny = server->cursor->y + event->delta_y;
+            double sx = nx - (cv->x - server->camera_x);
+            double sy = ny - cv->y;
+            if (!pixman_region32_contains_point(&server->active_constraint->region,
+                                                (int)sx, (int)sy, NULL)) {
+                server_notify_activity(server);
+                return;
+            }
+        }
+    }
+
     wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
     
     // Process pointer movement
@@ -1081,12 +1117,14 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
             if (view) server_focus_view(server, view);
             wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
             wlr_seat_pointer_notify_motion(server->seat, event->time_msec, sx, sy);
+            constraints_follow_focus(server, surface);
         } else {
             // Over the empty background: no client owns the cursor, so restore
             // our default image (otherwise it keeps the last client's cursor or
             // none at all).
             wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
             wlr_seat_pointer_clear_focus(server->seat);
+            constraints_follow_focus(server, NULL);
         }
     }
 }
@@ -1432,6 +1470,56 @@ static void idle_inhibit_refresh(FwmServer *server) {
     if (inhibited != server->idle_inhibited) {
         wlr_idle_notifier_v1_set_inhibited(server->idle_notifier, inhibited != 0);
         server->idle_inhibited = inhibited;
+    }
+}
+
+/* ── pointer constraints ──────────────────────────────────────────────── */
+
+static void handle_constraint_destroy(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, constraint_destroy);
+    (void)data;
+    server->active_constraint = NULL;
+    wl_list_remove(&server->constraint_destroy.link);
+}
+
+/* A constraint may only hold the pointer while its surface actually has
+ * pointer focus, or a background window could capture the mouse forever. */
+static void constraint_set_active(FwmServer *server,
+                                  struct wlr_pointer_constraint_v1 *constraint) {
+    if (server->active_constraint == constraint) return;
+
+    if (server->active_constraint) {
+        wlr_pointer_constraint_v1_send_deactivated(server->active_constraint);
+        wl_list_remove(&server->constraint_destroy.link);
+        server->active_constraint = NULL;
+    }
+    if (constraint) {
+        server->active_constraint = constraint;
+        server->constraint_destroy.notify = handle_constraint_destroy;
+        wl_signal_add(&constraint->events.destroy, &server->constraint_destroy);
+        wlr_pointer_constraint_v1_send_activated(constraint);
+    }
+}
+
+/* Called whenever pointer focus may have changed. */
+static void constraints_follow_focus(FwmServer *server, struct wlr_surface *surface) {
+    if (!server->pointer_constraints) return;
+    struct wlr_pointer_constraint_v1 *found = NULL;
+    if (surface) {
+        found = wlr_pointer_constraints_v1_constraint_for_surface(
+            server->pointer_constraints, surface, server->seat);
+    }
+    constraint_set_active(server, found);
+}
+
+static void handle_new_pointer_constraint(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, new_pointer_constraint);
+    struct wlr_pointer_constraint_v1 *constraint = data;
+
+    /* Activate immediately when the pointer is already over the requesting
+     * surface — which is the normal case: a game grabs the mouse on click. */
+    if (server->seat->pointer_state.focused_surface == constraint->surface) {
+        constraint_set_active(server, constraint);
     }
 }
 
@@ -2455,6 +2543,14 @@ bool server_init(FwmServer *server) {
     /* No listeners needed: the notifier is driven by server_notify_activity
      * from the input paths, and the inhibit manager keeps its own list, which
      * idle_inhibit_refresh polls each tick. */
+    server->relative_pointer = wlr_relative_pointer_manager_v1_create(server->wl_display);
+    server->pointer_constraints = wlr_pointer_constraints_v1_create(server->wl_display);
+    if (server->pointer_constraints) {
+        server->new_pointer_constraint.notify = handle_new_pointer_constraint;
+        wl_signal_add(&server->pointer_constraints->events.new_constraint,
+                      &server->new_pointer_constraint);
+    }
+
     server->output_power = wlr_output_power_manager_v1_create(server->wl_display);
     if (server->output_power) {
         server->output_power_set_mode.notify = handle_output_power_set_mode;

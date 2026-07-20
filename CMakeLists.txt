@@ -19,6 +19,9 @@ pkg_check_modules(CAIRO REQUIRED cairo)
 pkg_check_modules(PANGO REQUIRED pango)
 pkg_check_modules(PANGOCAIRO REQUIRED pangocairo)
 pkg_check_modules(GDK_PIXBUF REQUIRED gdk-pixbuf-2.0)
+# Used directly for pointer-constraint regions (pixman_region32_contains_point);
+# wlroots exposes pixman types in its API but does not link it for us.
+pkg_check_modules(PIXMAN REQUIRED pixman-1)
 find_package(box2d REQUIRED)
 
 # List of source files
@@ -76,6 +79,7 @@ target_include_directories(fwm-wayland PRIVATE
         ${PANGO_INCLUDE_DIRS}
         ${PANGOCAIRO_INCLUDE_DIRS}
         ${GDK_PIXBUF_INCLUDE_DIRS}
+        ${PIXMAN_INCLUDE_DIRS}
         src
         ${CMAKE_BINARY_DIR}
         src/ui
@@ -88,6 +92,7 @@ target_link_libraries(fwm-wayland PRIVATE
         ${CAIRO_LIBRARIES}
         ${PANGO_LIBRARIES}
         ${PANGOCAIRO_LIBRARIES}
+        ${PIXMAN_LIBRARIES}
         ${GDK_PIXBUF_LIBRARIES}
         box2d::box2d
         m

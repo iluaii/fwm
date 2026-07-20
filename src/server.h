@@ -137,6 +137,14 @@ typedef struct FwmServer {
 
     /* Idle: ext-idle-notify tells idle daemons (swayidle) when the user goes
      * quiet; idle-inhibit lets a client (a video player) suppress that. */
+    /* Pointer capture: games and 3D viewports lock the cursor and steer from
+     * raw deltas instead of its absolute position. */
+    struct wlr_pointer_constraints_v1 *pointer_constraints;
+    struct wl_listener new_pointer_constraint;
+    struct wlr_relative_pointer_manager_v1 *relative_pointer;
+    struct wlr_pointer_constraint_v1 *active_constraint; /* NULL when free */
+    struct wl_listener constraint_destroy;
+
     /* Display power (swayidle turning the screen off), gamma (wlsunset night
      * light) and client-requested cursor shapes. */
     struct wlr_output_power_manager_v1 *output_power;
