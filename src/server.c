@@ -127,6 +127,15 @@ static void server_notify_activity(FwmServer *server) {
     if (server->idle_notifier) {
         wlr_idle_notifier_v1_notify_activity(server->idle_notifier, server->seat);
     }
+    /* Input may set something moving (a throw, a drag, a bind), so leave the
+     * idle heartbeat at once rather than waiting it out.
+     * ONLY on the idle->busy edge: re-arming the timer on every motion event
+     * would push its expiry out again each time, and a 1000Hz mouse would
+     * starve the tick completely. */
+    if (server->tick_idle && server->physics_timer) {
+        server->tick_idle = 0;
+        wl_event_source_timer_update(server->physics_timer, 1);
+    }
 }
 
 /* Only continuous navigation binds should auto-repeat while held. Repeating
@@ -1711,6 +1720,35 @@ static void server_shake_tick(FwmServer *server, double dt) {
         wlr_scene_node_set_position(&server->layer_background->node, ox, oy);
 }
 
+/* How long the compositor may sit without driving a frame itself. Not a
+ * refresh rate: client redraws and scene node moves damage the scene and
+ * wlr_scene schedules a frame off that damage, so this is only a heartbeat. */
+#define TICK_IDLE_MS 200
+
+/* Is anything actually moving? Everything listed here is driven by our timers
+ * rather than by client damage, so the frame loop must keep running for it.
+ * Err on the side of "yes": a false busy costs some idle wakeups, a false idle
+ * freezes an animation halfway. */
+static int server_is_busy(FwmServer *server) {
+    if (server->interactive.action != FWM_ACTION_NONE) return 1;
+    if (server->camera_x != server->target_camera_x || server->cam_anim) return 1;
+    if (server->shake_mag > 0.0) return 1;
+    if (server->wallpaper_prev) return 1;              /* wallpaper cross-fade */
+    if (!wl_list_empty(&server->ghosts)) return 1;     /* close animations */
+    if (launcher_is_open(server->launcher)) return 1;  /* spring tiles */
+    if (cairo_overlay_animating()) return 1;
+
+    for (int i = 0; i < server->physics.body_count; i++) {
+        const PhysicsBody *b = &server->physics.bodies[i];
+        if (b->active && b->flying) return 1;
+    }
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        if (v->open_anim || v->tile_anim || v->squash_buf) return 1;
+    }
+    return 0;
+}
+
 static int physics_tick_cb(void *data) {
     FwmServer *server = data;
     
@@ -1882,16 +1920,28 @@ static int physics_tick_cb(void *data) {
     // Parallax: shift each wallpaper layer by a fraction of the camera offset.
     wallpaper_update(server->wallpaper, server->camera_x);
 
-    // The physics timer drives all continuous updates (camera scroll, window
-    // motion, tray/overlay content). Scene damage alone does not keep the
-    // output's frame loop alive once it goes idle, so explicitly schedule a
-    // frame every tick to guarantee the compositor keeps presenting.
+    /* While anything is actually moving we drive the frame loop ourselves at
+     * the full tick rate. Once everything settles we drop to a slow heartbeat
+     * instead of spinning at 60Hz forever: client redraws and scene node moves
+     * damage the scene, and wlr_scene schedules a frame off that damage on its
+     * own, so nothing depends on us for those.
+     *
+     * The heartbeat is not just for the tray clock. It is the safety net that
+     * the old unconditional schedule used to provide: should any path ever
+     * change what is on screen without damaging the scene, the screen is stale
+     * for at most one beat instead of forever. */
+    int busy = server_is_busy(server);
     struct FwmOutput *output;
     wl_list_for_each(output, &server->outputs, link) {
         wlr_output_schedule_frame(output->wlr_output);
     }
 
-    wl_event_source_timer_update(server->physics_timer, (int)(1000.0 / PHYSICS_TICK_RATE));
+    /* physics_step always advances a FIXED 1/60 regardless of when we are
+     * called, so slowing the timer cannot hand Box2D an enormous dt — idle
+     * simply means nothing is moving for it to integrate. */
+    server->tick_idle = !busy;
+    wl_event_source_timer_update(server->physics_timer,
+                                 busy ? (int)(1000.0 / PHYSICS_TICK_RATE) : TICK_IDLE_MS);
     return 0;
 }
 

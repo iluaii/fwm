@@ -211,6 +211,7 @@ typedef struct FwmServer {
     /* Impact shake. Deliberately a RENDER-ONLY offset applied to the world
      * layer trees: camera_x must not move, because edge auto-scroll and the
      * active-desktop test compare it against target_camera_x exactly. */
+    int tick_idle;      /* physics timer is on the slow heartbeat */
     double shake_mag;   /* px; decays to 0 */
     double shake_t;     /* seconds since the last impact, drives the oscillation */
     int screen_width;

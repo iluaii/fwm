@@ -1,6 +1,7 @@
 #ifndef FWM_CAIRO_OVERLAY_H
 #define FWM_CAIRO_OVERLAY_H
 
+#include <stdbool.h>
 #include <cairo.h>
 #include <pango/pangocairo.h>
 #include <wlr/types/wlr_scene.h>
@@ -28,6 +29,10 @@ void cairo_overlay_animate_out(struct wlr_scene_buffer *scene_buffer,
 
 /* Advance every running overlay animation. Call once per frame. */
 void cairo_overlay_tick(double dt);
+
+/* True while any overlay animation is running, so the compositor knows it must
+ * keep driving the frame loop. */
+bool cairo_overlay_animating(void);
 
 /* For overlays that are drawn once and never updated again (wallpaper layers,
  * welcome, hints): free the CPU-side pixel copy and keep only the GPU texture.

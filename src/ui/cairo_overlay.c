@@ -242,6 +242,11 @@ void cairo_overlay_animate_out(struct wlr_scene_buffer *scene_buffer,
     wl_list_insert(&g_anims, &info->link);
 }
 
+bool cairo_overlay_animating(void) {
+    anims_init();
+    return !wl_list_empty(&g_anims);
+}
+
 void cairo_overlay_tick(double dt) {
     anims_init();
     struct CairoOverlayInfo *info, *tmp;
