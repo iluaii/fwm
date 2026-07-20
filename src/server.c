@@ -4,6 +4,7 @@
 #include "bsp.h"
 #include "theme.h"
 #include "layer.h"
+#include "lock.h"
 #include "ui/tray.h"
 #include "ui/hints.h"
 #include "ui/errors.h"
@@ -221,17 +222,17 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
 
     server_notify_activity(server);
     
-    // Handle overlays dismissal first
+    // VT switching (Ctrl+Alt+F1..F12): xkb maps the chord to XF86Switch_VT_*
+    // keysyms; only meaningful on the DRM backend where we own a session
+    // (nested backends have none). Checked before the lock gate below on
+    // purpose — switching VT leads to a login prompt on another TTY, not into
+    // this session, so it stays available while locked.
     if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         uint32_t keycode = event->keycode + 8;
         const xkb_keysym_t *syms;
         int num_syms = xkb_state_key_get_syms(keyboard->wlr_keyboard->xkb_state, keycode, &syms);
-
         for (int i = 0; i < num_syms; i++) {
             xkb_keysym_t sym = syms[i];
-            // VT switching (Ctrl+Alt+F1..F12): xkb maps the chord to
-            // XF86Switch_VT_* keysyms; only meaningful on the DRM backend
-            // where we own a session (nested backends have none).
             if (sym >= XKB_KEY_XF86Switch_VT_1 && sym <= XKB_KEY_XF86Switch_VT_12) {
                 if (server->session) {
                     wlr_session_change_vt(server->session,
@@ -241,6 +242,28 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
                     server->key_consumed[event->keycode] = 1;
                 return;
             }
+        }
+    }
+
+    /* Locked: the lock surface owns the keyboard. No binds, no launcher, no
+     * overlay shortcuts — a bind still firing here (spawn:kitty, EXIT,
+     * killclient) would defeat the lock outright. Forward straight to the seat,
+     * which is focused on the lock surface, so the password field gets keys. */
+    if (lock_is_active(server)) {
+        wlr_seat_set_keyboard(server->seat, keyboard->wlr_keyboard);
+        wlr_seat_keyboard_notify_key(server->seat, event->time_msec,
+                                     event->keycode, event->state);
+        return;
+    }
+
+    // Handle overlays dismissal first
+    if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        uint32_t keycode = event->keycode + 8;
+        const xkb_keysym_t *syms;
+        int num_syms = xkb_state_key_get_syms(keyboard->wlr_keyboard->xkb_state, keycode, &syms);
+
+        for (int i = 0; i < num_syms; i++) {
+            xkb_keysym_t sym = syms[i];
             if (sym == XKB_KEY_Escape || sym == XKB_KEY_Return) {
                 if (server->welcome_buffer) {
                     welcome_set_welcomed();
@@ -888,6 +911,7 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
     double ly = server->cursor->y;
 
     server_notify_activity(server);
+    if (lock_is_active(server)) return; /* nothing under the lock may be reached */
     drag_icon_update_position(server);
 
     // While the launcher is open the pointer belongs to it: hover moves the
@@ -1047,6 +1071,7 @@ static void handle_cursor_motion_absolute(struct wl_listener *listener, void *da
     struct wlr_pointer_motion_absolute_event *event = data;
     wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
     server_notify_activity(server);
+    if (lock_is_active(server)) return; /* nothing under the lock may be reached */
     drag_icon_update_position(server);
     if (launcher_is_open(server->launcher)) {
         launcher_handle_motion(server->launcher, server->cursor->x, server->cursor->y);
@@ -1060,6 +1085,7 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
     struct wlr_pointer_button_event *event = data;
 
     server_notify_activity(server);
+    if (lock_is_active(server)) return; /* no clicks reach anything under the lock */
 
     bool l_was_open = launcher_is_open(server->launcher);
     if (launcher_handle_button(server->launcher, server->cursor->x, server->cursor->y,
@@ -1244,6 +1270,7 @@ static void handle_cursor_axis(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_axis);
     struct wlr_pointer_axis_event *event = data;
     server_notify_activity(server);
+    if (lock_is_active(server)) return;
     wlr_seat_pointer_notify_axis(server->seat, event->time_msec, event->orientation, event->delta, event->delta_discrete, event->source, event->relative_direction);
 }
 
@@ -2141,6 +2168,12 @@ bool server_init(FwmServer *server) {
     wlr_scene_node_place_above(&server->ls_top->node, &server->layer_windows->node);
     wlr_scene_node_place_above(&server->layer_overlay->node, &server->ls_top->node);
     wlr_scene_node_place_above(&server->ls_overlay->node, &server->layer_overlay->node);
+    /* The lock screen outranks everything, including an external bar's overlay
+     * layer — nothing may be drawn over a locked session. Disabled until a
+     * lock actually engages. */
+    server->layer_lock = wlr_scene_tree_create(&server->scene->tree);
+    wlr_scene_node_place_above(&server->layer_lock->node, &server->ls_overlay->node);
+    wlr_scene_node_set_enabled(&server->layer_lock->node, false);
 
     server->launcher = launcher_create(server);
 
@@ -2154,6 +2187,7 @@ bool server_init(FwmServer *server) {
     server->xdg_shell = wlr_xdg_shell_create(server->wl_display, 3); // xdg-shell v3/v6 depending on wlroots version (v3 is standard in 0.17+)
     wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
     layer_shell_init(server);
+    lock_init(server);
 
     server->new_xdg_popup.notify = handle_new_xdg_popup;
     wl_signal_add(&server->xdg_shell->events.new_popup, &server->new_xdg_popup);

@@ -140,6 +140,18 @@ typedef struct FwmServer {
     struct wlr_idle_notifier_v1 *idle_notifier;
     struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
     int idle_inhibited;                    /* last state pushed to the notifier */
+
+    /* ext-session-lock-v1. `locked` stays set if the lock client dies, which
+     * is what keeps a crashed locker from becoming an unlock — see src/lock.h. */
+    struct wlr_session_lock_manager_v1 *lock_manager;
+    struct wlr_session_lock_v1 *lock;      /* NULL once the client is gone */
+    int locked;
+    struct wlr_scene_tree *layer_lock;     /* above everything, incl. ls_overlay */
+    struct wl_list lock_surfaces;          /* FwmLockSurface.link */
+    struct wl_listener new_lock;
+    struct wl_listener new_lock_surface;
+    struct wl_listener lock_unlock;
+    struct wl_listener lock_destroy;
     
     /* Keyboard input */
     struct wl_list keyboards;
