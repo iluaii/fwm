@@ -100,10 +100,13 @@ static struct FwmView *view_at(FwmServer *server, double lx, double ly,
     
     struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
     struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(scene_buffer);
-    if (!scene_surface) {
-        return NULL;
-    }
-    *surface = scene_surface->surface;
+    /* A buffer that is NOT a client surface is one of ours — during an impact
+     * squash the live surface is hidden and our snapshot is what the cursor
+     * lands on. Returning NULL here made the window inert for the ~250ms the
+     * effect ran: no focus, no super+drag, no resize. Fall through with a NULL
+     * surface instead, so the window is still grabbable; every caller already
+     * distinguishes "no view" from "view with nothing to send events to". */
+    *surface = scene_surface ? scene_surface->surface : NULL;
 
     // Walk up to find the tree node holding the FwmView (set in view_map)
     struct wlr_scene_tree *tree = node->parent;
@@ -1297,6 +1300,12 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         
         if (view) {
             server->last_touched_view = view;
+            /* Touching a window ends its impact squash: while one runs the
+             * live surface is hidden behind a snapshot, so without this the
+             * grabbed window would keep wobbling and stay unresponsive inside
+             * for the rest of the effect. The user taking hold of it outranks
+             * the animation. */
+            view_stop_squash(view);
             server_focus_view(server, view);
             physics_stop_body(&server->physics, view->id);
             
@@ -1692,7 +1701,7 @@ static void handle_seat_request_start_drag(struct wl_listener *listener, void *d
  * half of the range without touching the cap: 200 px/s -> 14%, 500 -> 22%,
  * 900+ -> the full 30%. */
 #define SQUASH_FULL_SPEED 900.0
-#define SQUASH_MAX_AMOUNT 0.30
+#define SQUASH_MAX_AMOUNT 0.24
 
 static void server_squash_from_impact(FwmServer *server, uint32_t id,
                                       double nx, double ny, double speed) {

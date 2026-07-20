@@ -60,9 +60,14 @@ static void view_border_box(FwmView *view, int *w, int *h);
 
 /* ── impact squash & stretch ──────────────────────────────────────────── */
 
-#define SQUASH_DECAY  11.0   /* 1/s */
-#define SQUASH_OMEGA  26.0   /* rad/s — roughly two visible wobbles */
-#define SQUASH_BULGE  0.6    /* how much the perpendicular axis bulges */
+/* Tuned for a single soft press rather than a jelly wobble (the user asked for
+ * "поспокойнее"). At omega 26 the window crossed its resting size 2-3 times
+ * with a -3.7% rebound, which reads as vibration; at 14 it compresses, returns
+ * once and is done, rebound about -1%. Keep omega well under the decay's reach
+ * or the wobble comes back. */
+#define SQUASH_DECAY  12.0   /* 1/s */
+#define SQUASH_OMEGA  14.0   /* rad/s — one compression, then rest */
+#define SQUASH_BULGE  0.45   /* how much the perpendicular axis bulges */
 #define SQUASH_MAX_S  0.45   /* hard cap on deformation, both directions */
 
 /* ── composited snapshot of a window ──────────────────────────────────────
