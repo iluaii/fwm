@@ -20,7 +20,6 @@
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
-#include "server_internal.h"
 
 /* Directional tile navigation: among the leaves of `desktop`, find the one
  * nearest to `from` in direction `dir` ('l','r','u','d'), judged by tile

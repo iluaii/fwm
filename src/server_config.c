@@ -21,7 +21,6 @@
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
-#include "server_internal.h"
 
 #include <stdlib.h>
 #include <stdio.h>

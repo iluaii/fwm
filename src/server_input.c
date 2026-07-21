@@ -19,7 +19,8 @@
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
-#include "server_internal.h"
+
+static int key_repeat_cb(void *data);
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -132,7 +133,7 @@ static void key_repeat_stop(FwmServer *server) {
     }
 }
 
-int key_repeat_cb(void *data) {
+static int key_repeat_cb(void *data) {
     FwmServer *server = data;
     if (server->repeat_l_active) {
         // Launcher repeat: only while it is still open (Enter/Escape/click
@@ -402,7 +403,7 @@ void keyboard_apply_input_config(FwmServer *server, struct wlr_keyboard *kb) {
     wlr_keyboard_set_repeat_info(kb, in->repeat_rate, in->repeat_delay);
 }
 
-void handle_new_input(struct wl_listener *listener, void *data) {
+static void handle_new_input(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, new_input);
     struct wlr_input_device *device = data;
     
@@ -432,4 +433,16 @@ void handle_new_input(struct wl_listener *listener, void *data) {
         caps |= WL_SEAT_CAPABILITY_KEYBOARD;
     }
     wlr_seat_set_capabilities(server->seat, caps);
+}
+
+
+/* Called once from server_init(). Key repeat is driven entirely from this
+ * file, so the timer is created here too; it stays disarmed until a bind that
+ * repeats is actually held. */
+void server_input_register(FwmServer *server) {
+    server->new_input.notify = handle_new_input;
+    wl_signal_add(&server->wlr_backend->events.new_input, &server->new_input);
+
+    server->key_repeat_timer = wl_event_loop_add_timer(
+        wl_display_get_event_loop(server->wl_display), key_repeat_cb, server);
 }

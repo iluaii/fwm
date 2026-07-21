@@ -20,7 +20,6 @@
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
-#include "server_internal.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -62,6 +61,17 @@
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
 #include "server_internal.h"
+
+static int test_action_cb(void *data) {
+    FwmServer *server = data;
+    if (server->test_action) {
+        wlr_log(WLR_INFO, "FWM_TEST_ACTION: %s", server->test_action);
+        server_dispatch_action(server, server->test_action);
+        free(server->test_action);
+        server->test_action = NULL;
+    }
+    return 0;
+}
 
 /* Purely visual animations advance HERE, immediately before the scene is
  * committed — NOT on the physics timer.
@@ -220,7 +230,7 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
     free(output);
 }
 
-void handle_new_output(struct wl_listener *listener, void *data) {
+static void handle_new_output(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, new_output);
     struct wlr_output *wlr_output = data;
     
@@ -339,7 +349,7 @@ void handle_new_output(struct wl_listener *listener, void *data) {
 /* swayidle and friends turning the display off. Without this nothing can blank
  * the screen: fwm has no idle blanking of its own and the physics tick keeps
  * scheduling frames forever, so the monitor would stay lit indefinitely. */
-void handle_output_power_set_mode(struct wl_listener *listener, void *data) {
+static void handle_output_power_set_mode(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, output_power_set_mode);
     (void)server;
     const struct wlr_output_power_v1_set_mode_event *event = data;
@@ -350,4 +360,16 @@ void handle_output_power_set_mode(struct wl_listener *listener, void *data) {
     wlr_output_state_set_enabled(&state, event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON);
     wlr_output_commit_state(event->output, &state);
     wlr_output_state_finish(&state);
+}
+
+
+/* Called once from server_init(). */
+void server_output_register(FwmServer *server) {
+    server->new_output.notify = handle_new_output;
+    wl_signal_add(&server->wlr_backend->events.new_output, &server->new_output);
+
+    if (server->output_power) {
+        server->output_power_set_mode.notify = handle_output_power_set_mode;
+        wl_signal_add(&server->output_power->events.set_mode, &server->output_power_set_mode);
+    }
 }

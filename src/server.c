@@ -77,16 +77,6 @@ static int handle_signal(int signal, void *data) {
     return 0;
 }
 
-int test_action_cb(void *data) {
-    FwmServer *server = data;
-    if (server->test_action) {
-        wlr_log(WLR_INFO, "FWM_TEST_ACTION: %s", server->test_action);
-        server_dispatch_action(server, server->test_action);
-        free(server->test_action);
-        server->test_action = NULL;
-    }
-    return 0;
-}
 
 
 struct FwmDecoration {
@@ -613,23 +603,11 @@ bool server_init(FwmServer *server) {
     wl_list_init(&server->outputs);
     wl_list_init(&server->keyboards);
     
-    server->new_xdg_toplevel.notify = handle_new_xdg_toplevel;
     server->xdg_shell = wlr_xdg_shell_create(server->wl_display, 3); // xdg-shell v3/v6 depending on wlroots version (v3 is standard in 0.17+)
-    wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
     layer_shell_init(server);
     lock_init(server);
     foreign_init(server);
 
-    server->new_xdg_popup.notify = handle_new_xdg_popup;
-    wl_signal_add(&server->xdg_shell->events.new_popup, &server->new_xdg_popup);
-
-    // Advertise xdg-decoration and force server-side mode so clients drop their
-    // client-side titlebars (we draw none) and windows render borderless.
-    struct wlr_xdg_decoration_manager_v1 *xdg_decoration =
-        wlr_xdg_decoration_manager_v1_create(server->wl_display);
-    server->new_toplevel_decoration.notify = handle_new_toplevel_decoration;
-    wl_signal_add(&xdg_decoration->events.new_toplevel_decoration, &server->new_toplevel_decoration);
-    
     server->cursor = wlr_cursor_create();
     server->cursor_mgr = wlr_xcursor_manager_create(NULL, 24);
     wlr_cursor_attach_output_layout(server->cursor, server->output_layout);
@@ -639,60 +617,25 @@ bool server_init(FwmServer *server) {
     wlr_xcursor_manager_load(server->cursor_mgr, 1);
     wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
 
-    server->cursor_motion.notify = handle_cursor_motion;
-    wl_signal_add(&server->cursor->events.motion, &server->cursor_motion);
-    server->cursor_motion_absolute.notify = handle_cursor_motion_absolute;
-    wl_signal_add(&server->cursor->events.motion_absolute, &server->cursor_motion_absolute);
-    server->cursor_button.notify = handle_cursor_button;
-    wl_signal_add(&server->cursor->events.button, &server->cursor_button);
-    server->cursor_axis.notify = handle_cursor_axis;
-    wl_signal_add(&server->cursor->events.axis, &server->cursor_axis);
-    server->cursor_frame.notify = handle_cursor_frame;
-    wl_signal_add(&server->cursor->events.frame, &server->cursor_frame);
-    
     server->seat = wlr_seat_create(server->wl_display, "seat0");
 
     // Xwayland (lazy: the X server starts on the first X11 client). Managed
     // windows become FwmViews, override-redirect ones bare scene surfaces.
     server->xwayland = wlr_xwayland_create(server->wl_display, server->compositor, true);
     if (server->xwayland) {
-        server->xwl_ready.notify = handle_xwl_ready;
-        wl_signal_add(&server->xwayland->events.ready, &server->xwl_ready);
-        server->xwl_new_surface.notify = handle_xwl_new_surface;
-        wl_signal_add(&server->xwayland->events.new_surface, &server->xwl_new_surface);
         setenv("DISPLAY", server->xwayland->display_name, true);
         wlr_log(WLR_INFO, "Xwayland on DISPLAY=%s", server->xwayland->display_name);
     } else {
         wlr_log(WLR_ERROR, "Failed to start Xwayland; X11 apps won't work");
     }
 
-    server->request_cursor.notify = handle_request_cursor;
-    wl_signal_add(&server->seat->events.request_set_cursor, &server->request_cursor);
-    server->seat_request_set_selection.notify = handle_seat_request_set_selection;
-    wl_signal_add(&server->seat->events.request_set_selection, &server->seat_request_set_selection);
-    server->seat_request_set_primary_selection.notify = handle_seat_request_set_primary_selection;
-    wl_signal_add(&server->seat->events.request_set_primary_selection, &server->seat_request_set_primary_selection);
-    server->seat_request_start_drag.notify = handle_seat_request_start_drag;
-    wl_signal_add(&server->seat->events.request_start_drag, &server->seat_request_start_drag);
-    server->seat_start_drag.notify = handle_seat_start_drag;
-    wl_signal_add(&server->seat->events.start_drag, &server->seat_start_drag);
-
     /* No listeners needed: the notifier is driven by server_notify_activity
      * from the input paths, and the inhibit manager keeps its own list, which
      * idle_inhibit_refresh polls each tick. */
     server->relative_pointer = wlr_relative_pointer_manager_v1_create(server->wl_display);
     server->pointer_constraints = wlr_pointer_constraints_v1_create(server->wl_display);
-    if (server->pointer_constraints) {
-        server->new_pointer_constraint.notify = handle_new_pointer_constraint;
-        wl_signal_add(&server->pointer_constraints->events.new_constraint,
-                      &server->new_pointer_constraint);
-    }
 
     server->output_power = wlr_output_power_manager_v1_create(server->wl_display);
-    if (server->output_power) {
-        server->output_power_set_mode.notify = handle_output_power_set_mode;
-        wl_signal_add(&server->output_power->events.set_mode, &server->output_power_set_mode);
-    }
     server->gamma_control = wlr_gamma_control_manager_v1_create(server->wl_display);
     if (server->gamma_control) {
         /* The scene applies client ramps itself, including re-applying them
@@ -702,28 +645,22 @@ bool server_init(FwmServer *server) {
         wlr_scene_set_gamma_control_manager_v1(server->scene, server->gamma_control);
     }
     server->cursor_shape = wlr_cursor_shape_manager_v1_create(server->wl_display, 1);
-    if (server->cursor_shape) {
-        server->cursor_shape_request.notify = handle_cursor_shape_request;
-        wl_signal_add(&server->cursor_shape->events.request_set_shape,
-                      &server->cursor_shape_request);
-    }
 
     server->idle_notifier = wlr_idle_notifier_v1_create(server->wl_display);
     server->idle_inhibit  = wlr_idle_inhibit_v1_create(server->wl_display);
     server->idle_inhibited = 0;
 
     server->xdg_activation = wlr_xdg_activation_v1_create(server->wl_display);
-    if (server->xdg_activation) {
-        server->xdg_activation_request_activate.notify = handle_xdg_activation_request_activate;
-        wl_signal_add(&server->xdg_activation->events.request_activate,
-                      &server->xdg_activation_request_activate);
-    }
-    
-    server->new_input.notify = handle_new_input;
-    wl_signal_add(&server->wlr_backend->events.new_input, &server->new_input);
-    
-    server->new_output.notify = handle_new_output;
-    wl_signal_add(&server->wlr_backend->events.new_output, &server->new_output);
+
+    /* Each module wires its own listeners. Nothing can fire while init runs —
+     * the display socket is created below and the backend does not start until
+     * server_run() — so doing this in one place, after every object exists, is
+     * equivalent to interleaving it with construction, and it lets the handlers
+     * stay private to the file that implements them. */
+    server_shell_register(server);
+    server_pointer_register(server);
+    server_output_register(server);
+    server_input_register(server);
     
     // Load config
     char path[512];
@@ -751,7 +688,6 @@ bool server_init(FwmServer *server) {
     wl_event_source_timer_update(server->physics_timer, (int)(1000.0 / PHYSICS_TICK_RATE));
 
     // Held-key auto-repeat timer for repeatable binds (armed on demand).
-    server->key_repeat_timer = wl_event_loop_add_timer(event_loop, key_repeat_cb, server);
     server->repeat_action = NULL;
     server->repeat_keycode = 0;
 

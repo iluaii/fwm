@@ -91,7 +91,7 @@ static void deco_handle_commit(struct wl_listener *listener, void *data) {
     wl_list_init(&d->commit.link);
 }
 
-void handle_new_toplevel_decoration(struct wl_listener *listener, void *data) {
+static void handle_new_toplevel_decoration(struct wl_listener *listener, void *data) {
     (void)listener;
     struct wlr_xdg_toplevel_decoration_v1 *deco = data;
     // Force server-side decorations. We draw no titlebar/border ourselves, so
@@ -106,7 +106,7 @@ void handle_new_toplevel_decoration(struct wl_listener *listener, void *data) {
     wl_signal_add(&deco->toplevel->base->surface->events.commit, &d->commit);
 }
 
-void handle_new_xdg_toplevel(struct wl_listener *listener, void *data) {
+static void handle_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, new_xdg_toplevel);
     struct wlr_xdg_toplevel *toplevel = data;
     view_create(toplevel, server);
@@ -200,7 +200,7 @@ static void xwl_unmanaged_create(FwmServer *server, struct wlr_xwayland_surface 
     wl_signal_add(&xs->events.destroy, &u->destroy);
 }
 
-void handle_xwl_ready(struct wl_listener *listener, void *data) {
+static void handle_xwl_ready(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, xwl_ready);
     wlr_xwayland_set_seat(server->xwayland, server->seat);
     // Spawned children inherit DISPLAY, so binds can launch X11 apps.
@@ -209,7 +209,7 @@ void handle_xwl_ready(struct wl_listener *listener, void *data) {
     setenv("DISPLAY", server->xwayland->display_name, true);
 }
 
-void handle_xwl_new_surface(struct wl_listener *listener, void *data) {
+static void handle_xwl_new_surface(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, xwl_new_surface);
     struct wlr_xwayland_surface *xs = data;
     if (xs->override_redirect) {
@@ -267,7 +267,7 @@ static void popup_handle_destroy(struct wl_listener *listener, void *data) {
     free(p);
 }
 
-void handle_new_xdg_popup(struct wl_listener *listener, void *data) {
+static void handle_new_xdg_popup(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, new_xdg_popup);
     struct wlr_xdg_popup *popup = data;
 
@@ -297,4 +297,29 @@ void handle_new_xdg_popup(struct wl_listener *listener, void *data) {
     wl_signal_add(&popup->base->surface->events.commit, &p->commit);
     p->destroy.notify = popup_handle_destroy;
     wl_signal_add(&popup->events.destroy, &p->destroy);
+}
+
+
+/* Called once from server_init(), after the objects these listeners hang off
+ * exist. The decoration manager is created here because nothing outside this
+ * file ever touches it. */
+void server_shell_register(FwmServer *server) {
+    server->new_xdg_toplevel.notify = handle_new_xdg_toplevel;
+    wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
+    server->new_xdg_popup.notify = handle_new_xdg_popup;
+    wl_signal_add(&server->xdg_shell->events.new_popup, &server->new_xdg_popup);
+
+    // Advertise xdg-decoration and force server-side mode so clients drop their
+    // client-side titlebars (we draw none) and windows render borderless.
+    struct wlr_xdg_decoration_manager_v1 *xdg_decoration =
+        wlr_xdg_decoration_manager_v1_create(server->wl_display);
+    server->new_toplevel_decoration.notify = handle_new_toplevel_decoration;
+    wl_signal_add(&xdg_decoration->events.new_toplevel_decoration, &server->new_toplevel_decoration);
+
+    if (server->xwayland) {
+        server->xwl_ready.notify = handle_xwl_ready;
+        wl_signal_add(&server->xwayland->events.ready, &server->xwl_ready);
+        server->xwl_new_surface.notify = handle_xwl_new_surface;
+        wl_signal_add(&server->xwayland->events.new_surface, &server->xwl_new_surface);
+    }
 }

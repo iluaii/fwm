@@ -21,7 +21,6 @@
 #include "wallpaper.h"
 #include "group.h"
 #include <linux/input-event-codes.h>
-#include "server_internal.h"
 
 /* Defined further down this file; used before their definitions. */
 static void drag_icon_update_position(FwmServer *server);
@@ -97,7 +96,7 @@ struct FwmView *view_at(FwmServer *server, double lx, double ly,
     return tree->node.data;
 }
 
-void handle_cursor_motion(struct wl_listener *listener, void *data) {
+static void handle_cursor_motion(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;
 
@@ -296,7 +295,7 @@ void handle_cursor_motion(struct wl_listener *listener, void *data) {
     }
 }
 
-void handle_cursor_motion_absolute(struct wl_listener *listener, void *data) {
+static void handle_cursor_motion_absolute(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_motion_absolute);
     struct wlr_pointer_motion_absolute_event *event = data;
     wlr_cursor_warp_absolute(server->cursor, &event->pointer->base, event->x, event->y);
@@ -310,7 +309,7 @@ void handle_cursor_motion_absolute(struct wl_listener *listener, void *data) {
     }
 }
 
-void handle_cursor_button(struct wl_listener *listener, void *data) {
+static void handle_cursor_button(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
 
@@ -516,7 +515,7 @@ void handle_cursor_button(struct wl_listener *listener, void *data) {
     }
 }
 
-void handle_cursor_axis(struct wl_listener *listener, void *data) {
+static void handle_cursor_axis(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_axis);
     struct wlr_pointer_axis_event *event = data;
     server_notify_activity(server);
@@ -547,12 +546,12 @@ void handle_cursor_axis(struct wl_listener *listener, void *data) {
     wlr_seat_pointer_notify_axis(server->seat, event->time_msec, event->orientation, event->delta, event->delta_discrete, event->source, event->relative_direction);
 }
 
-void handle_cursor_frame(struct wl_listener *listener, void *data) {
+static void handle_cursor_frame(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_frame);
     wlr_seat_pointer_notify_frame(server->seat);
 }
 
-void handle_request_cursor(struct wl_listener *listener, void *data) {
+static void handle_request_cursor(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, request_cursor);
     struct wlr_seat_pointer_request_set_cursor_event *event = data;
     struct wlr_seat_client *focused_client = server->seat->pointer_state.focused_client;
@@ -561,13 +560,13 @@ void handle_request_cursor(struct wl_listener *listener, void *data) {
     }
 }
 
-void handle_seat_request_set_selection(struct wl_listener *listener, void *data) {
+static void handle_seat_request_set_selection(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, seat_request_set_selection);
     struct wlr_seat_request_set_selection_event *event = data;
     wlr_seat_set_selection(server->seat, event->source, event->serial);
 }
 
-void handle_seat_request_set_primary_selection(struct wl_listener *listener, void *data) {
+static void handle_seat_request_set_primary_selection(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, seat_request_set_primary_selection);
     struct wlr_seat_request_set_primary_selection_event *event = data;
     wlr_seat_set_primary_selection(server->seat, event->source, event->serial);
@@ -592,7 +591,7 @@ static void handle_drag_icon_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&server->drag_icon_destroy.link);
 }
 
-void handle_seat_start_drag(struct wl_listener *listener, void *data) {
+static void handle_seat_start_drag(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, seat_start_drag);
     struct wlr_drag *drag = data;
     if (!drag->icon) return; /* a drag without an icon is perfectly legal */
@@ -685,7 +684,7 @@ static void constraints_follow_focus(FwmServer *server, struct wlr_surface *surf
     constraint_set_active(server, found);
 }
 
-void handle_new_pointer_constraint(struct wl_listener *listener, void *data) {
+static void handle_new_pointer_constraint(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, new_pointer_constraint);
     struct wlr_pointer_constraint_v1 *constraint = data;
 
@@ -698,7 +697,7 @@ void handle_new_pointer_constraint(struct wl_listener *listener, void *data) {
 
 /* cursor-shape-v1: clients name a cursor ("text", "grab") instead of supplying
  * a surface. Older clients keep using wl_pointer.set_cursor, which still works. */
-void handle_cursor_shape_request(struct wl_listener *listener, void *data) {
+static void handle_cursor_shape_request(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_shape_request);
     const struct wlr_cursor_shape_manager_v1_request_set_shape_event *event = data;
 
@@ -712,7 +711,7 @@ void handle_cursor_shape_request(struct wl_listener *listener, void *data) {
     if (name) wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, name);
 }
 
-void handle_xdg_activation_request_activate(struct wl_listener *listener, void *data) {
+static void handle_xdg_activation_request_activate(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, xdg_activation_request_activate);
     const struct wlr_xdg_activation_v1_request_activate_event *event = data;
 
@@ -744,7 +743,7 @@ void handle_xdg_activation_request_activate(struct wl_listener *listener, void *
     server_focus_view(server, view);
 }
 
-void handle_seat_request_start_drag(struct wl_listener *listener, void *data) {
+static void handle_seat_request_start_drag(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, seat_request_start_drag);
     struct wlr_seat_request_start_drag_event *event = data;
 
@@ -755,5 +754,49 @@ void handle_seat_request_start_drag(struct wl_listener *listener, void *data) {
         wlr_seat_start_pointer_drag(server->seat, event->drag, event->serial);
     } else if (event->drag->source) {
         wlr_data_source_destroy(event->drag->source);
+    }
+}
+
+
+/* Called once from server_init(). The managers guarded below are optional:
+ * wlroots returns NULL when one cannot be advertised, and the compositor is
+ * expected to run without them. */
+void server_pointer_register(FwmServer *server) {
+    server->cursor_motion.notify = handle_cursor_motion;
+    wl_signal_add(&server->cursor->events.motion, &server->cursor_motion);
+    server->cursor_motion_absolute.notify = handle_cursor_motion_absolute;
+    wl_signal_add(&server->cursor->events.motion_absolute, &server->cursor_motion_absolute);
+    server->cursor_button.notify = handle_cursor_button;
+    wl_signal_add(&server->cursor->events.button, &server->cursor_button);
+    server->cursor_axis.notify = handle_cursor_axis;
+    wl_signal_add(&server->cursor->events.axis, &server->cursor_axis);
+    server->cursor_frame.notify = handle_cursor_frame;
+    wl_signal_add(&server->cursor->events.frame, &server->cursor_frame);
+
+    server->request_cursor.notify = handle_request_cursor;
+    wl_signal_add(&server->seat->events.request_set_cursor, &server->request_cursor);
+    server->seat_request_set_selection.notify = handle_seat_request_set_selection;
+    wl_signal_add(&server->seat->events.request_set_selection, &server->seat_request_set_selection);
+    server->seat_request_set_primary_selection.notify = handle_seat_request_set_primary_selection;
+    wl_signal_add(&server->seat->events.request_set_primary_selection, &server->seat_request_set_primary_selection);
+    server->seat_request_start_drag.notify = handle_seat_request_start_drag;
+    wl_signal_add(&server->seat->events.request_start_drag, &server->seat_request_start_drag);
+    server->seat_start_drag.notify = handle_seat_start_drag;
+    wl_signal_add(&server->seat->events.start_drag, &server->seat_start_drag);
+
+    if (server->pointer_constraints) {
+        server->new_pointer_constraint.notify = handle_new_pointer_constraint;
+        wl_signal_add(&server->pointer_constraints->events.new_constraint,
+                      &server->new_pointer_constraint);
+    }
+    if (server->cursor_shape) {
+        server->cursor_shape_request.notify = handle_cursor_shape_request;
+        wl_signal_add(&server->cursor_shape->events.request_set_shape,
+                      &server->cursor_shape_request);
+    }
+    if (server->xdg_activation) {
+        server->xdg_activation_request_activate.notify = handle_xdg_activation_request_activate;
+        wl_signal_add(&server->xdg_activation->events.request_activate,
+                      &server->xdg_activation_request_activate);
     }
 }
