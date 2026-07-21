@@ -43,6 +43,11 @@ void session_restore(struct FwmServer *server);
  * return the desktop it should go to and forget the entry; -1 otherwise. */
 int session_claim_desktop(struct FwmServer *server, struct FwmView *view);
 
+/* Delete the state file because we are shutting down on purpose. A crash never
+ * gets here, so the file surviving is exactly the signal that the last run was
+ * not a clean one. Skipped when restore = "always". */
+void session_clear_on_clean_exit(struct FwmServer *server);
+
 /* Free the pending-restore list. */
 void session_finish(struct FwmServer *server);
 

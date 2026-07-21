@@ -80,6 +80,18 @@ on_activate = "same_desktop"
 camera_shake = 0.0
 squash       = 1.0
 
+# When a restarted fwm should put your applications back. fwm records what is
+# running and on which desktop, and relaunches it — the applications restart,
+# they do not resume, so anything unsaved inside them is still lost.
+#
+#   "crash"  — (default) only when the last run ended badly. fwm deletes the
+#              record on a clean shutdown, so a normal logout gives you a clean
+#              desktop and only a crash brings the windows back.
+#   "always" — every start, including a normal login.
+#   "never"  — nothing is recorded and nothing is relaunched.
+[session]
+restore = "crash"
+
 [input]
 # xkb keyboard: several layouts + a grp:* option = layout switching.
 # The FIRST layout must stay Latin so binds keep working on any layout.
@@ -107,6 +119,11 @@ repeat_delay = 600
 # spawn actions:  spawn:command arg1 arg2 ...
 # camera:         move_camera:-50  move_camera:50
 # workspace:      view:0 .. view:9
+# move a window:  move_to:0 .. move_to:9        (send it there, stay put)
+#                 move_to_view:0 .. :9         (send it there and follow)
+# In physics and floating modes you can also just drag a window across the
+# desktop edge; in tiling you cannot, because the layout owns its geometry —
+# these actions are the way to move a tiled window out.
 
 "super+Return"       = "spawn:kitty"
 #"super+space"        = "spawn:rofi -show drun -normal-window"
@@ -156,6 +173,18 @@ repeat_delay = 600
 "super+Tab"          = "group_next"
 "super+shift+Tab"    = "group_prev"
 "super+shift+w"      = "group_add"
+# Send the focused window to a desktop (i3/sway convention). The camera stays
+# where it is; use move_to_view: to travel with the window instead.
+"super+shift+1"      = "move_to:0"
+"super+shift+2"      = "move_to:1"
+"super+shift+3"      = "move_to:2"
+"super+shift+4"      = "move_to:3"
+"super+shift+5"      = "move_to:4"
+"super+shift+6"      = "move_to:5"
+"super+shift+7"      = "move_to:6"
+"super+shift+8"      = "move_to:7"
+"super+shift+9"      = "move_to:8"
+"super+shift+0"      = "move_to:9"
 "super+1"            = "view:0"
 "super+2"            = "view:1"
 "super+3"            = "view:2"

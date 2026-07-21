@@ -93,6 +93,29 @@ typedef struct {
     double squash;        /* impact squash & stretch; 0 disables, 1 = default */
 } EffectsConfig;
 
+/* ── session ─────────────────────────────────────────────────────────── */
+
+/*
+ * When a restarted fwm should put your applications back.
+ *
+ * The distinction that matters is not "did fwm start" but "did the last run
+ * end the way you meant it to". Coming back from a crash with your windows
+ * where you left them is a rescue; doing the same after you deliberately
+ * closed everything and logged out is just an unwanted pile of windows.
+ *
+ * fwm tells the two apart without help: the state file is deleted on a clean
+ * shutdown, so finding one at startup means the previous run died.
+ */
+typedef enum {
+    SESSION_RESTORE_CRASH = 0, /* default — only after an unclean exit */
+    SESSION_RESTORE_ALWAYS,    /* every start, including a normal login */
+    SESSION_RESTORE_NEVER,     /* never; nothing is recorded either */
+} SessionRestorePolicy;
+
+typedef struct {
+    SessionRestorePolicy restore;
+} SessionConfig;
+
 /* ── binds ───────────────────────────────────────────────────────────── */
 
 /*
@@ -236,6 +259,7 @@ typedef struct {
     InputConfig     input;
     FocusConfig     focus;
     EffectsConfig   effects;
+    SessionConfig   session;
     KeyBind        *keys;
     int             key_count;
     WallpaperLayer *wallpapers;

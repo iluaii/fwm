@@ -150,6 +150,8 @@ static void build_snapshot(struct FwmServer *server, char *out, size_t cap) {
 }
 
 void session_maybe_save(struct FwmServer *server) {
+    if (server->config.session.restore == SESSION_RESTORE_NEVER) return;
+
     struct FwmSessionState *st = state_of(server);
     if (!st) return;
 
@@ -208,6 +210,8 @@ static void spawn_argv_key(const char *key) {
 }
 
 void session_restore(struct FwmServer *server) {
+    if (server->config.session.restore == SESSION_RESTORE_NEVER) return;
+
     struct FwmSessionState *st = state_of(server);
     if (!st) return;
 
@@ -258,6 +262,17 @@ int session_claim_desktop(struct FwmServer *server, struct FwmView *view) {
         return e->desktop;
     }
     return -1;
+}
+
+/* Called only on the way out of a NORMAL shutdown — a crash never reaches
+ * server_destroy. Removing the file here is what lets the next start tell the
+ * two apart: a state file that survived means the last run died. */
+void session_clear_on_clean_exit(struct FwmServer *server) {
+    if (server->config.session.restore == SESSION_RESTORE_ALWAYS) return;
+
+    char sp[512];
+    session_path(sp, sizeof(sp));
+    unlink(sp);
 }
 
 void session_finish(struct FwmServer *server) {

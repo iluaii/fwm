@@ -52,7 +52,8 @@ static int action_is_known(const char *a) {
         "launcher", NULL
     };
     static const char *prefixes[] = {
-        "spawn:", "view:", "move_camera:", "tile_focus:", "tile_move:", NULL
+        "spawn:", "view:", "move_camera:", "tile_focus:", "tile_move:",
+        "move_to:", "move_to_view:", NULL
     };
     for (int i = 0; exact[i]; i++)
         if (strcmp(a, exact[i]) == 0) return 1;
@@ -317,6 +318,21 @@ static void load_effects(toml_table_t *root, EffectsConfig *e) {
     if (e->squash > 2.0) e->squash = 2.0;
 }
 
+static void load_session(toml_table_t *root, SessionConfig *s, FwmConfig *cfg) {
+    s->restore = SESSION_RESTORE_CRASH;
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "session");
+    if (!tbl) return;
+
+    toml_datum_t d = toml_string_in(tbl, "restore");
+    if (!d.ok) return;
+    if      (strcmp(d.u.s, "crash")  == 0) s->restore = SESSION_RESTORE_CRASH;
+    else if (strcmp(d.u.s, "always") == 0) s->restore = SESSION_RESTORE_ALWAYS;
+    else if (strcmp(d.u.s, "never")  == 0) s->restore = SESSION_RESTORE_NEVER;
+    else config_report_error(cfg, "[session] unknown restore \"%s\" — using \"crash\"", d.u.s);
+    free(d.u.s);
+}
+
 /* ── binds section ───────────────────────────────────────────────────── */
 
 /* Built-in binds, installed whenever the config file yielded no usable ones
@@ -342,6 +358,18 @@ static const struct { const char *bind; const char *action; } default_binds[] = 
     { "super+Tab",            "group_next"       },
     { "super+shift+Tab",      "group_prev"       },
     { "super+shift+w",        "group_add"        },
+    /* Send the focused window to a desktop. Tiling has no other way out: the
+     * layout owns the window's geometry, so it cannot be dragged across. */
+    { "super+shift+1",        "move_to:0"        },
+    { "super+shift+2",        "move_to:1"        },
+    { "super+shift+3",        "move_to:2"        },
+    { "super+shift+4",        "move_to:3"        },
+    { "super+shift+5",        "move_to:4"        },
+    { "super+shift+6",        "move_to:5"        },
+    { "super+shift+7",        "move_to:6"        },
+    { "super+shift+8",        "move_to:7"        },
+    { "super+shift+9",        "move_to:8"        },
+    { "super+shift+0",        "move_to:9"        },
     { "super+shift+c",        "calm_all"         },
     { "super+shift+r",        "reload_config"    },
     { "super+shift+p",        "wallpaper_picker" },
@@ -806,6 +834,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_input(NULL, &cfg->input); /* defaults for the no-config-file path */
     load_focus(NULL, &cfg->focus, cfg);
     load_effects(NULL, &cfg->effects);
+    load_session(NULL, &cfg->session, cfg);
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -837,6 +866,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_input(root, &cfg->input);
     load_focus(root, &cfg->focus, cfg);
     load_effects(root, &cfg->effects);
+    load_session(root, &cfg->session, cfg);
     load_binds(root, cfg);
     load_wallpaper(root, cfg);
     load_wallpaper_picker(root, cfg);

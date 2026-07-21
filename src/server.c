@@ -2483,6 +2483,71 @@ static void server_toggle_desktop_tiling(FwmServer *server, int d) {
             ? DESKTOP_MODE_PHYSICS : DESKTOP_MODE_TILING);
 }
 
+/* Send a window to another desktop.
+ *
+ * In physics and floating modes you can already drag a window across the
+ * desktop boundary, but a tiled window is a static body owned by the layout —
+ * dragging cannot take it out, which left tiling with no way to move a window
+ * off its desktop at all. This works the same in all three modes so the bind
+ * does not silently mean different things depending on where you are. */
+static void server_move_view_to_desktop(FwmServer *server, FwmView *view, int target,
+                                        int follow) {
+    if (!view || target < 0 || target >= 10 || server->screen_width <= 0) return;
+
+    PhysicsBody *b = physics_find_body(&server->physics, view->id);
+    int src = b ? b->desktop_id : view->x / server->screen_width;
+    if (src == target) return;
+
+    /* A tab-stack is a single stack on a single desktop; pulling a member out
+     * of it is the only sensible reading of "move this window away". */
+    if (view->group) group_remove(server, view);
+
+    /* Leave the old layout before the coordinates move, or the re-tile would
+     * lay out the window that is on its way out. */
+    if (server->desktop_mode[src] == DESKTOP_MODE_TILING) {
+        bsp_remove(&server->bsp_roots[src], view->id);
+        server_apply_tiling(server, src);
+    }
+
+    if (b) {
+        /* Keep the offset within the desktop; desktops are one screen apart. */
+        b->x += (double)(target - src) * server->screen_width;
+        b->desktop_id = target;
+        b->vx = 0; b->vy = 0; b->flying = 0;
+        b->tiled = 0;
+        b->tiling_saved = 0;
+        b->floating = (server->desktop_mode[target] == DESKTOP_MODE_FLOATING);
+        view->x = (int)lround(b->x);
+        view->y = (int)lround(b->y);
+    } else {
+        view->x += (target - src) * server->screen_width;
+    }
+    view->tile_anim = 0;
+    view_sync_position(view);
+
+    if (server->desktop_mode[target] == DESKTOP_MODE_TILING) {
+        bsp_insert(&server->bsp_roots[target], 0, view->id);
+        server_apply_tiling(server, target);
+    }
+
+    if (follow) {
+        /* Relocating a window in order to keep working in it: travel with it
+         * and keep it focused. Claiming focus_desktop here stops the camera's
+         * arrival handler from handing the keyboard to whatever else lives on
+         * the destination. */
+        server->target_camera_x = target * server->screen_width;
+        server->cam_free = 0;
+        server->focus_desktop = target;
+        server_focus_view(server, view);
+    } else if (server->focused_view == view) {
+        /* The camera stays put (i3/sway convention: moving is not following),
+         * so the keyboard must not follow the window off-screen either. */
+        server_refocus(server, src, view);
+    }
+
+    server_request_tray_redraw(server);
+}
+
 static void server_toggle_desktop_floating(FwmServer *server, int d) {
     server_set_desktop_mode(server, d,
         server->desktop_mode[d] == DESKTOP_MODE_FLOATING
@@ -2670,6 +2735,10 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
             server->target_camera_x = desktop * server->screen_width;
             server->cam_free = 0; // discrete jump: use the eased slide
         }
+    } else if (strncmp(action, "move_to:", 8) == 0) {
+        server_move_view_to_desktop(server, server->focused_view, atoi(action + 8), 0);
+    } else if (strncmp(action, "move_to_view:", 13) == 0) {
+        server_move_view_to_desktop(server, server->focused_view, atoi(action + 13), 1);
     }
 }
 
@@ -2973,6 +3042,8 @@ void server_destroy(FwmServer *server) {
     ipc_destroy(server->ipc);
     server->ipc = NULL;
 
+    /* Order matters: the policy lives in the config, which is freed below. */
+    session_clear_on_clean_exit(server);
     session_finish(server);
     config_free(&server->config);
     
