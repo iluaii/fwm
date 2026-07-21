@@ -378,7 +378,11 @@ static void scan_wallpapers(Launcher *l) {
 
         LApp *it = &l->walls[l->wall_count];
         memset(it, 0, sizeof(*it));
-        snprintf(it->exec, sizeof(it->exec), "%s/%s", dir, e->d_name);
+        /* A truncated path is not this file's path: it names some shorter one
+         * that may well exist, so stat() is no guard. Drop the entry instead
+         * of listing a thumbnail that loads the wrong image, or none. */
+        int n = snprintf(it->exec, sizeof(it->exec), "%s/%s", dir, e->d_name);
+        if (n < 0 || (size_t)n >= sizeof(it->exec)) continue;
 
         struct stat st;
         if (stat(it->exec, &st) != 0 || !S_ISREG(st.st_mode)) continue;
