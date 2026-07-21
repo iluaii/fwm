@@ -1,10 +1,15 @@
 #!/bin/sh
-# Rebuild fwm and run it nested inside the current Wayland session.
+# Rebuild fwm and run it — nested inside the current Wayland session, or
+# natively on DRM/KMS when started from a bare TTY. The mode is picked from
+# WAYLAND_DISPLAY; there is no flag for it.
 #
 # A compositor cannot hot-restart: it IS the display server, so when it exits
 # every client's connection dies with it. Nesting is the working substitute —
 # the inner fwm can be restarted as often as you like while the session you are
 # actually working in never notices.
+#
+# Nesting cannot test keybinds, though: an outer fwm claims the Super
+# combinations before the inner one ever sees them. Run from a TTY for those.
 #
 #   ./dev.sh                      rebuild and run
 #   ./dev.sh -n 2                 ... with 2 terminals already open
@@ -29,7 +34,9 @@ shot=""
 shot_delay=4
 run_env=""
 
-usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+# Print the header block, stopping at the first blank line, so the usage text
+# does not have to be kept in sync with hard-coded line numbers.
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -48,10 +55,19 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ -z "${WAYLAND_DISPLAY:-}" ]; then
-    echo "dev.sh: no WAYLAND_DISPLAY — run this from inside a Wayland session." >&2
-    echo "        (on a bare TTY there is nothing to nest inside)" >&2
-    exit 1
+# A Wayland session to nest inside means nested; otherwise take over the TTY
+# directly. Forcing WLR_BACKENDS=wayland in the native case would make wlroots
+# look for a parent compositor that is not there and fail at startup.
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    mode="nested"
+    backend_env="WLR_BACKENDS=wayland"
+else
+    mode="native"
+    backend_env=""
+    if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+        echo "dev.sh: XDG_RUNTIME_DIR is unset — wlroots needs it for the socket." >&2
+        exit 1
+    fi
 fi
 
 if [ "$build" = 1 ]; then
@@ -74,7 +90,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # shellcheck disable=SC2086
-env $run_env WLR_BACKENDS=wayland "$BUILD/fwm" >"$log" 2>&1 &
+env $run_env $backend_env "$BUILD/fwm" >"$log" 2>&1 &
 fwm_pid=$!
 
 # Wait for the inner socket rather than sleeping a guessed amount.
@@ -89,7 +105,7 @@ while [ $i -lt 100 ]; do
 done
 [ -n "$sock" ] || { echo "dev.sh: fwm never reported a socket" >&2; cat "$log" >&2; exit 1; }
 
-echo "dev.sh: nested fwm on $sock (pid $fwm_pid)"
+echo "dev.sh: $mode fwm on $sock (pid $fwm_pid)"
 
 n=0
 while [ "$n" -lt "$windows" ]; do
