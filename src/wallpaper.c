@@ -18,6 +18,9 @@
  * movement, which reads as "the picture is barely there". That trade is the
  * user's to make per wallpaper, via [[wallpaper]] pan_crop (or zoom for exact
  * control), so the default budget is zero. */
+/* Decode margin over the drawn size: FILTER_BEST does the final, high-quality
+ * step, so the cheap in-decode scale never has to be the last word. */
+#define WALLPAPER_OVERSAMPLE 2.0
 #define PAN_MIN_TRAVEL  24    /* below this, movement is not worth any crop */
 
 /* Runtime layer. `slack` (= buffer_width - screen_width) is how far the layer can
@@ -48,9 +51,15 @@ struct DrawCtx {
 
 /* Load any gdk-pixbuf-supported format (PNG/JPEG/WebP/…) into a premultiplied
  * ARGB32 cairo surface. Returns NULL on failure. */
-static cairo_surface_t *load_image(const char *path) {
+/* Decode `path`, scaled down to fit max_w x max_h (aspect preserved). Pass 0
+ * for either to decode at native size. Scaling during the decode is what keeps
+ * a big wallpaper cheap: gdk-pixbuf hands JPEG a DCT-scale hint instead of
+ * expanding every pixel just so cairo can throw most of them away. */
+static cairo_surface_t *load_image(const char *path, int max_w, int max_h) {
     GError *err = NULL;
-    GdkPixbuf *pb = gdk_pixbuf_new_from_file(path, &err);
+    GdkPixbuf *pb = (max_w > 0 && max_h > 0)
+        ? gdk_pixbuf_new_from_file_at_scale(path, max_w, max_h, TRUE, &err)
+        : gdk_pixbuf_new_from_file(path, &err);
     if (!pb) {
         fprintf(stderr, "fwm wallpaper: cannot load '%s': %s\n",
                 path, err ? err->message : "unknown error");
@@ -150,11 +159,14 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
     for (int i = 0; i < cfg->wallpaper_count; i++) {
         const WallpaperLayer *layer = &cfg->wallpapers[i];
 
-        cairo_surface_t *img = load_image(layer->path);
-        if (!img) continue;
-
-        int iw = cairo_image_surface_get_width(img);
-        int ih = cairo_image_surface_get_height(img);
+        // Header only. The fit maths below needs the dimensions, but decoding
+        // at native size just to discard most of the pixels is what made
+        // applying a large wallpaper take seconds on a slow machine.
+        int iw = 0, ih = 0;
+        if (!gdk_pixbuf_get_file_info(layer->path, &iw, &ih) || iw <= 0 || ih <= 0) {
+            fprintf(stderr, "fwm wallpaper: cannot read '%s'\n", layer->path);
+            continue;
+        }
 
         int buf_w = screen_w;   // buffer width (>= screen_w); slack = buf_w - screen_w
         int contain = 0;        // draw mode passed to draw_layer
@@ -216,6 +228,25 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
         default:
             break;                       // fill screen, crop overflow, static
         }
+
+        // Decode only what the buffer will actually show, with an oversample
+        // margin so draw_layer's FILTER_BEST still has detail to resample from.
+        // Clamped to native: upscaling here would just burn memory.
+        double sx = (double)buf_w / iw, sy = (double)screen_h / ih;
+        double draw_s = scale > 0.0 ? scale
+                      : contain    ? (sx < sy ? sx : sy)
+                                   : (sx > sy ? sx : sy);
+        int dec_w = (int)lround(iw * draw_s * WALLPAPER_OVERSAMPLE);
+        int dec_h = (int)lround(ih * draw_s * WALLPAPER_OVERSAMPLE);
+        if (dec_w >= iw || dec_h >= ih) { dec_w = 0; dec_h = 0; }  /* native */
+
+        cairo_surface_t *img = load_image(layer->path, dec_w, dec_h);
+        if (!img) continue;
+
+        // The pan scale was derived from the file's native height; rebase it on
+        // what we actually decoded, or the layer draws at a fraction of size.
+        int ah = cairo_image_surface_get_height(img);
+        if (scale > 0.0 && ah > 0) scale = (double)screen_h / ah;
 
         struct wlr_scene_buffer *buf = cairo_overlay_create(parent, buf_w, screen_h);
         if (buf) {

@@ -3205,8 +3205,6 @@ void server_apply_tiling(FwmServer *server, int desktop) {
         // physics must never shove them (transient overlaps while several
         // windows glide to new slots used to scatter finished ones).
         pb->tiled = 1;
-        pb->width = n->w;
-        pb->height = n->h;
         pb->vx = 0;
         pb->vy = 0;
         pb->flying = 0;
@@ -3220,9 +3218,20 @@ void server_apply_tiling(FwmServer *server, int desktop) {
                 break;
             }
         }
+        // A tab-stack draws its bar above the window, outside the client area.
+        // The layout has to hand that strip over, or the bar hangs into the
+        // slot above -- for the top row that is our tray.
+        int nx = n->x, ny = n->y, nw = n->w, nh = n->h;
+        if (view && view->group && nh > GROUP_TAB_H * 2) {
+            ny += GROUP_TAB_H;
+            nh -= GROUP_TAB_H;
+        }
+        pb->width = nw;
+        pb->height = nh;
+
         if (!view) {
-            pb->x = n->x;
-            pb->y = n->y;
+            pb->x = nx;
+            pb->y = ny;
             continue;
         }
 
@@ -3232,12 +3241,12 @@ void server_apply_tiling(FwmServer *server, int desktop) {
 
         if (animate) {
             view->tile_anim = 1;
-            view->tile_tx = n->x;
-            view->tile_ty = n->y;
+            view->tile_tx = nx;
+            view->tile_ty = ny;
         } else {
             view->tile_anim = 0;
-            pb->x = n->x;
-            pb->y = n->y;
+            pb->x = nx;
+            pb->y = ny;
             view->x = pb->x;
             view->y = pb->y;
             if (view->scene_tree) {

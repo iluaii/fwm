@@ -14,6 +14,19 @@
  * Colours come from the live theme so tab-stacks follow the system palette. */
 #define TAB_GAP 4.0
 
+/* Grouping changes how much room the window needs: the tab bar lives above the
+ * client area, and server_apply_tiling reserves that strip only for views that
+ * are already grouped. Without this the bar hangs into the slot above — for the
+ * top row, straight over our tray. */
+static void group_retile(FwmServer *server, struct FwmView *view) {
+    if (!view) return;
+    PhysicsBody *pb = physics_find_body(&server->physics, view->id);
+    if (!pb) return;
+    if (server->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
+        server_apply_tiling(server, pb->desktop_id);
+    }
+}
+
 static void pill_path(cairo_t *cr, double x, double y, double w, double h) {
     double cut = h / 2.0;
     if (cut * 2.0 > w) cut = w / 2.0;
@@ -114,6 +127,7 @@ FwmGroup *group_create(FwmServer *server, struct FwmView *view) {
     g->active = 0;
     view->group = g;
     wl_list_insert(&server->groups, &g->link);
+    group_retile(server, view);
     group_redraw(server, g);
     return g;
 }
@@ -178,6 +192,7 @@ bool group_add(FwmServer *server, FwmGroup *g, struct FwmView *view) {
     g->count++;
     view->group = g;
     activate_member(server, g, view, front);
+    group_retile(server, view);
     group_redraw(server, g);
     return true;
 }
@@ -224,6 +239,8 @@ void group_dissolve(FwmServer *server, FwmGroup *g) {
     }
     wl_list_remove(&g->link);
     free(g);
+    // Members are ungrouped now, so the reserved tab strip goes back to them.
+    group_retile(server, front);
     server_request_tray_redraw(server);
 }
 
@@ -256,6 +273,7 @@ void group_remove(FwmServer *server, struct FwmView *view) {
         // tab. The departed view keeps its geometry; the new front inherits it.
         activate_member(server, g, g->members[g->active], old_front);
     }
+    group_retile(server, view);
     group_redraw(server, g);
 }
 
