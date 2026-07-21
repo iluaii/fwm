@@ -5,6 +5,12 @@
 #include <wlr/render/wlr_renderer.h>
 
 #define TRAY_HEIGHT 28
+/* The tray floats: it is inset from the top edge, so the strip it actually
+ * occupies runs down to TRAY_BOTTOM, not to TRAY_HEIGHT. Anything reserving
+ * space for the tray must use TRAY_BOTTOM, or the gap it leaves comes out
+ * TRAY_MARGIN px short of the gap on every other side. */
+#define TRAY_MARGIN 8
+#define TRAY_BOTTOM (TRAY_MARGIN + TRAY_HEIGHT)
 
 typedef struct {
     const char *win_name;

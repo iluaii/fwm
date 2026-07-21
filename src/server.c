@@ -1409,7 +1409,7 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
                     int d = src_pb->desktop_id;
                     BspNode *leaves[MAX_WINDOWS];
                     int count = 0;
-                    bsp_collect_leaves(server->bsp_roots[d], leaves, &count);
+                    bsp_collect_leaves(server->bsp_roots[d], leaves, &count, MAX_WINDOWS);
                     
                     uint32_t target_id = 0;
                     for (int i = 0; i < count; i++) {
@@ -2078,7 +2078,7 @@ static int physics_tick_cb(void *data) {
 static BspNode *tile_neighbor(FwmServer *server, int desktop, BspNode *from, char dir) {
     BspNode *leaves[MAX_WINDOWS];
     int count = 0;
-    bsp_collect_leaves(server->bsp_roots[desktop], leaves, &count);
+    bsp_collect_leaves(server->bsp_roots[desktop], leaves, &count, MAX_WINDOWS);
 
     double fx = from->x + from->w / 2.0;
     double fy = from->y + from->h / 2.0;
@@ -3176,9 +3176,9 @@ void server_apply_tiling(FwmServer *server, int desktop) {
     if (work.width <= 0 || work.height <= 0) {
         work = (struct wlr_box){ 0, 0, server->screen_width, server->screen_height };
     }
-    if (work.y < TRAY_HEIGHT) {
-        work.height -= TRAY_HEIGHT - work.y;
-        work.y = TRAY_HEIGHT;
+    if (work.y < TRAY_BOTTOM) {
+        work.height -= TRAY_BOTTOM - work.y;
+        work.y = TRAY_BOTTOM;
     }
     int top = work.y + gout;
     int usable_h = work.height - gout * 2;
@@ -3188,7 +3188,7 @@ void server_apply_tiling(FwmServer *server, int desktop) {
 
     BspNode *leaves[MAX_WINDOWS];
     int count = 0;
-    bsp_collect_leaves(server->bsp_roots[desktop], leaves, &count);
+    bsp_collect_leaves(server->bsp_roots[desktop], leaves, &count, MAX_WINDOWS);
 
     // No glide while the user drags a BSP border: the layout must track the
     // mouse 1:1, a lagging animation there feels like jelly.
@@ -3326,7 +3326,7 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
         if (work.width <= 0 || work.height <= 0) {
             work = (struct wlr_box){ 0, 0, server->screen_width, server->screen_height };
         }
-        int top = real ? 0 : (work.y > TRAY_HEIGHT + 20 ? work.y : TRAY_HEIGHT + 20);
+        int top = real ? 0 : (work.y > TRAY_BOTTOM + 12 ? work.y : TRAY_BOTTOM + 12);
         view->x = d * server->screen_width + (real ? 0 : work.x);
         view->y = top;
         view->width = real ? server->screen_width : work.width;

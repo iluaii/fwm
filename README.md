@@ -270,7 +270,7 @@ repeat_delay = 600
 
 [tiling]
 gaps_in    = 6       # px between tiles
-gaps_out   = 12      # px between tiles and screen edges
+gaps_out   = 14      # px between tiles and screen edges
 anim_speed = 12.0    # tile glide speed (1/s); 0 = instant
 
 [camera]

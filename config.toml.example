@@ -47,7 +47,7 @@ tint_strength    = 0.4
 # anim_speed is 1/s (12 ~ 250ms glide); 0 disables the animation.
 [tiling]
 gaps_in    = 6
-gaps_out   = 12
+gaps_out   = 14
 anim_speed = 12.0
 
 # Desktop-switch camera slide (ease-in-out). 0 = instant snap.

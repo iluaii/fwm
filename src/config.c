@@ -150,7 +150,7 @@ static void load_physics(toml_table_t *root, PhysicsConfig *p) {
 
 static void load_tiling(toml_table_t *root, TilingConfig *t) {
     t->gaps_in    = 6;
-    t->gaps_out   = 12;
+    t->gaps_out   = 14;
     t->anim_speed = 12.0; /* ~250 ms glide */
 
     toml_table_t *tbl = toml_table_in(root, "tiling");
@@ -808,7 +808,7 @@ void config_option_get(const FwmConfig *cfg, const ConfigOption *opt,
 
 void config_load(FwmConfig *cfg, const char *path) {
     cfg->physics         = physics_defaults;
-    cfg->tiling          = (TilingConfig){ .gaps_in = 6, .gaps_out = 12, .anim_speed = 12.0 };
+    cfg->tiling          = (TilingConfig){ .gaps_in = 6, .gaps_out = 14, .anim_speed = 12.0 };
     cfg->camera          = (CameraConfig){ .anim_ms = 350.0, .free_speed = 14.0 };
     // Defaults for the no-config-file path; load_decor re-applies them anyway.
     cfg->decor.border_width = 2;

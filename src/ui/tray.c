@@ -236,7 +236,7 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
 struct wlr_scene_buffer *tray_init(struct wlr_scene_tree *parent, int screen_width) {
     int tray_width = screen_width - 40;
     int tray_x = (screen_width - tray_width) / 2;
-    int tray_y = 8;
+    int tray_y = TRAY_MARGIN;
 
     struct wlr_scene_buffer *tray_buf = cairo_overlay_create(parent, tray_width, TRAY_HEIGHT);
     if (tray_buf) {
