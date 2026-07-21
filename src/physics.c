@@ -25,9 +25,10 @@
 static inline float px2m(double px) { return (float)(px / PX_PER_METER); }
 static inline double m2px(float m)  { return (double)m * PX_PER_METER; }
 
-/* Per-body Box2D state, kept in an array parallel to PhysicsWorld.bodies. Body
- * slots are stable (physics_sync_body only appends, physics_remove_body only
- * marks inactive), so index i here always maps to world->bodies[i]. The shadow
+/* Per-body Box2D state, kept in an array parallel to PhysicsWorld.bodies. Index
+ * i here always maps to world->bodies[i]: physics_remove_body marks the mirror
+ * slot inactive and releases the body here, and physics_sync_body may then hand
+ * that same index to a new window — the pairing is what keeps that safe. The shadow
  * fields hold the last values we wrote back into the mirror; comparing the
  * mirror against them tells us whether the mirror was changed by the outside
  * world (drag/throw/teleport) between steps and must be forced into Box2D. */
@@ -53,6 +54,18 @@ struct Engine {
 
 static struct Engine *engine_of(PhysicsWorld *world) {
     return (struct Engine *)world->engine;
+}
+
+/* Drop the Box2D body backing mirror slot i. Called as soon as a window goes
+ * away rather than at the next step, so the slot is immediately safe to hand
+ * to a new window: slot_create rewrites every shadow field, but only if it
+ * runs, and it only runs when has == false. */
+static void slot_release(struct Engine *eng, int i) {
+    if (!eng) return;
+    struct BodySlot *s = &eng->slots[i];
+    if (!s->has) return;
+    b2DestroyBody(s->body);
+    s->has = false;
 }
 
 static double calc_mass(int width, int height, double mass_density) {
@@ -158,11 +171,25 @@ PhysicsBody *physics_sync_body(PhysicsWorld *world, uint32_t id, int x, int y, i
         }
     }
 
-    if (world->body_count >= MAX_WINDOWS) {
-        return NULL;
+    /* Reuse a slot left behind by a closed window before growing the array.
+     * Without this the cap counts every window opened since the compositor
+     * started, not the ones currently on screen — open and close a terminal
+     * enough times in a day's work and the next window silently gets no body
+     * at all. Slot indices stay aligned with the engine's, as the invariant
+     * at the top of this file requires. */
+    PhysicsBody *body = NULL;
+    for (int i = 0; i < world->body_count; i++) {
+        if (!world->bodies[i].active) {
+            slot_release(engine_of(world), i);  /* no-op if already released */
+            body = &world->bodies[i];
+            break;
+        }
     }
 
-    PhysicsBody *body = &world->bodies[world->body_count++];
+    if (!body) {
+        if (world->body_count >= MAX_WINDOWS) return NULL;
+        body = &world->bodies[world->body_count++];
+    }
     memset(body, 0, sizeof(PhysicsBody));
     body->id = id;
     body->active = 1;
@@ -171,6 +198,7 @@ PhysicsBody *physics_sync_body(PhysicsWorld *world, uint32_t id, int x, int y, i
     body->vy = 0;
     body->pinned = 0;
     body->no_collide = 0;
+    body->floating = 0;
     update_body_geometry(body, x, y, width, height, world->mass_density);
 
     int d = (int)((body->x + body->width / 2.0) / screen_width);
@@ -221,6 +249,10 @@ void physics_remove_body(PhysicsWorld *world, uint32_t id) {
         if (world->bodies[i].id == id) {
             world->bodies[i].active = 0;
             world->bodies[i].id = 0;
+            /* Free the Box2D side now. physics_sync_body may hand this slot to
+             * the next window before the next step ever runs, and reusing it
+             * with a live body would inherit the dead window's velocity. */
+            slot_release(engine_of(world), i);
             return;
         }
     }
@@ -433,10 +465,10 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
         bool frozen = (skip_b != 0 && m->id == skip_b);
         bool dragged = (dragged_id != 0 && m->id == dragged_id);
         b2BodyType type = b2_dynamicBody;
-        if (m->pinned || m->fullscreen || m->tiled || frozen) type = b2_staticBody;
+        if (m->pinned || m->fullscreen || m->tiled || m->floating || frozen) type = b2_staticBody;
         else if (dragged) type = b2_kinematicBody;
 
-        int no_collide = m->no_collide || (skip_a != 0 && m->id == skip_a);
+        int no_collide = m->no_collide || m->floating || (skip_a != 0 && m->id == skip_a);
 
         if (!s->has) {
             slot_create(eng, world, i, m, type, no_collide);

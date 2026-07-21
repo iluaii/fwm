@@ -121,13 +121,17 @@ install_files() {
     # The control-socket CLI. Without it on PATH, scripting fwm means finding
     # the binary in a build directory, which nobody will do.
     $SUDO install -Dm755 "$REPO_DIR/build/fwmctl" "$PREFIX/bin/fwmctl"
+    # Supervisor: restarts fwm after a crash and lets session restore put the
+    # applications back. The session entry below launches this, not the
+    # compositor directly.
+    $SUDO install -Dm755 "$REPO_DIR/session/fwm-session" "$PREFIX/bin/fwm-session"
     # Substitute the real binary path rather than shipping a bare "fwm-wayland":
     # display managers run sessions with a trimmed PATH that need not contain
     # $PREFIX/bin, and the failure mode is the worst kind — the session shows up
     # in the list, you pick it, and it drops straight back to the login screen
     # with nothing to explain why.
     $SUDO install -d /usr/share/wayland-sessions
-    sed "s|^Exec=.*|Exec=$PREFIX/bin/fwm-wayland|" "$REPO_DIR/session/fwm.desktop" \
+    sed "s|^Exec=.*|Exec=$PREFIX/bin/fwm-session|" "$REPO_DIR/session/fwm.desktop" \
         | $SUDO tee /usr/share/wayland-sessions/fwm.desktop >/dev/null
     $SUDO chmod 644 /usr/share/wayland-sessions/fwm.desktop
 
@@ -158,7 +162,8 @@ update)
     ;;
 uninstall)
     msg "Uninstalling"
-    $SUDO rm -f "$PREFIX/bin/fwm-wayland" "$PREFIX/bin/fwmctl" /usr/share/wayland-sessions/fwm.desktop
+    $SUDO rm -f "$PREFIX/bin/fwm-wayland" "$PREFIX/bin/fwmctl" "$PREFIX/bin/fwm-session" \
+                /usr/share/wayland-sessions/fwm.desktop
     msg "Removed (user config in ~/.config/fwm kept)"
     ;;
 *)

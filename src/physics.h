@@ -24,6 +24,9 @@ typedef struct {
     int pinned;
     int no_collide;
     int tiled;     /* window is managed by the tiling layout: physics never moves it */
+    int floating;  /* desktop is in floating mode: immovable AND non-colliding,
+                    * i.e. pinned + no_collide without touching those per-window
+                    * flags, so leaving the mode restores what the user set */
     double tile_sav_x, tile_sav_y;
     int tile_sav_w, tile_sav_h;
     int tiling_saved;

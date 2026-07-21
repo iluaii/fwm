@@ -7,6 +7,7 @@
 #include "lock.h"
 #include "foreign.h"
 #include "ipc.h"
+#include "session.h"
 #include <signal.h>
 #include "ui/tray.h"
 #include "ui/hints.h"
@@ -539,6 +540,10 @@ static void server_animate(FwmServer *server) {
      * animation to its end. */
     if (dt > 0.25) dt = 0.25;
     server->last_anim = now;
+
+    /* Rate-limits itself to one write every few seconds, and only when the set
+     * of running applications or their desktops actually changed. */
+    session_maybe_save(server);
 
     server_shake_tick(server, dt);
 
@@ -2260,25 +2265,16 @@ void server_set_wallpaper(FwmServer *server, const char *path) {
     wlr_log(WLR_INFO, "wallpaper set to %s", path);
 }
 
-void server_reload_config(FwmServer *server) {
-    /* Held-key repeat points into config.keys[].action, which is about to be
-     * freed — disarm it before the old config goes away. */
-    server->repeat_action = NULL;
-    server->repeat_keycode = 0;
-    if (server->key_repeat_timer) wl_event_source_timer_update(server->key_repeat_timer, 0);
-
-    /* Panels are rebuilt from the new config rather than patched. */
-    server_close_errors_panel(server);
-    if (server->hints_buffer) {
-        cairo_overlay_destroy(server->hints_buffer);
-        server->hints_buffer = NULL;
-    }
-
-    char path[512];
-    server_config_path(path, sizeof(path));
-    config_free(&server->config);
-    config_load(&server->config, path);
-    server_state_apply_wallpaper(server);
+/* Push the current FwmConfig onto the live compositor.
+ *
+ * Split out of server_reload_config so that a single `fwmctl set` can reuse
+ * exactly the same re-apply path as a full reload — the alternative, a
+ * per-option apply hook, is a second place to forget about.
+ *
+ * rebuild_wallpaper is a parameter rather than always-on because rebuilding
+ * decodes the image from disk: fine once per reload, far too expensive for a
+ * knob someone is dragging through a range. */
+void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
     /* Before anything reads colours: a new wallpaper or color_source repaints
      * the whole system. */
     theme_build(&server->config);
@@ -2308,18 +2304,20 @@ void server_reload_config(FwmServer *server) {
     }
 
     /* Wallpaper layers are baked at load time, so rebuild them wholesale. */
-    if (server->wallpaper_prev) {
-        wallpaper_destroy(server->wallpaper_prev);
-        server->wallpaper_prev = NULL;
-    }
-    if (server->wallpaper) {
-        wallpaper_destroy(server->wallpaper);
-        server->wallpaper = NULL;
-    }
-    if (server->config.wallpaper_count > 0) {
-        server->wallpaper = wallpaper_create(server->layer_background, &server->config,
-                                             server->screen_width, server->screen_height);
-        if (server->wallpaper) wallpaper_update(server->wallpaper, server->camera_x);
+    if (rebuild_wallpaper) {
+        if (server->wallpaper_prev) {
+            wallpaper_destroy(server->wallpaper_prev);
+            server->wallpaper_prev = NULL;
+        }
+        if (server->wallpaper) {
+            wallpaper_destroy(server->wallpaper);
+            server->wallpaper = NULL;
+        }
+        if (server->config.wallpaper_count > 0) {
+            server->wallpaper = wallpaper_create(server->layer_background, &server->config,
+                                                 server->screen_width, server->screen_height);
+            if (server->wallpaper) wallpaper_update(server->wallpaper, server->camera_x);
+        }
     }
 
     /* New gaps / anim settings take effect on tiled desktops. */
@@ -2327,12 +2325,38 @@ void server_reload_config(FwmServer *server) {
         if (server->desktop_mode[d] == DESKTOP_MODE_TILING) server_apply_tiling(server, d);
     }
 
+    server_request_tray_redraw(server);
+}
+
+void server_reload_config(FwmServer *server) {
+    /* Held-key repeat points into config.keys[].action, which is about to be
+     * freed — disarm it before the old config goes away. */
+    server->repeat_action = NULL;
+    server->repeat_keycode = 0;
+    if (server->key_repeat_timer) wl_event_source_timer_update(server->key_repeat_timer, 0);
+
+    /* Panels are rebuilt from the new config rather than patched. */
+    server_close_errors_panel(server);
+    if (server->hints_buffer) {
+        cairo_overlay_destroy(server->hints_buffer);
+        server->hints_buffer = NULL;
+    }
+
+    char path[512];
+    server_config_path(path, sizeof(path));
+    config_free(&server->config);
+    config_load(&server->config, path);
+    server_state_apply_wallpaper(server);
+
+    /* Rereading the file also discards any `fwmctl set` overrides — the file
+     * is the source of truth, and this is the documented way back to it. */
+    server_apply_config(server, 1);
+
     /* Surface whatever the new file got wrong straight away. */
     if (server->config.error_count > 0) {
         server->errors_buffer = errors_show(server->layer_overlay, server->screen_width,
                                             server->screen_height, &server->config);
     }
-    server_request_tray_redraw(server);
     wlr_log(WLR_INFO, "config reloaded from %s (%d problem(s))",
             path, server->config.error_total);
 }
@@ -2341,76 +2365,128 @@ void server_reload_config(FwmServer *server) {
  * bind and the all-desktops bind cannot drift apart — the restore path in
  * particular (saved geometry, cleared tile state, the outward shove) is easy to
  * get subtly wrong twice. */
-static void server_toggle_desktop_tiling(FwmServer *server, int d) {
-    if (server->desktop_mode[d] == DESKTOP_MODE_PHYSICS) {
-        server->desktop_mode[d] = DESKTOP_MODE_TILING;
-        
-        // Save state for physics
-        FwmView *view;
-        wl_list_for_each(view, &server->views, link) {
-            PhysicsBody *b = physics_find_body(&server->physics, view->id);
-            if (b && b->desktop_id == d) {
-                if (!b->tiling_saved) {
-                    b->sav_x = b->x; b->sav_y = b->y;
-                    b->sav_w = b->width; b->sav_h = b->height;
-                    b->tiling_saved = 1;
-                }
-            }
-        }
-        
-        bsp_free(server->bsp_roots[d]);
-        server->bsp_roots[d] = NULL;
-        
-        // Insert views to BSP tree
-        wl_list_for_each(view, &server->views, link) {
-            PhysicsBody *b = physics_find_body(&server->physics, view->id);
-            if (b && !b->shaped && !b->fullscreen && b->desktop_id == d) {
-                bsp_insert(&server->bsp_roots[d], 0, view->id);
-            }
-        }
-        server_apply_tiling(server, d);
-    } else {
-        server->desktop_mode[d] = DESKTOP_MODE_PHYSICS;
-        
-        // Restore physics coordinates
-        FwmView *view;
-        wl_list_for_each(view, &server->views, link) {
-            PhysicsBody *b = physics_find_body(&server->physics, view->id);
-            if (b && b->desktop_id == d) {
-                if (b->tiling_saved) {
-                    b->x = b->sav_x; b->y = b->sav_y;
-                    b->width = b->sav_w; b->height = b->sav_h;
-                    b->tiling_saved = 0;
-                } else {
-                    b->width = server->screen_width / 2;
-                    b->height = server->screen_height / 2;
-                    b->x = d * server->screen_width + (server->screen_width - b->width) / 2;
-                    b->y = (server->screen_height - b->height) / 2;
-                }
-                b->vx = 0; b->vy = 0; b->flying = 0;
-                b->tiled = 0;
-                view->tile_anim = 0;
-
-                view->x = b->x; view->y = b->y;
-                view->width = b->width; view->height = b->height;
-                view_set_size(view, view->width, view->height);
-                if (view->scene_tree) {
-                    wlr_scene_node_set_position(&view->scene_tree->node, (int)lround(view->x - server->camera_x), (int)lround(view->y));
-                }
-            }
-        }
-        
-        // Push views flying
-        wl_list_for_each(view, &server->views, link) {
-            PhysicsBody *b = physics_find_body(&server->physics, view->id);
-            if (b && b->desktop_id == d) {
-                double angle = ((double)(view->id % 628)) / 100.0;
-                b->vx = cos(angle) * 200.0;
-                b->vy = sin(angle) * 200.0;
-                b->flying = 1;
-            }
+static void desktop_enter_tiling(FwmServer *server, int d) {
+    /* Remember where physics had put things, so leaving tiling can undo it. */
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        PhysicsBody *b = physics_find_body(&server->physics, view->id);
+        if (b && b->desktop_id == d && !b->tiling_saved) {
+            b->sav_x = b->x; b->sav_y = b->y;
+            b->sav_w = b->width; b->sav_h = b->height;
+            b->tiling_saved = 1;
         }
     }
+
+    bsp_free(server->bsp_roots[d]);
+    server->bsp_roots[d] = NULL;
+
+    wl_list_for_each(view, &server->views, link) {
+        PhysicsBody *b = physics_find_body(&server->physics, view->id);
+        if (b && !b->shaped && !b->fullscreen && b->desktop_id == d) {
+            bsp_insert(&server->bsp_roots[d], 0, view->id);
+        }
+    }
+    server_apply_tiling(server, d);
+}
+
+static void desktop_leave_tiling(FwmServer *server, int d) {
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        PhysicsBody *b = physics_find_body(&server->physics, view->id);
+        if (!b || b->desktop_id != d) continue;
+
+        if (b->tiling_saved) {
+            b->x = b->sav_x; b->y = b->sav_y;
+            b->width = b->sav_w; b->height = b->sav_h;
+            b->tiling_saved = 0;
+        } else {
+            b->width = server->screen_width / 2;
+            b->height = server->screen_height / 2;
+            b->x = d * server->screen_width + (server->screen_width - b->width) / 2;
+            b->y = (server->screen_height - b->height) / 2;
+        }
+        b->vx = 0; b->vy = 0; b->flying = 0;
+        b->tiled = 0;
+        view->tile_anim = 0;
+
+        view->x = b->x; view->y = b->y;
+        view->width = b->width; view->height = b->height;
+        view_set_size(view, view->width, view->height);
+        if (view->scene_tree) {
+            wlr_scene_node_set_position(&view->scene_tree->node,
+                                        (int)lround(view->x - server->camera_x),
+                                        (int)lround(view->y));
+        }
+    }
+
+    bsp_free(server->bsp_roots[d]);
+    server->bsp_roots[d] = NULL;
+}
+
+/* Floating is the "normal desktop environment" mode: windows stay exactly
+ * where you drop them and overlap freely. Both halves of that are already
+ * expressible per window (pinned = immovable anchor, no_collide = passes
+ * through other windows), so the desktop mode just raises one flag and lets
+ * physics.c apply the same two rules it already knows. */
+static void desktop_set_floating(FwmServer *server, int d, int on) {
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        PhysicsBody *b = physics_find_body(&server->physics, view->id);
+        if (!b || b->desktop_id != d) continue;
+        b->floating = on;
+        if (on) { b->vx = 0; b->vy = 0; b->flying = 0; }
+    }
+}
+
+/* Scatter everything on the desktop, so switching back to physics reads as the
+ * world waking up rather than as nothing having happened. */
+static void desktop_shove(FwmServer *server, int d) {
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        PhysicsBody *b = physics_find_body(&server->physics, view->id);
+        if (!b || b->desktop_id != d) continue;
+        double angle = ((double)(view->id % 628)) / 100.0;
+        b->vx = cos(angle) * 200.0;
+        b->vy = sin(angle) * 200.0;
+        b->flying = 1;
+    }
+}
+
+/* Move one desktop between physics, tiling and floating.
+ *
+ * Written as leave-old then enter-new rather than as a switch over pairs: with
+ * three modes there are six transitions, and the pairwise form is where the
+ * restore path (saved geometry, cleared tile state, the outward shove) starts
+ * getting subtly wrong in some of them. */
+void server_set_desktop_mode(FwmServer *server, int d, int mode) {
+    if (d < 0 || d >= 10) return;
+    int old = server->desktop_mode[d];
+    if (old == mode) return;
+
+    if (old == DESKTOP_MODE_TILING)        desktop_leave_tiling(server, d);
+    else if (old == DESKTOP_MODE_FLOATING) desktop_set_floating(server, d, 0);
+
+    server->desktop_mode[d] = mode;
+
+    if (mode == DESKTOP_MODE_TILING)        desktop_enter_tiling(server, d);
+    else if (mode == DESKTOP_MODE_FLOATING) desktop_set_floating(server, d, 1);
+    else                                    desktop_shove(server, d);
+
+    server_request_tray_redraw(server);
+}
+
+/* Kept as the entry point for the toggle_tiling bind: physics <-> tiling, with
+ * floating collapsing to tiling so the key never becomes a no-op. */
+static void server_toggle_desktop_tiling(FwmServer *server, int d) {
+    server_set_desktop_mode(server, d,
+        server->desktop_mode[d] == DESKTOP_MODE_TILING
+            ? DESKTOP_MODE_PHYSICS : DESKTOP_MODE_TILING);
+}
+
+static void server_toggle_desktop_floating(FwmServer *server, int d) {
+    server_set_desktop_mode(server, d,
+        server->desktop_mode[d] == DESKTOP_MODE_FLOATING
+            ? DESKTOP_MODE_PHYSICS : DESKTOP_MODE_FLOATING);
 }
 
 static void server_dispatch_action(FwmServer *server, const char *action) {
@@ -2539,9 +2615,19 @@ static void server_dispatch_action(FwmServer *server, const char *action) {
             if (server->desktop_mode[d] != DESKTOP_MODE_TILING) { all_tiled = 0; break; }
         }
         int want = all_tiled ? DESKTOP_MODE_PHYSICS : DESKTOP_MODE_TILING;
+        /* Set the mode outright instead of toggling: a floating desktop would
+         * otherwise be flipped INTO tiling on the "everything back to physics"
+         * pass, which is the opposite of what was asked. */
+        for (int d = 0; d < 10; d++) server_set_desktop_mode(server, d, want);
+    } else if (strcmp(action, "toggle_floating") == 0) {
+        server_toggle_desktop_floating(server, server->target_camera_x / server->screen_width);
+    } else if (strcmp(action, "toggle_floating_all") == 0) {
+        int all_floating = 1;
         for (int d = 0; d < 10; d++) {
-            if (server->desktop_mode[d] != want) server_toggle_desktop_tiling(server, d);
+            if (server->desktop_mode[d] != DESKTOP_MODE_FLOATING) { all_floating = 0; break; }
         }
+        int want = all_floating ? DESKTOP_MODE_PHYSICS : DESKTOP_MODE_FLOATING;
+        for (int d = 0; d < 10; d++) server_set_desktop_mode(server, d, want);
     } else if (strcmp(action, "calm_all") == 0) {
         for (int i = 0; i < server->physics.body_count; i++) {
             PhysicsBody *b = &server->physics.bodies[i];
@@ -2866,6 +2952,11 @@ void server_run(FwmServer *server) {
         return;
     }
 
+    /* After the backend is up (so WAYLAND_DISPLAY is exported and the socket
+     * accepts connections) but before the event loop blocks: the relaunched
+     * clients connect into the loop we are about to enter. */
+    session_restore(server);
+
     wl_display_run(server->wl_display);
 }
 
@@ -2882,6 +2973,7 @@ void server_destroy(FwmServer *server) {
     ipc_destroy(server->ipc);
     server->ipc = NULL;
 
+    session_finish(server);
     config_free(&server->config);
     
     // Clean overlays

@@ -47,6 +47,7 @@ static int action_is_known(const char *a) {
         "show_errors", "reload_config", "wallpaper_picker", "group_toggle", "group_next",
         "group_prev", "group_add", "cycle_gravity", "pin_window",
         "toggle_nocollide", "toggle_nocollide_all", "toggle_tiling_all",
+        "toggle_floating", "toggle_floating_all",
         "calm_all", "fake_fullscreen", "real_fullscreen",
         "launcher", NULL
     };
@@ -328,6 +329,7 @@ static const struct { const char *bind; const char *action; } default_binds[] = 
     { "super+space",          "launcher"         },
     { "super+q",              "killclient"       },
     { "super+t",              "toggle_tiling"    },
+    { "super+alt+space",      "toggle_floating"  },
     { "super+d",              "fake_fullscreen"  },
     { "super+f",              "real_fullscreen"  },
     { "super+h",              "move_camera:-50"  },
@@ -535,6 +537,247 @@ static void load_wallpaper(toml_table_t *root, FwmConfig *cfg) {
     cfg->wallpaper_count = idx;
 }
 
+/* ── window rules ────────────────────────────────────────────────────── */
+
+/* Compile one matcher. Returns 1 if the pattern was present AND valid; a
+ * broken regex is reported and the rule simply loses that matcher — but a rule
+ * left with NO matchers is dropped entirely by the caller, because a matcher-
+ * less rule would silently apply to every window. */
+static int compile_matcher(FwmConfig *cfg, toml_table_t *tbl, const char *key,
+                           int index, regex_t *re, char *pat, size_t patcap,
+                           int *present) {
+    toml_datum_t d = toml_string_in(tbl, key);
+    if (!d.ok) return 0;
+    *present = 1;
+
+    int rc = regcomp(re, d.u.s, REG_EXTENDED | REG_NOSUB);
+    if (rc != 0) {
+        char reason[128];
+        regerror(rc, re, reason, sizeof(reason));
+        config_report_error(cfg, "[[rule]] #%d: bad %s regex \"%s\" — %s",
+                            index + 1, key, d.u.s, reason);
+        free(d.u.s);
+        return 0;
+    }
+    snprintf(pat, patcap, "%s", d.u.s);
+    free(d.u.s);
+    return 1;
+}
+
+/* Reads an optional boolean property into a tri-state: -1 keeps "unset", so a
+ * later rule can leave an earlier rule's decision standing. */
+static int rule_tristate(toml_table_t *tbl, const char *key) {
+    toml_datum_t d = toml_bool_in(tbl, key);
+    return d.ok ? (d.u.b ? 1 : 0) : -1;
+}
+
+static void load_rules(toml_table_t *root, FwmConfig *cfg) {
+    cfg->rules      = NULL;
+    cfg->rule_count = 0;
+
+    toml_array_t *arr = toml_array_in(root, "rule");
+    if (!arr) return;
+
+    int n = toml_array_nelem(arr);
+    if (n <= 0) return;
+    if (n > CONFIG_MAX_RULES) {
+        config_report_error(cfg, "too many [[rule]] entries (%d) — only the first %d are used",
+                            n, CONFIG_MAX_RULES);
+        n = CONFIG_MAX_RULES;
+    }
+
+    cfg->rules = calloc(n, sizeof(ConfigRule));
+    if (!cfg->rules) { perror("calloc"); return; }
+
+    int idx = 0;
+    for (int i = 0; i < n; i++) {
+        toml_table_t *tbl = toml_table_at(arr, i);
+        if (!tbl) continue;
+
+        ConfigRule *r = &cfg->rules[idx];
+        int present = 0;
+        r->has_app_id = compile_matcher(cfg, tbl, "app_id", i, &r->re_app_id,
+                                        r->pat_app_id, sizeof(r->pat_app_id), &present);
+        r->has_title  = compile_matcher(cfg, tbl, "title", i, &r->re_title,
+                                        r->pat_title, sizeof(r->pat_title), &present);
+
+        if (!r->has_app_id && !r->has_title) {
+            /* Only complain about the absence when the user never wrote a
+             * matcher. If one was written but would not compile, the regex
+             * error above is the actionable message — saying it twice would
+             * spend two of the tray pill's slots on a single typo. */
+            if (!present)
+                config_report_error(cfg, "[[rule]] #%d: no app_id/title matcher — rule ignored",
+                                    i + 1);
+            continue;   /* nothing compiled, so nothing to regfree */
+        }
+
+        r->nocollide = rule_tristate(tbl, "nocollide");
+        r->pin       = rule_tristate(tbl, "pin");
+
+        r->desktop = -1;
+        toml_datum_t desk = toml_int_in(tbl, "desktop");
+        if (desk.ok) {
+            if (desk.u.i < 0 || desk.u.i > 9)
+                config_report_error(cfg, "[[rule]] #%d: desktop %lld out of range 0..9 — ignored",
+                                    i + 1, (long long)desk.u.i);
+            else
+                r->desktop = (int)desk.u.i;
+        }
+
+        if (r->nocollide < 0 && r->pin < 0 && r->desktop < 0)
+            config_report_error(cfg, "[[rule]] #%d: matches but sets nothing", i + 1);
+
+        idx++;
+    }
+    cfg->rule_count = idx;
+}
+
+int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *title,
+                       ConfigRule *out) {
+    out->nocollide = -1;
+    out->pin       = -1;
+    out->desktop   = -1;
+
+    int matched = 0;
+    for (int i = 0; i < cfg->rule_count; i++) {
+        const ConfigRule *r = &cfg->rules[i];
+
+        /* Every matcher the rule declares has to hit. A window with no app_id
+         * (some X11 clients) can never satisfy an app_id matcher. */
+        if (r->has_app_id) {
+            if (!app_id || regexec(&r->re_app_id, app_id, 0, NULL, 0) != 0) continue;
+        }
+        if (r->has_title) {
+            if (!title || regexec(&r->re_title, title, 0, NULL, 0) != 0) continue;
+        }
+
+        /* Later rules override earlier ones field by field. */
+        if (r->nocollide >= 0) out->nocollide = r->nocollide;
+        if (r->pin       >= 0) out->pin       = r->pin;
+        if (r->desktop   >= 0) out->desktop   = r->desktop;
+        matched = 1;
+    }
+    return matched;
+}
+
+/* ── runtime-settable options ────────────────────────────────────────── */
+
+/* physics.tick_rate is deliberately absent: the tick timer is armed once at
+ * startup, so accepting a new value here would report success and change
+ * nothing. Same reasoning excludes the string options (icon_theme, kbd_*) —
+ * they are re-read only by a full reload. */
+static const ConfigOption config_option_table[] = {
+    { "physics.friction",               CFG_OPT_DOUBLE, offsetof(FwmConfig, physics.friction),               0.0,     1.0,     "velocity retained per tick" },
+    { "physics.mass_density",           CFG_OPT_DOUBLE, offsetof(FwmConfig, physics.mass_density),            0.0,     1.0,     "mass per pixel of window area" },
+    { "physics.throw_speed_multiplier", CFG_OPT_DOUBLE, offsetof(FwmConfig, physics.throw_speed_multiplier),  0.0,    10.0,     "how hard a drag throws" },
+    { "physics.max_throw_speed",        CFG_OPT_DOUBLE, offsetof(FwmConfig, physics.max_throw_speed),         0.0, 100000.0,    "throw speed cap, px/s" },
+    { "physics.stop_speed_threshold",   CFG_OPT_DOUBLE, offsetof(FwmConfig, physics.stop_speed_threshold),    0.0,  1000.0,    "below this a body is put to sleep" },
+    { "physics.restitution",            CFG_OPT_DOUBLE, offsetof(FwmConfig, physics.restitution),             0.0,     1.0,     "bounciness, 0 = dead stop" },
+    { "physics.gravity",                CFG_OPT_DOUBLE, offsetof(FwmConfig, physics.gravity),           -100000.0, 100000.0,    "px/s^2; 981 = earth at 100px/m" },
+
+    { "tiling.gaps_in",                 CFG_OPT_INT,    offsetof(FwmConfig, tiling.gaps_in),                  0.0,   500.0,    "gap between tiles, px" },
+    { "tiling.gaps_out",                CFG_OPT_INT,    offsetof(FwmConfig, tiling.gaps_out),                 0.0,   500.0,    "gap to the screen edge, px" },
+    { "tiling.anim_speed",              CFG_OPT_DOUBLE, offsetof(FwmConfig, tiling.anim_speed),               0.0,  1000.0,    "tile-glide rate, 1/s; 0 disables" },
+
+    { "camera.anim_ms",                 CFG_OPT_DOUBLE, offsetof(FwmConfig, camera.anim_ms),                  0.0, 10000.0,    "desktop-switch slide, ms" },
+    { "camera.free_speed",              CFG_OPT_DOUBLE, offsetof(FwmConfig, camera.free_speed),               0.0,  1000.0,    "held move_camera chase rate, 1/s" },
+
+    { "decor.border_width",             CFG_OPT_INT,    offsetof(FwmConfig, decor.border_width),              0.0,    64.0,    "focus border, px; 0 disables" },
+    { "decor.col_active",               CFG_OPT_COLOR,  offsetof(FwmConfig, decor.col_active),                0.0,     0.0,    "focused border colour" },
+    { "decor.col_inactive",             CFG_OPT_COLOR,  offsetof(FwmConfig, decor.col_inactive),              0.0,     0.0,    "unfocused border colour" },
+    { "decor.fade_in_ms",               CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.fade_in_ms),                0.0, 10000.0,    "window open animation, ms" },
+    { "decor.wallpaper_fade_ms",        CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.wallpaper_fade_ms),         0.0, 10000.0,    "wallpaper cross-fade, ms" },
+    { "decor.tray_opacity",             CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.tray_opacity),              0.0,     1.0,    "tray island fill alpha" },
+    { "decor.launcher_opacity",         CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.launcher_opacity),          0.0,     1.0,    "launcher island fill alpha" },
+    { "decor.tint_strength",            CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.tint_strength),             0.0,     1.0,    "island tint toward the wallpaper hue" },
+
+    { "effects.camera_shake",           CFG_OPT_DOUBLE, offsetof(FwmConfig, effects.camera_shake),            0.0,     4.0,    "impact shake; 0 disables" },
+    { "effects.squash",                 CFG_OPT_DOUBLE, offsetof(FwmConfig, effects.squash),                  0.0,     4.0,    "impact squash & stretch; 0 disables" },
+
+    { "input.repeat_rate",              CFG_OPT_INT,    offsetof(FwmConfig, input.repeat_rate),               0.0,   200.0,    "key repeat, chars/s" },
+    { "input.repeat_delay",             CFG_OPT_INT,    offsetof(FwmConfig, input.repeat_delay),              0.0,  5000.0,    "ms before repeat starts" },
+};
+
+const ConfigOption *config_options(int *count) {
+    if (count) *count = (int)(sizeof(config_option_table) / sizeof(config_option_table[0]));
+    return config_option_table;
+}
+
+const ConfigOption *config_option_find(const char *name) {
+    if (!name) return NULL;
+    int n;
+    const ConfigOption *tbl = config_options(&n);
+    for (int i = 0; i < n; i++)
+        if (strcmp(tbl[i].name, name) == 0) return &tbl[i];
+    return NULL;
+}
+
+int config_option_set(FwmConfig *cfg, const ConfigOption *opt,
+                      const char *value, char *err, size_t errcap) {
+    if (!value || !*value) {
+        snprintf(err, errcap, "%s needs a value", opt->name);
+        return 0;
+    }
+    char *field = (char *)cfg + opt->offset;
+
+    if (opt->type == CFG_OPT_COLOR) {
+        float rgba[4];
+        if (!parse_hex_color(value, rgba)) {
+            snprintf(err, errcap, "%s: expected #RRGGBB or #RRGGBBAA, got \"%s\"",
+                     opt->name, value);
+            return 0;
+        }
+        memcpy(field, rgba, sizeof(rgba));
+        return 1;
+    }
+
+    char *end;
+    double v = strtod(value, &end);
+    while (*end == ' ' || *end == '\t') end++;
+    if (end == value || *end) {
+        snprintf(err, errcap, "%s: expected a number, got \"%s\"", opt->name, value);
+        return 0;
+    }
+    /* Rejected rather than clamped: over a socket a silent clamp is
+     * indistinguishable from the value having been accepted. */
+    if (v < opt->min || v > opt->max) {
+        snprintf(err, errcap, "%s: %g is outside %g..%g", opt->name, v, opt->min, opt->max);
+        return 0;
+    }
+
+    if (opt->type == CFG_OPT_INT) *(int *)field = (int)v;
+    else                          *(double *)field = v;
+    return 1;
+}
+
+void config_option_get(const FwmConfig *cfg, const ConfigOption *opt,
+                       char *out, size_t cap) {
+    const char *field = (const char *)cfg + opt->offset;
+
+    switch (opt->type) {
+    case CFG_OPT_INT:
+        snprintf(out, cap, "%d", *(const int *)field);
+        break;
+    case CFG_OPT_COLOR: {
+        /* parse_hex_color stores premultiplied alpha for wlr_scene_rect, so
+         * undo that on the way out or every colour reads back darkened. */
+        const float *c = (const float *)field;
+        float a = c[3];
+        float r = a > 0.0f ? c[0] / a : 0.0f;
+        float g = a > 0.0f ? c[1] / a : 0.0f;
+        float b = a > 0.0f ? c[2] / a : 0.0f;
+        snprintf(out, cap, "#%02X%02X%02X%02X",
+                 (unsigned)(r * 255.0f + 0.5f), (unsigned)(g * 255.0f + 0.5f),
+                 (unsigned)(b * 255.0f + 0.5f), (unsigned)(a * 255.0f + 0.5f));
+        break;
+    }
+    default:
+        snprintf(out, cap, "%g", *(const double *)field);
+        break;
+    }
+}
+
 void config_load(FwmConfig *cfg, const char *path) {
     cfg->physics         = physics_defaults;
     cfg->tiling          = (TilingConfig){ .gaps_in = 6, .gaps_out = 12, .anim_speed = 12.0 };
@@ -554,6 +797,8 @@ void config_load(FwmConfig *cfg, const char *path) {
     cfg->key_count       = 0;
     cfg->wallpapers      = NULL;
     cfg->wallpaper_count = 0;
+    cfg->rules           = NULL;
+    cfg->rule_count      = 0;
     cfg->error_count     = 0;
     cfg->error_total     = 0;
     cfg->fallback_binds  = 0;
@@ -595,6 +840,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_binds(root, cfg);
     load_wallpaper(root, cfg);
     load_wallpaper_picker(root, cfg);
+    load_rules(root, cfg);
 
     toml_free(root);
 }
@@ -606,4 +852,13 @@ void config_free(FwmConfig *cfg) {
     free(cfg->wallpapers);
     cfg->wallpapers      = NULL;
     cfg->wallpaper_count = 0;
+    /* Compiled regexes own heap memory of their own: without regfree every
+     * hot reload (super+shift+r) would leak one allocation per matcher. */
+    for (int i = 0; i < cfg->rule_count; i++) {
+        if (cfg->rules[i].has_app_id) regfree(&cfg->rules[i].re_app_id);
+        if (cfg->rules[i].has_title)  regfree(&cfg->rules[i].re_title);
+    }
+    free(cfg->rules);
+    cfg->rules      = NULL;
+    cfg->rule_count = 0;
 }

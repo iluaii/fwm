@@ -1,0 +1,58 @@
+#!/bin/sh
+# fwm-session — keep fwm running across crashes.
+#
+# A Wayland compositor cannot be restarted without taking its clients with it:
+# it IS the display server, so a crash normally costs the whole working
+# layout. This wrapper turns that into a few seconds — fwm comes back up and
+# the applications it recorded in ~/.local/state/fwm/session are relaunched on
+# the desktops they were on. They are relaunched, not resumed: anything unsaved
+# inside them is still gone.
+#
+# A clean exit (the EXIT bind, super+shift+Escape) ends the session for good.
+# Anything else counts as a crash — but a compositor that cannot start at all
+# must not spin forever in front of a user with no way to intervene, so
+# repeated fast failures give up and hand control back to the display manager.
+#
+# Set FWM_BINARY to run a build other than the installed one.
+
+set -u
+
+FWM="${FWM_BINARY:-fwm-wayland}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/fwm"
+LOG="$STATE_DIR/crash.log"
+
+MAX_CRASHES=3    # this many failures...
+WINDOW=60        # ...within this many seconds means it is not coming back
+
+mkdir -p "$STATE_DIR"
+
+crashes=0
+window_start=$(date +%s)
+
+while :; do
+    "$FWM" "$@"
+    code=$?
+
+    if [ "$code" -eq 0 ]; then
+        exit 0    # the user asked to leave
+    fi
+
+    now=$(date +%s)
+    if [ $((now - window_start)) -gt "$WINDOW" ]; then
+        crashes=0                 # the last failure was long ago; start over
+        window_start=$now
+    fi
+    crashes=$((crashes + 1))
+
+    printf '%s: fwm exited with code %s (failure %s of %s)\n' \
+        "$(date -Is 2>/dev/null || date)" "$code" "$crashes" "$MAX_CRASHES" >>"$LOG"
+
+    if [ "$crashes" -ge "$MAX_CRASHES" ]; then
+        printf '%s: giving up after %s failures in %ss\n' \
+            "$(date -Is 2>/dev/null || date)" "$crashes" "$WINDOW" >>"$LOG"
+        echo "fwm-session: fwm failed $crashes times in ${WINDOW}s — see $LOG" >&2
+        exit "$code"
+    fi
+
+    sleep 1
+done

@@ -22,6 +22,10 @@
 
 #define DESKTOP_MODE_PHYSICS 0
 #define DESKTOP_MODE_TILING  1
+/* "Normal desktop environment": windows keep the position you drop them at and
+ * overlap freely — no gravity, no shoving, no layout. Mechanically it is the
+ * per-window pinned + no_collide pair raised to the whole desktop. */
+#define DESKTOP_MODE_FLOATING 2
 
 typedef enum {
     FWM_ACTION_NONE,
@@ -165,6 +169,15 @@ typedef struct FwmServer {
     /* Control socket (src/ipc.h). NULL if it could not be created. */
     struct FwmIpc *ipc;
 
+    /* Session save/restore bookkeeping (src/session.c); opaque here. Not to be
+     * confused with `session` above, which is the libseat/VT session. */
+    void *session_state;
+
+    /* MAX_WINDOWS overflow is reported once per session, not once per window:
+     * the tray pill stores a capped 24 messages and would otherwise fill with
+     * copies of the same one. */
+    int warned_window_limit;
+
     struct wlr_session_lock_manager_v1 *lock_manager;
     struct wlr_session_lock_v1 *lock;      /* NULL once the client is gone */
     int locked;
@@ -257,6 +270,9 @@ void server_schedule_frames(FwmServer *server);
 void server_refocus(FwmServer *server, int desktop, struct FwmView *skip);
 void server_focus_view(FwmServer *server, struct FwmView *view);
 void server_apply_tiling(FwmServer *server, int desktop);
+/* Move one desktop to DESKTOP_MODE_*, running the leave/enter work for both
+ * the old and the new mode. No-op when the desktop is already in that mode. */
+void server_set_desktop_mode(FwmServer *server, int d, int mode);
 void server_start_interactive_move(FwmServer *server, struct FwmView *view, uint32_t serial);
 void server_start_interactive_resize(FwmServer *server, struct FwmView *view, uint32_t edges, uint32_t serial);
 /* real=true: true fullscreen over the whole output (client is told it is
@@ -269,6 +285,10 @@ void server_request_tray_redraw(FwmServer *server);
  * (physics, decor, tiling, keymap, wallpaper, binds). Errors are reported
  * through the tray pill, never by failing. */
 void server_reload_config(FwmServer *server);
+/* Push the in-memory config onto the live compositor without touching the
+ * file. Used by server_reload_config (rebuild_wallpaper = 1) and by
+ * `fwmctl set`, which must not pay for an image decode per keystroke (0). */
+void server_apply_config(FwmServer *server, int rebuild_wallpaper);
 /* Run a keybind action from outside the keyboard path (see src/ipc.c). */
 void server_dispatch_action_external(FwmServer *server, const char *action);
 /* Swap the wallpaper at runtime: rebuilds the layers, recomputes the palette

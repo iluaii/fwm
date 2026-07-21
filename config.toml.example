@@ -94,7 +94,8 @@ repeat_delay = 600
 # mod keys: super, alt, shift, ctrl
 # system actions: killclient, toggle_tiling, fake_fullscreen, real_fullscreen,
 #                 pin_window, toggle_nocollide, toggle_nocollide_all,
-#                 toggle_tiling_all, calm_all, cycle_gravity,
+#                 toggle_tiling_all, toggle_floating, toggle_floating_all,
+#                 calm_all, cycle_gravity,
 #                 show_hints, show_errors, reload_config,
 #                 wallpaper_picker, launcher, EXIT
 # tiling:         toggle_split, tile_focus:l|r|u|d, tile_move:l|r|u|d
@@ -111,6 +112,12 @@ repeat_delay = 600
 #"super+space"        = "spawn:rofi -show drun -normal-window"
 "super+q"            = "killclient"
 "super+t"            = "toggle_tiling"
+# The third mode: a plain desktop environment. Windows keep the position you
+# drop them at and overlap freely — no gravity, no shoving, no layout. Handy
+# for the stretch of an afternoon where you just want the windows to sit still.
+# Per-window pin/nocollide are left untouched, so leaving the mode gives back
+# whatever you had toggled by hand. "toggle_floating_all" does every desktop.
+"super+alt+space"    = "toggle_floating"
 "super+space"            = "launcher"
 "super+d"            = "fake_fullscreen"
 "super+f"            = "real_fullscreen"
@@ -166,6 +173,39 @@ repeat_delay = 600
 # Deleting that state file goes back to the wallpaper configured here.
 [wallpaper_picker]
 dir = "~/Pictures"
+
+# Window rules: per-window overrides applied once, when the window opens.
+# Match on app_id and/or title with POSIX extended regexes — the same anchored
+# style as Hyprland's `class:^(mpv)$`. A rule with both matchers needs both to
+# hit; rules are applied in file order, so a later one wins field by field.
+#
+# Properties: nocollide, pin (booleans) and desktop (0..9).
+#
+# There is no per-window "float" on purpose: tiling here is a property of the
+# DESKTOP, not of the window, so such a rule could not be honoured. Use
+# toggle_tiling on the desktop instead.
+#
+#[[rule]]
+#app_id    = "^mpv$"
+#nocollide = true          # video should not get shoved around by physics
+#
+#[[rule]]
+#app_id  = "^(Slack|discord)$"
+#desktop = 3               # chat always opens on desktop 4
+#
+#[[rule]]
+#title = "^Picture-in-Picture$"
+#pin   = true
+
+# Anything above with a numeric or colour value can also be changed live,
+# without editing this file:
+#
+#   fwmctl config                        # list every option with its value
+#   fwmctl set physics.gravity 200       # watch a window fall in slow motion
+#   fwmctl set decor.col_active "#ff0000"
+#
+# Those changes last until the session ends or you reload (super+shift+r) —
+# this file is never rewritten, so the comments you are reading survive.
 
 # Wallpaper. fit = "cover" (fill+crop, static) | "contain" (whole image,
 # letterboxed, static) | "pan" (walk across the image as you switch desktops).

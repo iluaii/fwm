@@ -1,6 +1,8 @@
 #ifndef FWM_CONFIG_H
 #define FWM_CONFIG_H
 
+#include <regex.h>
+#include <stddef.h>
 #include <xkbcommon/xkbcommon.h>
 
 /* Modifiers */
@@ -143,6 +145,73 @@ typedef struct {
                     * zoom = more travel but the image is scaled up (softer). */
 } WallpaperLayer;
 
+/* ── window rules ────────────────────────────────────────────────────── */
+
+/*
+ * Per-window overrides applied ONCE, when the window is mapped. Configured as
+ * an array of tables, each with at least one matcher:
+ *
+ *   [[rule]]
+ *   app_id    = "^mpv$"
+ *   nocollide = true
+ *   pin       = true
+ *
+ * Matchers are POSIX extended regexes (libc regcomp, so no new dependency)
+ * tested against the window's app_id / title — the same anchored style
+ * Hyprland users already write. A rule with several matchers requires ALL of
+ * them to hit. Rules are evaluated in file order and every match is applied,
+ * so a later rule overrides an earlier one field by field.
+ *
+ * There is deliberately no per-window "float": tiling on fwm is a property of
+ * the DESKTOP, not of the window, so such a rule could not be honoured.
+ */
+
+#define CONFIG_MAX_RULES 64
+
+typedef struct {
+    /* Compiled matchers; the has_* flag says whether the regex_t is live. */
+    int     has_app_id;
+    int     has_title;
+    regex_t re_app_id;
+    regex_t re_title;
+    char    pat_app_id[128];  /* kept for diagnostics / `fwmctl rules` */
+    char    pat_title[128];
+
+    /* Properties. -1 means "this rule says nothing about it", so an earlier
+     * rule's decision survives. */
+    int nocollide;  /* PhysicsBody.no_collide */
+    int pin;        /* PhysicsBody.pinned */
+    int desktop;    /* 0..9; where the window opens */
+} ConfigRule;
+
+/* ── runtime-settable options ────────────────────────────────────────── */
+
+/*
+ * The scalar knobs, addressable by name ("physics.gravity") so that IPC can
+ * read and write any of them without a line of code per option — the one part
+ * of Hyprland's string-keyed config registry that pays for itself at this
+ * size. Arrays ([binds], [[wallpaper]], [[rule]]) are NOT here: they are not
+ * scalars, and reloading is the right way to change them.
+ *
+ * Writes are RUNTIME-ONLY. config.toml is never rewritten — it is the source
+ * of truth, and `reload_config` (super+shift+r) discards every override. This
+ * matches how the wallpaper picker already behaves.
+ */
+
+typedef enum {
+    CFG_OPT_DOUBLE,
+    CFG_OPT_INT,
+    CFG_OPT_COLOR,   /* float[4] premultiplied RGBA, written as "#RRGGBB[AA]" */
+} ConfigOptType;
+
+typedef struct {
+    const char   *name;   /* "section.field" */
+    ConfigOptType type;
+    size_t        offset; /* into FwmConfig */
+    double        min, max;
+    const char   *help;
+} ConfigOption;
+
 /* ── config diagnostics ──────────────────────────────────────────────── */
 
 /* A broken config must never leave the compositor unusable: config_load always
@@ -171,6 +240,8 @@ typedef struct {
     int             key_count;
     WallpaperLayer *wallpapers;
     int             wallpaper_count;
+    ConfigRule     *rules;
+    int             rule_count;
     /* [wallpaper_picker] dir — where the built-in picker looks for images.
      * "~" is expanded at load. */
     char            wallpaper_dir[512];
@@ -192,6 +263,30 @@ void config_free(FwmConfig *cfg);
  * consumers that only discover a mistake when they act on the value (e.g. the
  * theme asking for wallpaper colours when no wallpaper is set). */
 void config_report_error(FwmConfig *cfg, const char *fmt, ...);
+
+/* Runtime-settable options (see ConfigOption above). */
+
+/* The table itself, for listing. */
+const ConfigOption *config_options(int *count);
+
+/* Look one up by name; NULL if unknown. */
+const ConfigOption *config_option_find(const char *name);
+
+/* Parse `value` and store it. Returns 1 on success; on failure returns 0 and
+ * writes a human-readable reason into err. Out-of-range values are rejected
+ * rather than clamped: a silent clamp over a socket is indistinguishable from
+ * the value having been accepted. */
+int config_option_set(FwmConfig *cfg, const ConfigOption *opt,
+                      const char *value, char *err, size_t errcap);
+
+/* Format the current value into out (never fails for a valid opt). */
+void config_option_get(const FwmConfig *cfg, const ConfigOption *opt,
+                       char *out, size_t cap);
+
+/* Fold every matching rule's properties into `out`, in file order. Returns 0
+ * if nothing matched. app_id/title may be NULL. */
+int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *title,
+                       ConfigRule *out);
 
 #define FWM_CONFIG_PATH "/.config/fwm/config.toml"
 

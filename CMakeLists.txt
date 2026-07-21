@@ -39,6 +39,7 @@ set(SOURCES
     src/foreign.c
     src/group.c
     src/ipc.c
+    src/session.c
     src/server.c
     src/ui/cairo_overlay.c
     src/ui/tray.c

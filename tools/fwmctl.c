@@ -47,9 +47,15 @@ int main(int argc, char **argv) {
             "\n"
             "  state              compositor state as JSON\n"
             "  windows            open windows as JSON\n"
+            "  config             every settable option, with values and ranges\n"
+            "  get <name>         read one option, e.g. physics.gravity\n"
+            "  set <name> <val>   change one option for this session only\n"
             "  dispatch <action>  run a keybind action (same names as config.toml)\n"
-            "  reload             reload the config\n"
-            "  version            IPC protocol version\n");
+            "  reload             reload the config, discarding every `set`\n"
+            "  version            IPC protocol version\n"
+            "\n"
+            "`set` never writes config.toml: the file stays the source of truth,\n"
+            "so `reload` (or super+shift+r) puts everything back.\n");
         return argc < 2 ? 1 : 0;
     }
 

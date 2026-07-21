@@ -1,7 +1,11 @@
 #ifndef FWM_DEFINES_H
 #define FWM_DEFINES_H
 
-#define MAX_WINDOWS             32
+/* Concurrent windows with a physics body. Slots are recycled when a window
+ * closes, so this is a ceiling on what is on screen at once, not on what has
+ * been opened over the session. Costs ~256 * (sizeof(PhysicsBody) +
+ * sizeof(BodySlot)) of static memory, which is tens of kilobytes. */
+#define MAX_WINDOWS             256
 #define DRAG_MARGIN             5
 #define PHYSICS_MARGIN          3
 #define MASS_DENSITY            0.0005

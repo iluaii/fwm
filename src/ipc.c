@@ -122,6 +122,11 @@ static void cmd_windows(FwmServer *server, struct Buf *b) {
         buf_printf(b, ",\"desktop\":%d", server->screen_width > 0
                                          ? view->x / server->screen_width : 0);
         buf_printf(b, ",\"focused\":%s", view == server->focused_view ? "true" : "false");
+        /* Physics flags: the only way to see whether a [[rule]] (or a manual
+         * toggle) actually took hold on this window. */
+        PhysicsBody *body = physics_find_body(&server->physics, view->id);
+        buf_printf(b, ",\"pinned\":%s", body && body->pinned ? "true" : "false");
+        buf_printf(b, ",\"nocollide\":%s", body && body->no_collide ? "true" : "false");
         buf_printf(b, ",\"xwayland\":%s}", view->type == FWM_VIEW_XDG ? "false" : "true");
     }
     buf_puts(b, "]}\n");
@@ -138,8 +143,94 @@ static void cmd_state(FwmServer *server, struct Buf *b) {
                server->screen_width, server->screen_height);
     buf_printf(b, "\"gravity\":%.3f,\"locked\":%s,",
                server->physics.gravity_scale, server->locked ? "true" : "false");
+
+    /* Per-desktop mode: nothing else exposes it, and with three modes "which
+     * one am I in" stops being guessable from how the windows look. */
+    static const char *mode_name[] = { "physics", "tiling", "floating" };
+    int m = server->desktop_mode[desktop];
+    buf_puts(b, "\"mode\":");
+    buf_json_string(b, (m >= 0 && m <= 2) ? mode_name[m] : "?");
+    buf_puts(b, ",\"modes\":[");
+    for (int d = 0; d < 10; d++) {
+        int dm = server->desktop_mode[d];
+        if (d) buf_puts(b, ",");
+        buf_json_string(b, (dm >= 0 && dm <= 2) ? mode_name[dm] : "?");
+    }
+    buf_puts(b, "],");
     buf_puts(b, "\"focused\":");
     buf_json_string(b, server->focused_view ? view_title(server->focused_view) : "");
+    buf_puts(b, "}\n");
+}
+
+/* Every runtime-settable option with its current value, so `fwmctl config`
+ * documents itself rather than needing the list kept in sync by hand. */
+static void cmd_config(FwmServer *server, struct Buf *b) {
+    int n;
+    const ConfigOption *opts = config_options(&n);
+
+    buf_puts(b, "{\"ok\":true,\"options\":[");
+    for (int i = 0; i < n; i++) {
+        char value[64];
+        config_option_get(&server->config, &opts[i], value, sizeof(value));
+
+        if (i) buf_puts(b, ",");
+        buf_puts(b, "{\"name\":");
+        buf_json_string(b, opts[i].name);
+        buf_puts(b, ",\"value\":");
+        buf_json_string(b, value);
+        buf_puts(b, ",\"help\":");
+        buf_json_string(b, opts[i].help);
+        if (opts[i].type != CFG_OPT_COLOR)
+            buf_printf(b, ",\"min\":%g,\"max\":%g", opts[i].min, opts[i].max);
+        buf_puts(b, "}");
+    }
+    buf_puts(b, "]}\n");
+}
+
+static void cmd_get(FwmServer *server, const char *name, struct Buf *b) {
+    const ConfigOption *opt = config_option_find(name);
+    if (!opt) { reply_error(b, "unknown option (try: config)"); return; }
+
+    char value[64];
+    config_option_get(&server->config, opt, value, sizeof(value));
+    buf_puts(b, "{\"ok\":true,\"name\":");
+    buf_json_string(b, opt->name);
+    buf_puts(b, ",\"value\":");
+    buf_json_string(b, value);
+    buf_puts(b, "}\n");
+}
+
+/* `set <name> <value>` — runtime only. config.toml is never rewritten, so
+ * reload_config (super+shift+r) is the documented way back to the file. */
+static void cmd_set(FwmServer *server, const char *arg, struct Buf *b) {
+    const char *sep = arg ? strchr(arg, ' ') : NULL;
+    if (!sep) { reply_error(b, "set needs <name> <value>"); return; }
+
+    char name[64];
+    size_t namelen = (size_t)(sep - arg);
+    if (namelen >= sizeof(name)) { reply_error(b, "option name too long"); return; }
+    memcpy(name, arg, namelen);
+    name[namelen] = '\0';
+
+    while (*sep == ' ') sep++;
+
+    const ConfigOption *opt = config_option_find(name);
+    if (!opt) { reply_error(b, "unknown option (try: config)"); return; }
+
+    char err[192];
+    if (!config_option_set(&server->config, opt, sep, err, sizeof(err))) {
+        reply_error(b, err);
+        return;
+    }
+    /* Same re-apply path a reload uses, minus the wallpaper image decode. */
+    server_apply_config(server, 0);
+
+    char value[64];
+    config_option_get(&server->config, opt, value, sizeof(value));
+    buf_puts(b, "{\"ok\":true,\"name\":");
+    buf_json_string(b, opt->name);
+    buf_puts(b, ",\"value\":");
+    buf_json_string(b, value);
     buf_puts(b, "}\n");
 }
 
@@ -160,6 +251,12 @@ static void ipc_handle_command(FwmIpc *ipc, const char *line, struct Buf *out) {
     }
     if (IS("state"))   { cmd_state(server, out);   return; }
     if (IS("windows")) { cmd_windows(server, out); return; }
+    if (IS("config"))  { cmd_config(server, out);  return; }
+    if (IS("get")) {
+        if (!arg) { reply_error(out, "get needs an option name"); return; }
+        cmd_get(server, arg, out);
+        return;
+    }
 
     /* Everything below CHANGES state. The lock screen's whole promise is that
      * a locked session accepts no input — routing binds through a socket
@@ -175,13 +272,17 @@ static void ipc_handle_command(FwmIpc *ipc, const char *line, struct Buf *out) {
         reply_ok(out);
         return;
     }
+    if (IS("set")) {
+        cmd_set(server, arg, out);
+        return;
+    }
     if (IS("reload")) {
         server_reload_config(server);
         reply_ok(out);
         return;
     }
 
-    reply_error(out, "unknown command (try: version, state, windows, dispatch, reload)");
+    reply_error(out, "unknown command (try: version, state, windows, config, get, set, dispatch, reload)");
     #undef IS
 }
 

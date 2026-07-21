@@ -4,6 +4,7 @@
 #include "physics.h"
 #include "bsp.h"
 #include "group.h"
+#include "session.h"
 #include "foreign.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -651,8 +652,24 @@ void view_map(FwmView *view) {
     
     view->width = initial_w;
     view->height = initial_h;
-    
+
+    /* Window rules ([[rule]] in config.toml) are matched once, here, because
+     * app_id and title are what the client announced before mapping. Matching
+     * BEFORE the desktop is chosen means the position, the physics body and
+     * bsp_insert below all agree on where the window lives — nothing
+     * downstream needs to know a rule was involved. */
+    ConfigRule rule;
+    int have_rule = config_match_rules(&view->server->config,
+                                       view_app_id(view), view_title(view), &rule);
+
     int current_desktop = view->server->target_camera_x / view->server->screen_width;
+    if (have_rule && rule.desktop >= 0) current_desktop = rule.desktop;
+
+    /* A window from an application this session relaunched goes back where it
+     * was. Checked after [[rule]] so that a rule the user wrote by hand still
+     * wins over what merely happened to be true last time. */
+    int restored = session_claim_desktop(view->server, view);
+    if (restored >= 0 && !(have_rule && rule.desktop >= 0)) current_desktop = restored;
     int cx = current_desktop * view->server->screen_width + (view->server->screen_width - initial_w) / 2;
     int cy = (view->server->screen_height - initial_h) / 2;
     
@@ -664,10 +681,29 @@ void view_map(FwmView *view) {
     view_update_border_geometry(view);
 
     PhysicsBody *body = physics_sync_body(&view->server->physics, view->id, view->x, view->y, view->width, view->height, view->server->screen_width);
+
+    /* No body means the window is past MAX_WINDOWS: it will map and be usable,
+     * but physics, collisions and tiling will all skip it. That used to happen
+     * in complete silence, leaving one inexplicably inert window; say it once,
+     * through the same tray pill that reports config problems. */
+    if (!body && !view->server->warned_window_limit) {
+        view->server->warned_window_limit = 1;
+        config_report_error(&view->server->config,
+                            "window limit reached (%d) — new windows open without physics",
+                            MAX_WINDOWS);
+        wlr_log(WLR_ERROR, "MAX_WINDOWS (%d) reached; window %u has no physics body",
+                MAX_WINDOWS, view->id);
+        server_request_tray_redraw(view->server);
+    }
     
     if (body) {
         body->shaped = 0;
         body->corner_mode = (view->server->desktop_mode[body->desktop_id] == DESKTOP_MODE_PHYSICS) ? CORNER_CHAMFER : CORNER_SHARP;
+        /* Rule properties live on the physics body, not the view. */
+        if (have_rule) {
+            if (rule.nocollide >= 0) body->no_collide = rule.nocollide;
+            if (rule.pin       >= 0) body->pinned     = rule.pin;
+        }
     }
     
     /* Publish to external panels BEFORE focusing, so the activation state that
@@ -679,6 +715,11 @@ void view_map(FwmView *view) {
     if (view->server->desktop_mode[desktop] == DESKTOP_MODE_TILING) {
         bsp_insert(&view->server->bsp_roots[desktop], view->server->focused_view ? view->server->focused_view->id : 0, view->id);
         server_apply_tiling(view->server, desktop);
+    } else if (view->server->desktop_mode[desktop] == DESKTOP_MODE_FLOATING) {
+        /* Overlapping is the whole point of floating — shoving the new window
+         * clear of the others would be the physics behaviour this mode exists
+         * to switch off. */
+        if (body) body->floating = 1;
     } else {
         physics_push_overlapping(&view->server->physics, view->id, 300.0);
     }
