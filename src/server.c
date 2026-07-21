@@ -743,14 +743,25 @@ void server_destroy(FwmServer *server) {
     session_finish(server);
     config_free(&server->config);
     
-    // Clean overlays
+    /* Clean overlays. Clearing each pointer is not tidiness: teardown below
+     * takes the clients down, and an unmapping view still calls
+     * server_request_tray_redraw(). That guards on a NULL tray_buffer — but a
+     * freed pointer is not NULL, so it sailed through the guard and read the
+     * released scene buffer. Same reasoning as the IPC handle above. */
     if (server->tray_buffer) cairo_overlay_destroy(server->tray_buffer);
+    server->tray_buffer = NULL;
     if (server->hints_buffer) cairo_overlay_destroy(server->hints_buffer);
+    server->hints_buffer = NULL;
     if (server->welcome_buffer) cairo_overlay_destroy(server->welcome_buffer);
+    server->welcome_buffer = NULL;
     if (server->errors_buffer) cairo_overlay_destroy(server->errors_buffer);
+    server->errors_buffer = NULL;
     if (server->wallpaper_prev) wallpaper_destroy(server->wallpaper_prev);
+    server->wallpaper_prev = NULL;
     if (server->wallpaper) wallpaper_destroy(server->wallpaper);
+    server->wallpaper = NULL;
     launcher_destroy(server->launcher);
+    server->launcher = NULL;
     
     if (server->physics_timer) {
         wl_event_source_remove(server->physics_timer);
