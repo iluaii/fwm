@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push makes an in-flight run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Build and the tests that need no compositor. This is the job to keep green:
+  # it is fast and has nothing to be flaky about.
+  build-and-unit:
+    runs-on: ubuntu-latest
+    # wlroots 0.20 and Box2D v3 are not packaged on the Ubuntu runners; Arch
+    # has both, which is cheaper than building them from source every run.
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            gcc make cmake pkgconf git \
+            wayland wlroots0.20 libxkbcommon cairo pango gdk-pixbuf2 box2d \
+            xorg-xwayland
+
+      - uses: actions/checkout@v4
+
+      - name: Build
+        # Release on purpose: -O2 turns on analyses GCC skips without it, so a
+        # plain local build never sees these. -Werror lives here rather than in
+        # the project's own flags, where a contributor's toolchain upgrade
+        # would break their build.
+        #
+        # format-truncation is exempt: the desktop-file readers in launcher.c
+        # truncate deliberately — snprintf into a fixed field is the safe
+        # idiom, not an overflow — and there is no way to say so per call site.
+        # It still prints, so a new one is visible in the log.
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS="-Werror -Wno-error=format-truncation"
+          cmake --build build -j$(nproc)
+
+      - name: Unit tests
+        run: |
+          cmake -S . -B build-test -DFWM_TESTS=ON
+          cmake --build build-test -j$(nproc)
+          ctest --test-dir build-test --output-on-failure
+
+  # Runs the real compositor under AddressSanitizer on the headless backend.
+  # Separate from the job above so that when this breaks it is obvious whether
+  # the code or the environment did it.
+  dynamic:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        # No xterm on purpose: the xwayland scenario skips itself without one,
+        # and Xwayland in a container fails for reasons that have nothing to do
+        # with this code. foot is the client the scenarios drive.
+        run: |
+          pacman -Syu --noconfirm --needed \
+            gcc clang make cmake pkgconf git \
+            wayland wlroots0.20 libxkbcommon cairo pango gdk-pixbuf2 box2d \
+            xorg-xwayland foot
+
+      - uses: actions/checkout@v4
+
+      - name: Build with sanitizers
+        run: |
+          cmake -S . -B build-asan -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build-asan -j$(nproc)
+
+      - name: Dynamic tests
+        env:
+          # wlroots needs somewhere to put the Wayland socket, and a container
+          # has no logind to provide one.
+          XDG_RUNTIME_DIR: /tmp/xdg
+          # No GPU on a runner: software rendering or nothing.
+          WLR_RENDERER: pixman
+        run: |
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          ./tests/dynamic.sh
