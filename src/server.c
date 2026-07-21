@@ -688,6 +688,15 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     struct FwmOutput *output = calloc(1, sizeof(struct FwmOutput));
     output->server = server;
     output->wlr_output = wlr_output;
+
+    /* fwm is single-output: the first one to arrive sizes the whole world (see
+     * below), and any further one renders that same world rather than getting
+     * a desktop strip of its own. Say so, or a second monitor looks like a
+     * rendering bug instead of a missing feature. */
+    wlr_log(WLR_INFO, "output %s: %dx%d%s", wlr_output->name,
+            wlr_output->width, wlr_output->height,
+            server->screen_width == 0 ? " (sizes the world)"
+                                      : " — EXTRA OUTPUT, fwm is single-output");
     output->frame.notify = handle_output_frame;
     output->destroy.notify = handle_output_destroy;
     wl_signal_add(&wlr_output->events.frame, &output->frame);
