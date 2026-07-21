@@ -1,6 +1,5 @@
 # Build output
-build/
-build_check/
+build*/
 cmake-build-*/
 *.o
 *.a
@@ -10,6 +9,8 @@ compile_commands.json
 .idea/
 .vscode/
 *.swp
+# clangd's index, written by any editor or tool that drives clangd
+.cache/
 
 # Assistant / tooling state
 .serena/
