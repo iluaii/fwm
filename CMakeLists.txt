@@ -57,6 +57,13 @@ set(SOURCES
     src/ipc.c
     src/session.c
     src/server.c
+    src/server_shell.c
+    src/server_output.c
+    src/server_input.c
+    src/server_pointer.c
+    src/server_config.c
+    src/server_desktop.c
+    src/server_actions.c
     src/ui/cairo_overlay.c
     src/ui/tray.c
     src/ui/hints.c
