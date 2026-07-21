@@ -246,7 +246,7 @@ static void ipc_handle_command(FwmIpc *ipc, const char *line, struct Buf *out) {
     #define IS(name) (cmdlen == strlen(name) && strncmp(line, name, cmdlen) == 0)
 
     if (IS("version")) {
-        buf_puts(out, "{\"ok\":true,\"version\":\"fwm-wayland ipc 1\"}\n");
+        buf_puts(out, "{\"ok\":true,\"version\":\"fwm ipc 1\"}\n");
         return;
     }
     if (IS("state"))   { cmd_state(server, out);   return; }

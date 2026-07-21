@@ -74,7 +74,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # shellcheck disable=SC2086
-env $run_env WLR_BACKENDS=wayland "$BUILD/fwm-wayland" >"$log" 2>&1 &
+env $run_env WLR_BACKENDS=wayland "$BUILD/fwm" >"$log" 2>&1 &
 fwm_pid=$!
 
 # Wait for the inner socket rather than sleeping a guessed amount.

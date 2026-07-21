@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(fwm_wayland C)
+project(fwm C)
 
 set(CMAKE_C_STANDARD 11)
 
@@ -88,9 +88,9 @@ foreach(proto ${WLR_PROTOCOLS})
     list(APPEND PROTOCOL_HEADERS ${header})
 endforeach()
 
-add_executable(fwm-wayland ${SOURCES} ${PROTOCOL_HEADERS})
+add_executable(fwm ${SOURCES} ${PROTOCOL_HEADERS})
 
-target_include_directories(fwm-wayland PRIVATE
+target_include_directories(fwm PRIVATE
         ${WAYLAND_SERVER_INCLUDE_DIRS}
         ${WLROOTS_INCLUDE_DIRS}
         ${XKBCOMMON_INCLUDE_DIRS}
@@ -104,7 +104,7 @@ target_include_directories(fwm-wayland PRIVATE
         src/ui
 )
 
-target_link_libraries(fwm-wayland PRIVATE
+target_link_libraries(fwm PRIVATE
         ${WAYLAND_SERVER_LIBRARIES}
         ${WLROOTS_LIBRARIES}
         ${XKBCOMMON_LIBRARIES}
@@ -117,7 +117,7 @@ target_link_libraries(fwm-wayland PRIVATE
         m
 )
 
-target_compile_definitions(fwm-wayland PRIVATE WLR_USE_UNSTABLE)
+target_compile_definitions(fwm PRIVATE WLR_USE_UNSTABLE)
 
 # Control-socket CLI. Deliberately links nothing: it speaks plain text over a
 # unix socket, so it stays usable even if the compositor's deps change.

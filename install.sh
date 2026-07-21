@@ -117,7 +117,14 @@ build() {
 
 install_files() {
     msg "Installing to $PREFIX"
-    $SUDO install -Dm755 "$REPO_DIR/build/fwm-wayland" "$PREFIX/bin/fwm-wayland"
+    $SUDO install -Dm755 "$REPO_DIR/build/fwm" "$PREFIX/bin/fwm"
+    # The compositor used to install as fwm-wayland. Left alone it stays on
+    # PATH forever as a stale build, and anything still pointing at it keeps
+    # silently running the old binary instead of the one just installed.
+    if [ -e "$PREFIX/bin/fwm-wayland" ]; then
+        msg "Removing the old fwm-wayland binary (it is now just fwm)"
+        $SUDO rm -f "$PREFIX/bin/fwm-wayland"
+    fi
     # The control-socket CLI. Without it on PATH, scripting fwm means finding
     # the binary in a build directory, which nobody will do.
     $SUDO install -Dm755 "$REPO_DIR/build/fwmctl" "$PREFIX/bin/fwmctl"
@@ -125,7 +132,7 @@ install_files() {
     # applications back. The session entry below launches this, not the
     # compositor directly.
     $SUDO install -Dm755 "$REPO_DIR/session/fwm-session" "$PREFIX/bin/fwm-session"
-    # Substitute the real binary path rather than shipping a bare "fwm-wayland":
+    # Substitute the real binary path rather than shipping a bare "fwm-session":
     # display managers run sessions with a trimmed PATH that need not contain
     # $PREFIX/bin, and the failure mode is the worst kind — the session shows up
     # in the list, you pick it, and it drops straight back to the login screen
@@ -142,7 +149,7 @@ install_files() {
         cp "$REPO_DIR/config.toml.example" "$cfg_dir/config.toml"
         msg "Default config written to $cfg_dir/config.toml"
     fi
-    msg "Done. Log in via your display manager (fwm session) or run: fwm-wayland"
+    msg "Done. Log in via your display manager (fwm session) or run: fwm"
 }
 
 # ── commands ───────────────────────────────────────────────────────────
@@ -162,7 +169,7 @@ update)
     ;;
 uninstall)
     msg "Uninstalling"
-    $SUDO rm -f "$PREFIX/bin/fwm-wayland" "$PREFIX/bin/fwmctl" "$PREFIX/bin/fwm-session" \
+    $SUDO rm -f "$PREFIX/bin/fwm" "$PREFIX/bin/fwm-wayland" "$PREFIX/bin/fwmctl" "$PREFIX/bin/fwm-session" \
                 /usr/share/wayland-sessions/fwm.desktop
     msg "Removed (user config in ~/.config/fwm kept)"
     ;;

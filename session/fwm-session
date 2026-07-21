@@ -17,7 +17,7 @@
 
 set -u
 
-FWM="${FWM_BINARY:-fwm-wayland}"
+FWM="${FWM_BINARY:-fwm}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/fwm"
 LOG="$STATE_DIR/crash.log"
 

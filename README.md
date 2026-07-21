@@ -118,14 +118,14 @@ cmake --build build
 Run from a TTY:
 
 ```sh
-./build/fwm-wayland
+./build/fwm
 ```
 
 Or nested inside another compositor / X session for testing:
 
 ```sh
-WLR_BACKENDS=x11 ./build/fwm-wayland      # nested X11 window
-WLR_BACKENDS=wayland ./build/fwm-wayland  # nested Wayland window
+WLR_BACKENDS=x11 ./build/fwm      # nested X11 window
+WLR_BACKENDS=wayland ./build/fwm  # nested Wayland window
 ```
 
 ---
