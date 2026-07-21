@@ -23,7 +23,8 @@ BspNode *bsp_find(BspNode *root, uint32_t id);
 void bsp_insert(BspNode **root, uint32_t focused, uint32_t new_id);
 void bsp_remove(BspNode **root, uint32_t id);
 void bsp_recalc(BspNode *node, int x, int y, int w, int h, int gap);
-void bsp_collect_leaves(BspNode *node, BspNode **out, int *count);
+/* Collects at most `max` leaves into `out`; excess leaves are dropped. */
+void bsp_collect_leaves(BspNode *node, BspNode **out, int *count, int max);
 void bsp_swap(BspNode *root, uint32_t a, uint32_t b);
 BspNode *bsp_find_border(BspNode *root, int x, int y, int threshold);
 void bsp_free(BspNode *node);

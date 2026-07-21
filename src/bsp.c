@@ -133,14 +133,19 @@ BspNode *bsp_find_border(BspNode *root, int x, int y, int threshold) {
     return bsp_find_border(root->right, x, y, threshold);
 }
 
-void bsp_collect_leaves(BspNode *node, BspNode **out, int *count) {
-    if (!node) return;
+/* `max` is not paranoia: windows past MAX_WINDOWS get no physics body, but
+ * they are still inserted into the tree, so a desktop can hold more leaves
+ * than every caller's fixed-size array has room for. Dropping the excess
+ * leaves those windows untiled -- the same degradation they already get from
+ * having no body -- instead of writing past the end of a stack buffer. */
+void bsp_collect_leaves(BspNode *node, BspNode **out, int *count, int max) {
+    if (!node || *count >= max) return;
     if (node->id != 0) {
         out[(*count)++] = node;
         return;
     }
-    bsp_collect_leaves(node->left, out, count);
-    bsp_collect_leaves(node->right, out, count);
+    bsp_collect_leaves(node->left, out, count, max);
+    bsp_collect_leaves(node->right, out, count, max);
 }
 
 void bsp_free(BspNode *node) {
