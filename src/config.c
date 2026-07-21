@@ -892,3 +892,28 @@ void config_free(FwmConfig *cfg) {
     cfg->rules      = NULL;
     cfg->rule_count = 0;
 }
+
+/* ── bind lookup ─────────────────────────────────────────────────────── */
+
+const KeyBind *config_match_bind(const FwmConfig *cfg, xkb_keysym_t sym, unsigned int mods) {
+    if (!cfg) return NULL;
+    /* Compare case-insensitively: xkb_state_key_get_syms() reflects the live
+     * CapsLock state, so with Caps Lock on a letter key resolves to its
+     * uppercase keysym ('q' -> 'Q') while binds are parsed from lowercase
+     * config strings. Without normalising, every letter bind silently stops
+     * working the moment Caps Lock is on, while digit and Return binds — which
+     * Caps Lock does not touch — keep working, which is a maddening way to
+     * find out. */
+    xkb_keysym_t want = xkb_keysym_to_lower(sym);
+    for (int i = 0; i < cfg->key_count; i++) {
+        const KeyBind *bind = &cfg->keys[i];
+        if (xkb_keysym_to_lower(bind->key) == want && bind->mod == mods)
+            return bind;
+    }
+    return NULL;
+}
+
+int config_action_is_repeatable(const char *action) {
+    if (!action) return 0;
+    return strncmp(action, "move_camera:", 12) == 0;
+}

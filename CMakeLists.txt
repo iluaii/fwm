@@ -150,6 +150,14 @@ if(FWM_TESTS)
     target_include_directories(test_config PRIVATE src tests ${XKBCOMMON_INCLUDE_DIRS})
     target_link_libraries(test_config PRIVATE ${XKBCOMMON_LIBRARIES} m)
 
+    # Input needs physics too: the pointer half of it is what a drag becomes
+    # on release, which lives in physics.c. That file reaches Box2D but not
+    # wlroots, so it links here without a display.
+    add_executable(test_input tests/test_input.c src/config.c src/toml.c src/physics.c)
+    target_include_directories(test_input PRIVATE src tests ${XKBCOMMON_INCLUDE_DIRS})
+    target_link_libraries(test_input PRIVATE ${XKBCOMMON_LIBRARIES} box2d::box2d m)
+
     add_test(NAME bsp    COMMAND test_bsp)
     add_test(NAME config COMMAND test_config)
+    add_test(NAME input  COMMAND test_input)
 endif()

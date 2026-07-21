@@ -312,6 +312,15 @@ void config_option_get(const FwmConfig *cfg, const ConfigOption *opt,
 int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *title,
                        ConfigRule *out);
 
+/* The bind whose key and modifiers match, or NULL. `mods` must equal the
+ * bind's own mask exactly — a bind on super+q does not fire for super+shift+q.
+ * The keysym is compared case-insensitively; see the implementation for why
+ * that is load-bearing rather than lenient. */
+const KeyBind *config_match_bind(const FwmConfig *cfg, xkb_keysym_t sym, unsigned int mods);
+
+/* Whether holding the key down should keep firing the action. */
+int config_action_is_repeatable(const char *action);
+
 #define FWM_CONFIG_PATH "/.config/fwm/config.toml"
 
 #endif /* FWM_CONFIG_H */

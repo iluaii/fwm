@@ -96,10 +96,6 @@ void server_notify_activity(FwmServer *server) {
 /* Only continuous navigation binds should auto-repeat while held. Repeating
  * one-shot actions (killclient, spawn, toggles, view/fullscreen) would be
  * destructive or spammy, so they fire once per press only. */
-static bool action_is_repeatable(const char *action) {
-    return strncmp(action, "move_camera:", 12) == 0;
-}
-
 /* Call around any code that may toggle the launcher. Opening it takes the
  * keyboard away from the focused client via a wl_keyboard leave — per the
  * Wayland spec the client must then treat every key as released, which is
@@ -157,34 +153,27 @@ static int key_repeat_cb(void *data) {
 static int try_binds(FwmServer *server, struct wlr_keyboard_key_event *event,
                      const xkb_keysym_t *syms, int num_syms, uint32_t active_mods) {
     for (int i = 0; i < num_syms; i++) {
-        // Compare case-insensitively: xkb_state_key_get_syms() reflects the
-        // live CapsLock state, so with Caps Lock on, a letter key resolves to
-        // its uppercase keysym (e.g. 'q' -> 'Q') while binds are parsed from
-        // lowercase config strings. Without normalizing, every letter-based
-        // bind silently fails to match whenever Caps Lock is toggled on,
-        // while digit/Return binds (unaffected by Caps Lock) keep working.
-        xkb_keysym_t sym = xkb_keysym_to_lower(syms[i]);
-        for (int j = 0; j < server->config.key_count; j++) {
-            KeyBind *bind = &server->config.keys[j];
-            if (xkb_keysym_to_lower(bind->key) == sym && bind->mod == active_mods) {
-                // Consumed by the compositor: the client never sees this key
-                // (forwarding it too made super+g type a 'g' into the client).
-                if (event->keycode < sizeof(server->key_consumed)) {
-                    server->key_consumed[event->keycode] = 1;
-                }
-                server_dispatch_action(server, bind->action);
-                // Arm auto-repeat for repeatable binds (e.g. move_camera) so
-                // holding the key keeps scrolling; delay before first repeat.
-                if (action_is_repeatable(bind->action) && server->key_repeat_timer) {
-                    server->repeat_action = bind->action;
-                    server->repeat_keycode = event->keycode;
-                    wl_event_source_timer_update(server->key_repeat_timer, 300);
-                } else {
-                    key_repeat_stop(server);
-                }
-                return 1;
-            }
+        /* Matching lives in config.c so it can be tested without a
+         * compositor; the case-insensitive comparison is explained there. */
+        const KeyBind *bind = config_match_bind(&server->config, syms[i], active_mods);
+        if (!bind) continue;
+
+        // Consumed by the compositor: the client never sees this key
+        // (forwarding it too made super+g type a 'g' into the client).
+        if (event->keycode < sizeof(server->key_consumed)) {
+            server->key_consumed[event->keycode] = 1;
         }
+        server_dispatch_action(server, bind->action);
+        // Arm auto-repeat for repeatable binds (e.g. move_camera) so
+        // holding the key keeps scrolling; delay before first repeat.
+        if (config_action_is_repeatable(bind->action) && server->key_repeat_timer) {
+            server->repeat_action = bind->action;
+            server->repeat_keycode = event->keycode;
+            wl_event_source_timer_update(server->key_repeat_timer, 300);
+        } else {
+            key_repeat_stop(server);
+        }
+        return 1;
     }
     return 0;
 }
