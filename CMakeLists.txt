@@ -3,6 +3,22 @@ project(fwm_wayland C)
 
 set(CMAKE_C_STANDARD 11)
 
+# A compositor cannot report its own memory corruption: it IS the display
+# server, so a smashed stack takes the whole session down with no way to see
+# what happened. These are cheap enough to keep on in release builds.
+#
+# -fstack-protector-strong earns its keep: a 256-entry array overrun in the
+# tiling code ran silently for lack of it, and only showed up under ASan.
+add_compile_options(
+    -Wall
+    -Wextra
+    -Wno-unused-parameter   # wlroots listeners take args most handlers ignore
+    -fstack-protector-strong
+)
+# Frame pointers make the backtrace from a crash or a sanitizer usable; the
+# cost only lands on debug builds, where nobody is counting registers.
+add_compile_options($<$<CONFIG:Debug>:-fno-omit-frame-pointer>)
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND_SERVER REQUIRED wayland-server)
 # wlroots is hard-pinned: the unstable API breaks between minor versions, so
