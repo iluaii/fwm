@@ -23,7 +23,7 @@ BUILD="$REPO/build-asan"
 KEEP=0
 LIST=0
 
-SCENARIOS="bare clients churn tiling groups desktops overlays physics reload xwayland kill"
+SCENARIOS="bare clients churn tiling groups desktops overlays physics reload ipc xwayland kill"
 
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
@@ -235,6 +235,49 @@ sc_xwayland() {
     sleep 3
     act toggle_tiling_all 0.5
     act killclient 0.5
+}
+
+# Event subscribers, which are the one IPC client that outlives its request.
+# What matters is that the compositor never waits on one: a subscriber that
+# stops reading must be dropped, and one killed mid-stream must not be written
+# to afterwards.
+sc_ipc() {
+    timeout 25 "$FWMCTL" subscribe >/dev/null 2>&1 & KIDS="$KIDS $!"
+    timeout 25 "$FWMCTL" subscribe window_open,window_close >/dev/null 2>&1 & KIDS="$KIDS $!"
+    # Reads nothing for its whole life, while the scenario keeps events coming.
+    timeout 25 "$FWMCTL" subscribe gravity >/dev/null 2>&1 & DEAF=$!
+    KIDS="$KIDS $DEAF"
+    sleep 0.5
+
+    client 20
+    i=0
+    while [ $i -lt 40 ]; do act cycle_gravity 0.02; i=$((i + 1)); done
+    act toggle_tiling_all 0.4
+    act reload_config 0.4
+
+    # Killed subscribers, then more events: emitting must survive the gap.
+    kill -9 "$DEAF" 2>/dev/null || true
+    sleep 0.3
+    act cycle_gravity 0.2
+    act "view:2" 0.3
+    sleep 0.5
+
+    # The reentrant case, which fwmctl cannot express: one connection that
+    # subscribes AND dispatches, reading nothing back. Its own events overflow
+    # its own backlog while its own command is still on the stack — dropping it
+    # there is a use-after-free, and this is what caught that.
+    command -v python3 >/dev/null 2>&1 || { echo "  (no python3 — reentrancy case skipped)"; return 0; }
+    FWM_SOCKET="$FWM_SOCKET" timeout 60 python3 -c '
+import socket, os, time
+s = socket.socket(socket.AF_UNIX); s.connect(os.environ["FWM_SOCKET"])
+s.sendall(b"subscribe gravity\n"); time.sleep(0.3); s.setblocking(False)
+sent, deadline = 0, time.time() + 40
+while sent < 60000 and time.time() < deadline:
+    try: s.sendall(b"dispatch cycle_gravity\n"); sent += 1
+    except BlockingIOError: time.sleep(0.02)
+    except (BrokenPipeError, ConnectionResetError): break   # dropped, as intended
+' >/dev/null 2>&1 || true
+    sleep 0.5
 }
 
 # Clients killed outright rather than exiting: the compositor sees the socket

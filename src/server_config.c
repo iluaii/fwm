@@ -295,4 +295,7 @@ void server_reload_config(FwmServer *server) {
     }
     wlr_log(WLR_INFO, "config reloaded from %s (%d problem(s))",
             path, server->config.error_total);
+
+    /* Anything a subscriber cached from `config` or `get` is now stale. */
+    ipc_emit_config_reload(server->ipc);
 }

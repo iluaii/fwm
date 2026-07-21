@@ -6,6 +6,7 @@
 #include "group.h"
 #include "session.h"
 #include "foreign.h"
+#include "ipc.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -458,6 +459,12 @@ static void handle_set_title(struct wl_listener *listener, void *data) {
     if (view->group) group_redraw(view->server, view->group);
     foreign_view_title_changed(view);
     server_request_tray_redraw(view->server);
+
+    /* Clients announce a title before mapping too; reporting those would have
+     * a subscriber hear about windows it was never told had opened. */
+    struct wlr_surface *surface = view_surface(view);
+    if (surface && surface->mapped)
+        ipc_emit_window(view->server->ipc, FWM_EV_WINDOW_TITLE, view);
 }
 
 /* ── X11 (Xwayland) handlers ──────────────────────────────────────────── */
@@ -750,9 +757,17 @@ void view_map(FwmView *view) {
     }
 
     server_request_tray_redraw(view->server);
+
+    /* Last, so a subscriber that reacts by dispatching an action finds the
+     * window already placed, tiled and focused rather than half-mapped. */
+    ipc_emit_window(view->server->ipc, FWM_EV_WINDOW_OPEN, view);
 }
 
 void view_unmap(FwmView *view) {
+    /* First, while the window is still whole: below this line its body, its
+     * tile and its title are being taken apart. */
+    ipc_emit_window(view->server->ipc, FWM_EV_WINDOW_CLOSE, view);
+
     foreign_view_unmap(view);
     /* Before anything else: the snapshot lives in scene_tree, which is about to
      * go, and it holds a buffer lock the close ghost may want back. */

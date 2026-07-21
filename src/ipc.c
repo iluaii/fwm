@@ -18,13 +18,19 @@
 #include <wayland-server-core.h>
 #include <wlr/util/log.h>
 
-/* One request line in, one JSON reply out, then the server closes. Keeping the
- * connection single-shot means no per-client state machine beyond reading a
- * line, which is what makes this safe to bolt onto the compositor's own event
- * loop: a wedged client can never hold compositor state hostage. */
+/* One request line in, one JSON reply out, then the server closes — unless the
+ * request was `subscribe`, which keeps the connection open and streams events
+ * down it instead.
+ *
+ * What makes both safe to bolt onto the compositor's own event loop is that
+ * nothing here ever blocks on a client. Writes go through an outbound queue
+ * drained on WL_EVENT_WRITABLE, and a subscriber that stops reading until the
+ * queue passes IPC_MAX_BACKLOG is dropped rather than allowed to stall the
+ * compositor: a wedged client can never hold compositor state hostage. */
 
-#define IPC_MAX_REQUEST  4096   /* a request longer than this is malformed */
-#define IPC_MAX_CLIENTS  16     /* cheap ceiling; replies are immediate */
+#define IPC_MAX_REQUEST  4096          /* a request longer than this is malformed */
+#define IPC_MAX_CLIENTS  16            /* cheap ceiling; replies are immediate */
+#define IPC_MAX_BACKLOG  (256 * 1024)  /* unread bytes before a subscriber is dropped */
 
 struct FwmIpc {
     struct FwmServer *server;
@@ -32,6 +38,14 @@ struct FwmIpc {
     char path[108];             /* sun_path is 108 bytes on Linux */
     struct wl_event_source *source;
     struct wl_list clients;
+    uint32_t subscribed;        /* union of every client's mask; 0 = emit nothing */
+
+    /* The client whose command is currently running, if any. A `dispatch` sent
+     * down a subscription emits events while that client is still on the
+     * stack, and if its own backlog is what overflows, freeing it here would
+     * pull the ground out from under the caller. It is marked instead and
+     * reaped by the read path once the command has returned. */
+    struct IpcClient *current;
 };
 
 struct IpcClient {
@@ -41,6 +55,12 @@ struct IpcClient {
     struct wl_event_source *source;
     char buf[IPC_MAX_REQUEST];
     size_t len;
+
+    uint32_t events;            /* subscribed event mask; 0 = not a subscriber */
+    bool closing;               /* reply written, close once the queue drains */
+    bool dead;                  /* doomed; freed as soon as it is safe to */
+    char *out;                  /* queued outbound bytes */
+    size_t out_len, out_cap;
 };
 
 /* ── reply builder ────────────────────────────────────────────────────── */
@@ -104,7 +124,69 @@ static void reply_error(struct Buf *b, const char *msg) {
 
 static void reply_ok(struct Buf *b) { buf_puts(b, "{\"ok\":true}\n"); }
 
+/* ── outbound queue ───────────────────────────────────────────────────── */
+
+/* Declared here because the write path and the command handlers are mutually
+ * recursive through `subscribe`: it replies, then keeps the client. */
+struct IpcClient;
+static void ipc_client_destroy(struct IpcClient *c);
+
+/* Push whatever the socket will take right now. Returns false if the
+ * connection is dead and the caller should drop the client. */
+static bool ipc_client_flush(struct IpcClient *c) {
+    while (c->out_len > 0) {
+        /* MSG_NOSIGNAL: a client that hung up mid-write must not kill the
+         * compositor with SIGPIPE. MSG_DONTWAIT: nor may it stall it. */
+        ssize_t n = send(c->fd, c->out, c->out_len, MSG_NOSIGNAL | MSG_DONTWAIT);
+        if (n > 0) {
+            c->out_len -= (size_t)n;
+            memmove(c->out, c->out + n, c->out_len);
+            continue;
+        }
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
+        return false;
+    }
+
+    /* Only ask for writability while there is something to write; otherwise
+     * an idle subscriber would spin the event loop. */
+    uint32_t mask = WL_EVENT_READABLE | (c->out_len ? WL_EVENT_WRITABLE : 0);
+    if (c->source) wl_event_source_fd_update(c->source, mask);
+    return true;
+}
+
+/* Queue `len` bytes, flushing as much as goes immediately. Returns false when
+ * the client should be dropped: dead connection, or a subscriber so far behind
+ * that keeping its backlog is no longer the compositor's problem to carry. */
+static bool ipc_client_send(struct IpcClient *c, const char *data, size_t len) {
+    if (len == 0) return true;
+
+    if (c->out_len + len > IPC_MAX_BACKLOG) {
+        wlr_log(WLR_INFO, "ipc: dropping client %d bytes behind", (int)c->out_len);
+        return false;
+    }
+    if (c->out_len + len > c->out_cap) {
+        size_t cap = c->out_cap ? c->out_cap : 4096;
+        while (cap < c->out_len + len) cap *= 2;
+        char *d = realloc(c->out, cap);
+        if (!d) return false;   /* cannot queue it: dropping beats lying */
+        c->out = d;
+        c->out_cap = cap;
+    }
+    memcpy(c->out + c->out_len, data, len);
+    c->out_len += len;
+
+    return ipc_client_flush(c);
+}
+
 /* ── commands ─────────────────────────────────────────────────────────── */
+
+/* Shared by cmd_state and the desktop/mode events, which must agree on how a
+ * mode is spelled or a subscriber would see two vocabularies for one thing. */
+static const char *mode_name(int m) {
+    static const char *const names[] = { "physics", "tiling", "floating" };
+    return (m >= 0 && m <= 2) ? names[m] : "?";
+}
 
 static void cmd_windows(FwmServer *server, struct Buf *b) {
     buf_puts(b, "{\"ok\":true,\"windows\":[");
@@ -146,15 +228,12 @@ static void cmd_state(FwmServer *server, struct Buf *b) {
 
     /* Per-desktop mode: nothing else exposes it, and with three modes "which
      * one am I in" stops being guessable from how the windows look. */
-    static const char *mode_name[] = { "physics", "tiling", "floating" };
-    int m = server->desktop_mode[desktop];
     buf_puts(b, "\"mode\":");
-    buf_json_string(b, (m >= 0 && m <= 2) ? mode_name[m] : "?");
+    buf_json_string(b, mode_name(server->desktop_mode[desktop]));
     buf_puts(b, ",\"modes\":[");
     for (int d = 0; d < 10; d++) {
-        int dm = server->desktop_mode[d];
         if (d) buf_puts(b, ",");
-        buf_json_string(b, (dm >= 0 && dm <= 2) ? mode_name[dm] : "?");
+        buf_json_string(b, mode_name(server->desktop_mode[d]));
     }
     buf_puts(b, "],");
     buf_puts(b, "\"focused\":");
@@ -234,7 +313,46 @@ static void cmd_set(FwmServer *server, const char *arg, struct Buf *b) {
     buf_puts(b, "}\n");
 }
 
-static void ipc_handle_command(FwmIpc *ipc, const char *line, struct Buf *out) {
+/* Recomputed from the live clients rather than accumulated, so unsubscribing
+ * by disconnecting actually stops the work of building those events. */
+static void ipc_refresh_subscriptions(FwmIpc *ipc) {
+    uint32_t mask = 0;
+    struct IpcClient *c;
+    wl_list_for_each(c, &ipc->clients, link) mask |= c->events;
+    ipc->subscribed = mask;
+}
+
+/* `subscribe [events]` — everything, or a comma/space separated subset. The
+ * reply names what was actually subscribed, so a client can log it instead of
+ * assuming its request was understood. */
+static void cmd_subscribe(struct IpcClient *c, const char *arg, struct Buf *b) {
+    uint32_t mask = 0;
+    char err[320];
+    if (!fwm_ipc_events_parse(arg, &mask, err, sizeof err)) {
+        reply_error(b, err);
+        return;
+    }
+
+    /* A second subscribe widens the set rather than replacing it: the two
+     * readings differ only for a client that asked twice, and adding is the
+     * one that never silently unsubscribes it from the first request. */
+    c->events |= mask;
+    ipc_refresh_subscriptions(c->ipc);
+
+    buf_puts(b, "{\"ok\":true,\"events\":[");
+    bool first = true;
+    for (int i = 0; i < FWM_EV_COUNT; i++) {
+        uint32_t bit = 1u << i;
+        if (!(c->events & bit)) continue;
+        if (!first) buf_puts(b, ",");
+        first = false;
+        buf_json_string(b, fwm_ipc_event_name(bit));
+    }
+    buf_puts(b, "]}\n");
+}
+
+static void ipc_handle_command(struct IpcClient *client, const char *line, struct Buf *out) {
+    FwmIpc *ipc = client->ipc;
     FwmServer *server = ipc->server;
 
     /* Split off the first word. */
@@ -257,6 +375,9 @@ static void ipc_handle_command(FwmIpc *ipc, const char *line, struct Buf *out) {
         cmd_get(server, arg, out);
         return;
     }
+    /* Read-only, so it sits with the commands above the lock check: a
+     * subscriber learns nothing a `windows` poll would not already tell it. */
+    if (IS("subscribe")) { cmd_subscribe(client, arg, out); return; }
 
     /* Everything below CHANGES state. The lock screen's whole promise is that
      * a locked session accepts no input — routing binds through a socket
@@ -282,8 +403,106 @@ static void ipc_handle_command(FwmIpc *ipc, const char *line, struct Buf *out) {
         return;
     }
 
-    reply_error(out, "unknown command (try: version, state, windows, config, get, set, dispatch, reload)");
+    reply_error(out, "unknown command (try: version, state, windows, config, get, set, "
+                     "dispatch, reload, subscribe)");
     #undef IS
+}
+
+/* ── event emission ───────────────────────────────────────────────────── */
+
+/* Fan one built line out to everyone who asked for that event.
+ *
+ * A client that cannot take it is condemned rather than freed on the spot:
+ * this can run underneath that very client's own `dispatch`, and ipc->current
+ * is the one whose memory the caller is still standing on. Clearing `events`
+ * takes it out of every later broadcast, so a doomed client costs nothing
+ * while it waits to be reaped. */
+static void ipc_broadcast(FwmIpc *ipc, uint32_t event, struct Buf *b) {
+    if (!b->data) return;
+
+    struct IpcClient *c, *tmp;
+    wl_list_for_each_safe(c, tmp, &ipc->clients, link) {
+        if (c->dead || !(c->events & event)) continue;
+        if (ipc_client_send(c, b->data, b->len)) continue;
+
+        c->dead = true;
+        c->events = 0;
+        if (c != ipc->current) ipc_client_destroy(c);
+    }
+    ipc_refresh_subscriptions(ipc);
+}
+
+/* True when the event is worth building at all. */
+static bool ipc_wants(FwmIpc *ipc, uint32_t event) {
+    return ipc && (ipc->subscribed & event);
+}
+
+void ipc_emit_window(FwmIpc *ipc, uint32_t event, struct FwmView *view) {
+    if (!ipc_wants(ipc, event)) return;
+
+    FwmServer *server = ipc->server;
+    struct Buf b = {0};
+
+    buf_puts(&b, "{\"event\":");
+    buf_json_string(&b, fwm_ipc_event_name(event));
+
+    /* Focus genuinely goes nowhere when the last window on a desktop closes,
+     * and a subscriber has to be able to tell that from "window 0". */
+    if (!view) {
+        buf_puts(&b, ",\"id\":null}\n");
+    } else {
+        buf_printf(&b, ",\"id\":%u,\"title\":", view->id);
+        buf_json_string(&b, view_title(view));
+        buf_puts(&b, ",\"app_id\":");
+        buf_json_string(&b, view_app_id(view));
+        buf_printf(&b, ",\"desktop\":%d",
+                   server->screen_width > 0 ? view->x / server->screen_width : 0);
+        buf_puts(&b, "}\n");
+    }
+
+    ipc_broadcast(ipc, event, &b);
+    free(b.data);
+}
+
+void ipc_emit_desktop(FwmIpc *ipc, int desktop) {
+    if (!ipc_wants(ipc, FWM_EV_DESKTOP)) return;
+
+    struct Buf b = {0};
+    buf_printf(&b, "{\"event\":\"desktop\",\"desktop\":%d,\"mode\":", desktop);
+    buf_json_string(&b, mode_name(desktop >= 0 && desktop < 10
+                                  ? ipc->server->desktop_mode[desktop] : -1));
+    buf_puts(&b, "}\n");
+    ipc_broadcast(ipc, FWM_EV_DESKTOP, &b);
+    free(b.data);
+}
+
+void ipc_emit_mode(FwmIpc *ipc, int desktop, int mode) {
+    if (!ipc_wants(ipc, FWM_EV_MODE)) return;
+
+    struct Buf b = {0};
+    buf_printf(&b, "{\"event\":\"mode\",\"desktop\":%d,\"mode\":", desktop);
+    buf_json_string(&b, mode_name(mode));
+    buf_puts(&b, "}\n");
+    ipc_broadcast(ipc, FWM_EV_MODE, &b);
+    free(b.data);
+}
+
+void ipc_emit_gravity(FwmIpc *ipc, double gravity_scale) {
+    if (!ipc_wants(ipc, FWM_EV_GRAVITY)) return;
+
+    struct Buf b = {0};
+    buf_printf(&b, "{\"event\":\"gravity\",\"gravity\":%.3f}\n", gravity_scale);
+    ipc_broadcast(ipc, FWM_EV_GRAVITY, &b);
+    free(b.data);
+}
+
+void ipc_emit_config_reload(FwmIpc *ipc) {
+    if (!ipc_wants(ipc, FWM_EV_CONFIG_RELOAD)) return;
+
+    struct Buf b = {0};
+    buf_puts(&b, "{\"event\":\"config_reload\"}\n");
+    ipc_broadcast(ipc, FWM_EV_CONFIG_RELOAD, &b);
+    free(b.data);
 }
 
 /* ── connection handling ──────────────────────────────────────────────── */
@@ -292,16 +511,59 @@ static void ipc_client_destroy(struct IpcClient *c) {
     wl_list_remove(&c->link);
     if (c->source) wl_event_source_remove(c->source);
     close(c->fd);
+    free(c->out);
     free(c);
 }
 
-static int ipc_client_readable(int fd, uint32_t mask, void *data) {
+/* Run one complete request line and queue its reply. Returns false when the
+ * client is finished with and should be destroyed. */
+static bool ipc_client_line(struct IpcClient *c, char *line) {
+    /* Tolerate CRLF so `echo` from any shell works. */
+    size_t l = strlen(line);
+    if (l && line[l - 1] == '\r') line[l - 1] = '\0';
+
+    struct Buf out = {0};
+
+    /* The command may emit events — including to this very client — so the
+     * broadcast path has to know not to free what we are standing on. */
+    c->ipc->current = c;
+    ipc_handle_command(c, line, &out);
+    c->ipc->current = NULL;
+
+    bool alive = !c->dead;
+    if (alive && out.data) alive = ipc_client_send(c, out.data, out.len);
+    free(out.data);
+    if (!alive) return false;
+
+    /* A subscriber stays for the stream; everyone else gets the one reply and
+     * goes. The close waits for the queue to drain, because a large reply
+     * (`config`, `windows` with many windows) can exceed what the socket takes
+     * in one go and closing on top of that would truncate it. */
+    if (c->events) return true;
+    c->closing = true;
+    return c->out_len > 0;
+}
+
+static int ipc_client_event(int fd, uint32_t mask, void *data) {
     struct IpcClient *c = data;
 
     if (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)) {
         ipc_client_destroy(c);
         return 0;
     }
+
+    if (mask & WL_EVENT_WRITABLE) {
+        if (!ipc_client_flush(c) || (c->closing && c->out_len == 0)) {
+            ipc_client_destroy(c);
+            return 0;
+        }
+        ipc_refresh_subscriptions(c->ipc);
+    }
+
+    if (!(mask & WL_EVENT_READABLE)) return 0;
+
+    /* Already answered and just waiting to drain: nothing more to read. */
+    if (c->closing) return 0;
 
     ssize_t n = read(fd, c->buf + c->len, sizeof(c->buf) - c->len - 1);
     if (n <= 0) {
@@ -312,29 +574,33 @@ static int ipc_client_readable(int fd, uint32_t mask, void *data) {
     c->len += (size_t)n;
     c->buf[c->len] = '\0';
 
-    char *nl = strchr(c->buf, '\n');
-    if (!nl) {
-        /* No line yet. A request that fills the buffer without one is junk. */
-        if (c->len >= sizeof(c->buf) - 1) ipc_client_destroy(c);
-        return 0;
-    }
-    *nl = '\0';
-    /* Tolerate CRLF so `echo` from any shell works. */
-    size_t l = strlen(c->buf);
-    if (l && c->buf[l - 1] == '\r') c->buf[l - 1] = '\0';
+    /* A subscriber may keep issuing commands down the same connection, so run
+     * every complete line the read produced, not just the first. */
+    for (;;) {
+        char *nl = memchr(c->buf, '\n', c->len);
+        if (!nl) {
+            /* No line yet. A request that fills the buffer without one is junk. */
+            if (c->len >= sizeof(c->buf) - 1) ipc_client_destroy(c);
+            return 0;
+        }
+        *nl = '\0';
 
-    struct Buf out = {0};
-    ipc_handle_command(c->ipc, c->buf, &out);
-    if (out.data) {
-        /* MSG_NOSIGNAL: a client that hung up mid-reply must not kill the
-         * compositor with SIGPIPE. Partial writes are not retried — the reply
-         * is small and the connection is single-shot. */
-        ssize_t unused = send(fd, out.data, out.len, MSG_NOSIGNAL);
-        (void)unused;
-        free(out.data);
+        /* Consume the line before running it: the handler can queue output, and
+         * on the error paths below `c` is gone and must not be touched again. */
+        size_t used = (size_t)(nl - c->buf) + 1;
+        char line[IPC_MAX_REQUEST];
+        memcpy(line, c->buf, used);           /* includes the NUL we just wrote */
+        c->len -= used;
+        memmove(c->buf, c->buf + used, c->len);
+        c->buf[c->len] = '\0';
+
+        if (!ipc_client_line(c, line)) {
+            ipc_client_destroy(c);
+            return 0;
+        }
+        ipc_refresh_subscriptions(c->ipc);
+        if (c->closing) return 0;             /* draining; ignore the rest */
     }
-    ipc_client_destroy(c);
-    return 0;
 }
 
 static int ipc_listen_readable(int fd, uint32_t mask, void *data) {
@@ -356,7 +622,7 @@ static int ipc_listen_readable(int fd, uint32_t mask, void *data) {
     wl_list_insert(&ipc->clients, &c->link);
 
     struct wl_event_loop *el = wl_display_get_event_loop(ipc->server->wl_display);
-    c->source = wl_event_loop_add_fd(el, cfd, WL_EVENT_READABLE, ipc_client_readable, c);
+    c->source = wl_event_loop_add_fd(el, cfd, WL_EVENT_READABLE, ipc_client_event, c);
     if (!c->source) ipc_client_destroy(c);
     return 0;
 }

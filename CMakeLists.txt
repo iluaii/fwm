@@ -55,6 +55,7 @@ set(SOURCES
     src/foreign.c
     src/group.c
     src/ipc.c
+    src/ipc_events.c
     src/session.c
     src/server.c
     src/server_shell.c
@@ -157,7 +158,14 @@ if(FWM_TESTS)
     target_include_directories(test_input PRIVATE src tests ${XKBCOMMON_INCLUDE_DIRS})
     target_link_libraries(test_input PRIVATE ${XKBCOMMON_LIBRARIES} box2d::box2d m)
 
-    add_test(NAME bsp    COMMAND test_bsp)
-    add_test(NAME config COMMAND test_config)
-    add_test(NAME input  COMMAND test_input)
+    # ipc.c itself reaches wlroots, but the event vocabulary it serves does
+    # not — that split is what lets `subscribe` argument parsing be checked
+    # without a compositor.
+    add_executable(test_ipc_events tests/test_ipc_events.c src/ipc_events.c)
+    target_include_directories(test_ipc_events PRIVATE src tests)
+
+    add_test(NAME bsp        COMMAND test_bsp)
+    add_test(NAME config     COMMAND test_config)
+    add_test(NAME input      COMMAND test_input)
+    add_test(NAME ipc_events COMMAND test_ipc_events)
 endif()

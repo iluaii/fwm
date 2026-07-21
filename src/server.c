@@ -376,6 +376,7 @@ static int physics_tick_cb(void *data) {
             if (arrived != server->focus_desktop) {
                 server->focus_desktop = arrived;
                 server_refocus(server, arrived, NULL);
+                ipc_emit_desktop(server->ipc, arrived);
             }
         }
         
@@ -849,6 +850,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
     } else {
         wlr_seat_keyboard_clear_focus(server->seat);
     }
+    ipc_emit_window(server->ipc, FWM_EV_WINDOW_FOCUS, view);
 
     if (prev_focus) {
         view_set_activated(prev_focus, false);

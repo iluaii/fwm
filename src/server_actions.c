@@ -212,6 +212,7 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         if (g == 0.0)       server->physics.gravity_scale = 0.15;
         else if (g == 0.15) server->physics.gravity_scale = 1.0;
         else                server->physics.gravity_scale = 0.0;
+        ipc_emit_gravity(server->ipc, server->physics.gravity_scale);
     } else if (strcmp(action, "pin_window") == 0) {
         if (server->focused_view) {
             PhysicsBody *pb = physics_find_body(&server->physics, server->focused_view->id);

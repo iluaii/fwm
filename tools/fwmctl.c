@@ -53,9 +53,21 @@ int main(int argc, char **argv) {
             "  dispatch <action>  run a keybind action (same names as config.toml)\n"
             "  reload             reload the config, discarding every `set`\n"
             "  version            IPC protocol version\n"
+            "  subscribe [events] stream events as JSON lines until killed\n"
             "\n"
             "`set` never writes config.toml: the file stays the source of truth,\n"
-            "so `reload` (or super+shift+r) puts everything back.\n");
+            "so `reload` (or super+shift+r) puts everything back.\n"
+            "\n"
+            "subscribe takes all events by default, or a comma-separated subset:\n"
+            "  window_open window_close window_focus window_title\n"
+            "  desktop mode gravity config_reload\n"
+            "\n"
+            "Pairing it with `dispatch` is the whole plugin story — no shared\n"
+            "address space, so a script that crashes takes nothing with it:\n"
+            "\n"
+            "  fwmctl subscribe window_open | while read -r ev; do\n"
+            "      echo \"$ev\" | grep -q mpv && fwmctl dispatch toggle_float\n"
+            "  done\n");
         return argc < 2 ? 1 : 0;
     }
 
@@ -95,12 +107,16 @@ int main(int argc, char **argv) {
         off += (size_t)n;
     }
 
-    /* The compositor closes after one reply, so read to EOF. */
+    /* The compositor closes after one reply, so read to EOF. `subscribe` is
+     * the exception: it never closes, and the flush is what makes this usable
+     * in a pipeline — stdout is block-buffered when it is not a terminal, so
+     * without it a `| while read` loop would see nothing for 4 KiB at a time. */
     char buf[8192];
     ssize_t n;
     int had_output = 0;
     while ((n = read(fd, buf, sizeof(buf))) > 0) {
         fwrite(buf, 1, (size_t)n, stdout);
+        fflush(stdout);
         had_output = 1;
     }
     close(fd);

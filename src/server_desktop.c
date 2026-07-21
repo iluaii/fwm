@@ -175,6 +175,7 @@ void server_set_desktop_mode(FwmServer *server, int d, int mode) {
     else                                    desktop_shove(server, d);
 
     server_request_tray_redraw(server);
+    ipc_emit_mode(server->ipc, d, mode);
 }
 
 /* Kept as the entry point for the toggle_tiling bind: physics <-> tiling, with

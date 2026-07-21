@@ -175,6 +175,7 @@ fwmctl reload                   # reload the config
 fwmctl config                   # every settable option, with values and ranges
 fwmctl get physics.gravity      # read one option
 fwmctl set physics.gravity 200  # change it, live
+fwmctl subscribe                # stream events as they happen
 ```
 
 Every numeric and colour option in the config is addressable by name, so you can
@@ -214,6 +215,63 @@ as `$FWM_SOCKET`, which children inherit — a program spawned from a keybind ca
 talk back to the compositor that started it without being told where it is.
 Naming the socket after the Wayland display means a nested dev instance and
 your real session never collide.
+
+### Reacting to things — `fwmctl subscribe`
+
+Polling tells you what is true now; `subscribe` tells you when it changes. It
+keeps the connection open and streams one JSON object per line until you kill
+it:
+
+```sh
+fwmctl subscribe                      # everything
+fwmctl subscribe window_open,desktop  # just these
+```
+
+```json
+{"event":"window_open","id":7,"title":"nvim","app_id":"foot","desktop":2}
+{"event":"desktop","desktop":2,"mode":"tiling"}
+{"event":"gravity","gravity":1.000}
+```
+
+| event | fires when |
+|---|---|
+| `window_open` / `window_close` | a window maps / unmaps |
+| `window_focus` | focus moves (`"id":null` when it lands nowhere) |
+| `window_title` | a mapped window renames itself |
+| `desktop` | the camera settles on a different desktop |
+| `mode` | a desktop switches physics / tiling / floating |
+| `gravity` | the gravity mode is cycled |
+| `config_reload` | the config was re-read, so anything cached is stale |
+
+An unknown event name is refused outright rather than ignored, since a typo
+that silently subscribed you to nothing looks exactly like an event that never
+fires.
+
+**This is the extension mechanism.** A "plugin" for fwm is any process that
+subscribes at one end and calls `dispatch` at the other — in any language,
+with no ABI to track and no shared address space, so a script that crashes
+takes nothing down with it:
+
+```sh
+# float every mpv window the moment it opens
+fwmctl subscribe window_open | while read -r ev; do
+    echo "$ev" | jq -e 'select(.app_id=="mpv")' >/dev/null &&
+        fwmctl dispatch toggle_float
+done
+```
+
+Panels and widgets need nothing new either: fwm implements `wlr-layer-shell`,
+so waybar, eww and ags already work, and `subscribe` is how a module reads the
+things only fwm has — gravity mode, per-desktop mode, the window strip.
+
+fwm deliberately has no in-process plugin API. wlroots has no stable ABI, so
+loadable modules would break on every wlroots release and every crash in one
+would be a lost session; the socket costs a few microseconds per event and
+neither is true of it.
+
+Subscribers are never allowed to slow the compositor down: writes are queued
+and flushed asynchronously, and a subscriber that stops reading is disconnected
+once its backlog passes 256 KiB rather than being waited on.
 
 ## Session restore
 
