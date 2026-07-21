@@ -2,6 +2,12 @@
   <img src="assets/logo-brackets.svg" width="230" alt="fwm logo">
 </p>
 
+<p align="center">
+  <a href="https://github.com/iluaii/fwm/actions/workflows/ci.yml">
+    <img src="https://github.com/iluaii/fwm/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+</p>
+
 # fwm — Physics Window Manager (Wayland)
 
 A Wayland compositor written in C (wlroots) where windows behave as physical objects with **mass, momentum, inertia, and velocity** — simulated by a real rigid-body engine ([Box2D](https://box2d.org/) v3). Drag a window and throw it — it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
