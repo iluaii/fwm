@@ -148,42 +148,60 @@ void bsp_collect_leaves(BspNode *node, BspNode **out, int *count, int max) {
     bsp_collect_leaves(node->right, out, count, max);
 }
 
-static void place_rec(BspNode *n, int x, int y, int gap,
+static void place_rec(BspNode *n, int x, int y, int w, int h, int gap,
                       const BspActual *act, int n_act, int *out_w, int *out_h) {
     if (!n) { *out_w = 0; *out_h = 0; return; }
     n->ax = x;
     n->ay = y;
+    n->aw = w;
+    n->ah = h;
 
     if (n->id != 0 || !n->left || !n->right) {
-        int w = n->w, h = n->h;
+        /* What the client took of what it was offered. Never more: a client
+         * that asks for more than the layout has must not push its neighbours
+         * off the screen. */
+        int cw = w, ch = h;
         for (int i = 0; i < n_act; i++) {
-            if (act[i].id == n->id) { w = act[i].w; h = act[i].h; break; }
+            if (act[i].id == n->id) { cw = act[i].w; ch = act[i].h; break; }
         }
-        *out_w = w;
-        *out_h = h;
+        if (cw > w) cw = w;
+        if (ch > h) ch = h;
+        if (cw < 1) cw = 1;
+        if (ch < 1) ch = 1;
+        *out_w = cw;
+        *out_h = ch;
         return;
     }
 
     int aw, ah, bw, bh;
     if (!n->split_h) {
-        place_rec(n->left,  x, y, gap, act, n_act, &aw, &ah);
-        /* The neighbour starts one gap past where the first child really
-         * ended, not past where its slot ended. */
-        place_rec(n->right, x + aw + gap, y, gap, act, n_act, &bw, &bh);
+        /* The first child is offered its share of the split, the second is
+         * offered the rest — which is more than its share whenever the first
+         * came up short. */
+        int lw = (int)((w - gap) * n->ratio);
+        if (lw < 1) lw = 1;
+        place_rec(n->left, x, y, lw, h, gap, act, n_act, &aw, &ah);
+        int rw = w - aw - gap;
+        if (rw < 1) rw = 1;
+        place_rec(n->right, x + aw + gap, y, rw, h, gap, act, n_act, &bw, &bh);
         *out_w = aw + gap + bw;
         *out_h = ah > bh ? ah : bh;
     } else {
-        place_rec(n->left,  x, y, gap, act, n_act, &aw, &ah);
-        place_rec(n->right, x, y + ah + gap, gap, act, n_act, &bw, &bh);
+        int th = (int)((h - gap) * n->ratio);
+        if (th < 1) th = 1;
+        place_rec(n->left, x, y, w, th, gap, act, n_act, &aw, &ah);
+        int rh = h - ah - gap;
+        if (rh < 1) rh = 1;
+        place_rec(n->right, x, y + ah + gap, w, rh, gap, act, n_act, &bw, &bh);
         *out_w = aw > bw ? aw : bw;
         *out_h = ah + gap + bh;
     }
 }
 
-void bsp_place_actual(BspNode *root, int x, int y, int gap,
+void bsp_place_actual(BspNode *root, int x, int y, int w, int h, int gap,
                       const BspActual *actual, int n_actual) {
-    int w, h;
-    place_rec(root, x, y, gap, actual, n_actual, &w, &h);
+    int ow, oh;
+    place_rec(root, x, y, w, h, gap, actual, n_actual, &ow, &oh);
 }
 
 void bsp_free(BspNode *node) {

@@ -935,65 +935,49 @@ void server_align_tiles(FwmServer *server, int desktop) {
     for (int i = 0; i < count; i++) {
         BspNode *n = leaves[i];
         FwmView *view = server_find_view(server, n->id);
-        int w = n->w, h = n->h;
+        int w = n->aw, h = n->ah;
         if (view) view_committed_size(view, &w, &h);
         /* A tab-stack's bar sits above the client but inside the slot, so it
          * counts toward the space this leaf occupies. */
-        bar[i] = (view && view->group && n->h > GROUP_TAB_H * 2) ? GROUP_TAB_H : 0;
+        bar[i] = (view && view->group && n->ah > GROUP_TAB_H * 2) ? GROUP_TAB_H : 0;
         actual[i] = (BspActual){ .id = n->id, .w = w, .h = h + bar[i] };
     }
 
     int x, y, w, h;
     tile_area(server, desktop, &x, &y, &w, &h);
-    bsp_place_actual(root, x, y, server->config.tiling.gaps_in, actual, count);
+    bsp_place_actual(root, x, y, w, h, server->config.tiling.gaps_in, actual, count);
 
-    for (int i = 0; i < count; i++) {
-        PhysicsBody *pb = physics_find_body(&server->physics, leaves[i]->id);
-        if (!pb) continue;
-        tile_move_to(server, server_find_view(server, leaves[i]->id), pb,
-                     leaves[i]->ax, leaves[i]->ay + bar[i]);
-    }
-}
-
-void server_apply_tiling(FwmServer *server, int desktop) {
-    int gin = server->config.tiling.gaps_in;
-    int x, y, usable_w, usable_h;
-    tile_area(server, desktop, &x, &y, &usable_w, &usable_h);
-
-    bsp_recalc(server->bsp_roots[desktop], x, y, usable_w, usable_h, gin);
-
-    BspNode *leaves[MAX_WINDOWS];
-    int count = 0;
-    bsp_collect_leaves(server->bsp_roots[desktop], leaves, &count, MAX_WINDOWS);
-
-    /* Sizes first, for every tile. Positions come afterwards, from the sizes
-     * clients have actually committed — see tile_place(). */
     for (int i = 0; i < count; i++) {
         BspNode *n = leaves[i];
         PhysicsBody *pb = physics_find_body(&server->physics, n->id);
         if (!pb) continue;
-        // `tiled` turns the body into a static anchor: the layout owns tiles,
-        // physics must never shove them (transient overlaps while several
-        // windows glide to new slots used to scatter finished ones).
         pb->tiled = 1;
         pb->vx = 0;
         pb->vy = 0;
         pb->flying = 0;
 
         FwmView *view = server_find_view(server, n->id);
-        int nh = n->h;
-        // A tab-stack draws its bar above the window, outside the client area.
-        // The layout has to hand that strip over, or the bar hangs into the
-        // slot above -- for the top row that is our tray.
-        if (view && view->group && nh > GROUP_TAB_H * 2) nh -= GROUP_TAB_H;
-        pb->width  = n->w;
-        pb->height = nh;
-
-        if (!view) continue;
-        view->width  = pb->width;
-        view->height = pb->height;
-        view_set_size(view, view->width, view->height);
+        pb->width  = n->aw;
+        pb->height = n->ah - bar[i];
+        if (view) {
+            view->width  = pb->width;
+            view->height = pb->height;
+            view_set_size(view, view->width, view->height);
+        }
+        tile_move_to(server, view, pb, n->ax, n->ay + bar[i]);
     }
+}
+
+void server_apply_tiling(FwmServer *server, int desktop) {
+    int x, y, usable_w, usable_h;
+    tile_area(server, desktop, &x, &y, &usable_w, &usable_h);
+
+    /* The slot grid. Sizes and positions no longer come from it —
+     * server_align_tiles() derives those from what clients committed — but
+     * bsp_find_border() hit-tests dragging against x/y/w/h, and the ratio each
+     * split is recalculated from lives here. */
+    bsp_recalc(server->bsp_roots[desktop], x, y, usable_w, usable_h,
+               server->config.tiling.gaps_in);
 
     server_align_tiles(server, desktop);
 }

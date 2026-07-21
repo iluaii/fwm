@@ -265,7 +265,7 @@ static void test_place_actual(void) {
     bsp_recalc(root, 0, 0, 100, 600, 10);
     BspActual same[] = { {1, root->left->w, root->left->h},
                          {2, root->right->w, root->right->h} };
-    bsp_place_actual(root, 0, 0, 10, same, 2);
+    bsp_place_actual(root, 0, 0, 100, 600, 10, same, 2);
     CHECK_INT(root->left->ay, root->left->y);
     CHECK_INT(root->right->ay, root->right->y);
     bsp_free(root);
@@ -277,7 +277,7 @@ static void test_place_actual(void) {
     CHECK_INT(root->left->h, 295);
     /* The upper window took 289 of its 295. */
     BspActual act[] = { {1, 100, 289}, {2, 100, 295} };
-    bsp_place_actual(root, 0, 0, 10, act, 2);
+    bsp_place_actual(root, 0, 0, 100, 600, 10, act, 2);
     CHECK_INT(root->left->ay, 0);
     CHECK_INT(root->right->ay, 299);                /* 289 + 10, not 305 */
     /* Which is the whole point: the visible gap is the configured one. */
@@ -292,7 +292,7 @@ static void test_place_actual(void) {
     sub->split_h = 1;
     bsp_recalc(root, 0, 0, 100, 900, 10);
     BspActual a3[] = { {1, 100, 440}, {2, 100, 210}, {3, 100, 200} };
-    bsp_place_actual(root, 0, 0, 10, a3, 3);
+    bsp_place_actual(root, 0, 0, 100, 900, 10, a3, 3);
 
     BspNode *lv[8]; int n = 0;
     bsp_collect_leaves(root, lv, &n, 8);
@@ -310,7 +310,7 @@ static void test_place_actual(void) {
     root->split_h = 0;
     bsp_recalc(root, 0, 0, 1000, 100, 10);
     BspActual h2[] = { {1, 480, 100}, {2, 495, 100} };   /* left is 15 short */
-    bsp_place_actual(root, 0, 0, 10, h2, 2);
+    bsp_place_actual(root, 0, 0, 1000, 100, 10, h2, 2);
     CHECK_INT(root->left->ax, 0);
     CHECK_INT(root->right->ax, 490);                     /* 480 + 10 */
     bsp_free(root);
@@ -330,7 +330,7 @@ static void test_place_actual(void) {
     bsp_recalc(root, 0, 0, 200, 900, 10);
 
     BspActual nest[] = { {1, 200, 100}, {3, 200, 150}, {2, 200, 300} };
-    bsp_place_actual(root, 0, 0, 10, nest, 3);
+    bsp_place_actual(root, 0, 0, 200, 900, 10, nest, 3);
     BspNode *l1 = bsp_find(root, 1), *l3 = bsp_find(root, 3), *l2 = bsp_find(root, 2);
     CHECK_INT(l1->ay, 0);
     CHECK_INT(l3->ay, 110);             /* 100 + gap */
@@ -348,18 +348,80 @@ static void test_place_actual(void) {
     root->left->split_h = 0;            /* subtree splits side by side */
     bsp_recalc(root, 0, 0, 900, 200, 10);
     BspActual wide[] = { {1, 100, 200}, {3, 150, 200}, {2, 300, 200} };
-    bsp_place_actual(root, 0, 0, 10, wide, 3);
+    bsp_place_actual(root, 0, 0, 900, 200, 10, wide, 3);
     l1 = bsp_find(root, 1); l3 = bsp_find(root, 3); l2 = bsp_find(root, 2);
     CHECK_INT(l1->ax, 0);
     CHECK_INT(l3->ax, 110);
     CHECK_INT(l2->ax, 270);
     bsp_free(root);
 
+    /* The other half of the fix. Moving a window up to close an interior gap
+     * only relocates the leftover unless something takes it: without this the
+     * slack piled up at the bottom of the column, so a column of three
+     * terminals ended far short of the area and its bottom gap dwarfed the
+     * neighbouring column's. */
+    CASE("the last child is offered what the earlier ones did not take");
+    root = tree_of(2);
+    root->split_h = 1;
+    bsp_recalc(root, 0, 0, 100, 600, 10);
+    CHECK_INT(root->left->h, 295);                  /* even slots to start */
+    CHECK_INT(root->right->h, 295);
+    BspActual shy[] = { {1, 100, 289}, {2, 100, 600} };   /* upper is 6 short */
+    bsp_place_actual(root, 0, 0, 100, 600, 10, shy, 2);
+    l1 = bsp_find(root, 1); l2 = bsp_find(root, 2);
+    CHECK_INT(l1->ah, 295);                         /* offered its share */
+    CHECK_INT(l2->ah, 301);                         /* offered the remainder */
+    CHECK_INT(l2->ay, 299);                         /* 289 + gap */
+    /* And so the column reaches the bottom of the area instead of stopping
+     * short of it. */
+    CHECK_INT(l2->ay + l2->ah, 600);
+    bsp_free(root);
+
+    CASE("the same remainder rule across a row");
+    root = tree_of(2);
+    root->split_h = 0;
+    bsp_recalc(root, 0, 0, 1000, 100, 10);
+    CHECK_INT(root->left->w, 495);
+    BspActual narrow[] = { {1, 480, 100}, {2, 1000, 100} };   /* left is 15 short */
+    bsp_place_actual(root, 0, 0, 1000, 100, 10, narrow, 2);
+    l1 = bsp_find(root, 1); l2 = bsp_find(root, 2);
+    CHECK_INT(l1->aw, 495);                         /* offered its share */
+    CHECK_INT(l2->aw, 510);                         /* offered the remainder */
+    CHECK_INT(l2->ax, 490);                         /* 480 + gap */
+    CHECK_INT(l2->ax + l2->aw, 1000);               /* the row reaches the edge */
+    bsp_free(root);
+
+    CASE("slack does not accumulate down a column of three");
+    root = tree_of(3);
+    root->split_h = 1;
+    (root->right->id == 0 ? root->right : root->left)->split_h = 1;
+    bsp_recalc(root, 0, 0, 100, 900, 10);
+    /* Every window comes up 6 short of whatever it is offered. */
+    BspActual s3[] = { {1, 100, 439}, {2, 100, 209}, {3, 100, 900} };
+    bsp_place_actual(root, 0, 0, 100, 900, 10, s3, 3);
+    BspNode *w3[8]; int n3 = 0;
+    bsp_collect_leaves(root, w3, &n3, 8);
+    CHECK_INT(n3, 3);
+    /* The last one still ends at the bottom: it was offered the slack. */
+    CHECK_INT(w3[2]->ay + w3[2]->ah, 900);
+    bsp_free(root);
+
+    CASE("a client asking for more than it was offered is clamped");
+    root = tree_of(2);
+    root->split_h = 1;
+    bsp_recalc(root, 0, 0, 100, 600, 10);
+    BspActual greedy[] = { {1, 100, 5000}, {2, 100, 100} };
+    bsp_place_actual(root, 0, 0, 100, 600, 10, greedy, 2);
+    l2 = bsp_find(root, 2);
+    CHECK(l2->ay >= 0);
+    CHECK(l2->ay <= 600);                           /* not shoved off the area */
+    bsp_free(root);
+
     CASE("a leaf with no committed size falls back to its slot");
     root = tree_of(2);
     root->split_h = 1;
     bsp_recalc(root, 0, 0, 100, 600, 10);
-    bsp_place_actual(root, 0, 0, 10, NULL, 0);
+    bsp_place_actual(root, 0, 0, 100, 600, 10, NULL, 0);
     CHECK_INT(root->left->ay, root->left->y);
     CHECK_INT(root->right->ay, root->right->y);
     bsp_free(root);
@@ -369,7 +431,7 @@ static void test_place_actual(void) {
     root->split_h = 1;
     bsp_recalc(root, 40, 70, 100, 600, 10);
     BspActual off[] = { {1, 100, 289}, {2, 100, 295} };
-    bsp_place_actual(root, 40, 70, 10, off, 2);
+    bsp_place_actual(root, 40, 70, 100, 600, 10, off, 2);
     CHECK_INT(root->left->ax, 40);
     CHECK_INT(root->left->ay, 70);
     CHECK_INT(root->right->ay, 70 + 289 + 10);
