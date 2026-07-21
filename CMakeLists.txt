@@ -129,3 +129,27 @@ target_compile_definitions(fwm PRIVATE WLR_USE_UNSTABLE)
 # Control-socket CLI. Deliberately links nothing: it speaks plain text over a
 # unix socket, so it stays usable even if the compositor's deps change.
 add_executable(fwmctl tools/fwmctl.c)
+# ── unit tests ─────────────────────────────────────────────────────────
+# Off by default: a normal build should not pay for targets nobody asked for.
+#
+#   cmake -S . -B build-test -DFWM_TESTS=ON && cmake --build build-test
+#   ctest --test-dir build-test --output-on-failure
+#
+# Only the modules that need no compositor are covered here. bsp.c is a plain
+# tree over ints, and config.c reaches no further than toml and xkbcommon, so
+# both link without wlroots, a display, or a running fwm.
+option(FWM_TESTS "Build the unit tests" OFF)
+if(FWM_TESTS)
+    enable_testing()
+
+    add_executable(test_bsp tests/test_bsp.c src/bsp.c)
+    target_include_directories(test_bsp PRIVATE src tests)
+    target_link_libraries(test_bsp PRIVATE m)
+
+    add_executable(test_config tests/test_config.c src/config.c src/toml.c)
+    target_include_directories(test_config PRIVATE src tests ${XKBCOMMON_INCLUDE_DIRS})
+    target_link_libraries(test_config PRIVATE ${XKBCOMMON_LIBRARIES} m)
+
+    add_test(NAME bsp    COMMAND test_bsp)
+    add_test(NAME config COMMAND test_config)
+endif()
