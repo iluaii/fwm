@@ -148,6 +148,44 @@ void bsp_collect_leaves(BspNode *node, BspNode **out, int *count, int max) {
     bsp_collect_leaves(node->right, out, count, max);
 }
 
+static void place_rec(BspNode *n, int x, int y, int gap,
+                      const BspActual *act, int n_act, int *out_w, int *out_h) {
+    if (!n) { *out_w = 0; *out_h = 0; return; }
+    n->ax = x;
+    n->ay = y;
+
+    if (n->id != 0 || !n->left || !n->right) {
+        int w = n->w, h = n->h;
+        for (int i = 0; i < n_act; i++) {
+            if (act[i].id == n->id) { w = act[i].w; h = act[i].h; break; }
+        }
+        *out_w = w;
+        *out_h = h;
+        return;
+    }
+
+    int aw, ah, bw, bh;
+    if (!n->split_h) {
+        place_rec(n->left,  x, y, gap, act, n_act, &aw, &ah);
+        /* The neighbour starts one gap past where the first child really
+         * ended, not past where its slot ended. */
+        place_rec(n->right, x + aw + gap, y, gap, act, n_act, &bw, &bh);
+        *out_w = aw + gap + bw;
+        *out_h = ah > bh ? ah : bh;
+    } else {
+        place_rec(n->left,  x, y, gap, act, n_act, &aw, &ah);
+        place_rec(n->right, x, y + ah + gap, gap, act, n_act, &bw, &bh);
+        *out_w = aw > bw ? aw : bw;
+        *out_h = ah + gap + bh;
+    }
+}
+
+void bsp_place_actual(BspNode *root, int x, int y, int gap,
+                      const BspActual *actual, int n_actual) {
+    int w, h;
+    place_rec(root, x, y, gap, actual, n_actual, &w, &h);
+}
+
 void bsp_free(BspNode *node) {
     if (!node) return;
     bsp_free(node->left);

@@ -45,6 +45,21 @@ static void handle_commit(struct wl_listener *listener, void *data) {
     // Track the actual committed surface size so borders hug the real window.
     view_update_border_geometry(view);
 
+    /* A tiled client that commits a size other than the one it was given
+     * shifts where its neighbours belong — terminals do this on every resize,
+     * rounding to whole character cells. Re-run the layout's positioning pass,
+     * but only when the size actually moved: this runs on every commit. */
+    {
+        int cw, ch;
+        view_committed_size(view, &cw, &ch);
+        if (cw != view->aligned_w || ch != view->aligned_h) {
+            view->aligned_w = cw;
+            view->aligned_h = ch;
+            PhysicsBody *pb = physics_find_body(&view->server->physics, view->id);
+            if (pb && pb->tiled) server_align_tiles(view->server, pb->desktop_id);
+        }
+    }
+
     // Keep our own lock on the latest committed buffer: at unmap time the
     // client's buffer may already be gone, but the close animation needs the
     // last frame as a snapshot.
@@ -378,6 +393,10 @@ static void view_border_box(FwmView *view, int *w, int *h) {
     }
     if (*w <= 0) *w = view->width;
     if (*h <= 0) *h = view->height;
+}
+
+void view_committed_size(FwmView *view, int *w, int *h) {
+    view_border_box(view, w, h);
 }
 
 void view_update_border_geometry(FwmView *view) {

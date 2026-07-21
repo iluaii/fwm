@@ -864,12 +864,11 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
     server_request_tray_redraw(server);
 }
 
-void server_apply_tiling(FwmServer *server, int desktop) {
-    int cx = desktop * server->screen_width;
-    int gin  = server->config.tiling.gaps_in;
+/* The area tiles live in: the space layer-shell clients left us, minus our own
+ * tray and the outer gap. Shared by the layout and the alignment pass so the
+ * two cannot drift apart. */
+static void tile_area(FwmServer *server, int desktop, int *x, int *y, int *w, int *h) {
     int gout = server->config.tiling.gaps_out;
-    /* Start from the area layer-shell clients left us (a bar with an
-     * exclusive zone shrinks it), never letting tiles run under our own tray. */
     struct wlr_box work = server->usable_area;
     if (work.width <= 0 || work.height <= 0) {
         work = (struct wlr_box){ 0, 0, server->screen_width, server->screen_height };
@@ -878,27 +877,101 @@ void server_apply_tiling(FwmServer *server, int desktop) {
         work.height -= TRAY_BOTTOM - work.y;
         work.y = TRAY_BOTTOM;
     }
-    int top = work.y + gout;
-    int usable_h = work.height - gout * 2;
-    int usable_w = work.width - gout * 2;
+    *x = desktop * server->screen_width + work.x + gout;
+    *y = work.y + gout;
+    *w = work.width  - gout * 2;
+    *h = work.height - gout * 2;
+}
 
-    bsp_recalc(server->bsp_roots[desktop], cx + work.x + gout, top, usable_w, usable_h, gin);
+/* Move one tile to where the alignment pass decided it goes. */
+static void tile_move_to(FwmServer *server, FwmView *view, PhysicsBody *pb, int nx, int ny) {
+    int animate = server->config.tiling.anim_speed > 0.0 &&
+                  server->interactive.action != FWM_ACTION_BSP_RESIZE;
+    if (!view) { pb->x = nx; pb->y = ny; return; }
+
+    if (animate) {
+        view->tile_anim = 1;
+        view->tile_tx = nx;
+        view->tile_ty = ny;
+    } else {
+        view->tile_anim = 0;
+        pb->x = nx;
+        pb->y = ny;
+        view->x = pb->x;
+        view->y = pb->y;
+        if (view->scene_tree) {
+            wlr_scene_node_set_position(&view->scene_tree->node,
+                                        (int)lround(view->x - server->camera_x),
+                                        (int)lround(view->y));
+        }
+    }
+}
+
+/* Re-run tile positioning against the sizes clients actually committed.
+ *
+ * A tile is asked to be its slot's size, but a client may commit something
+ * smaller and terminals routinely do — they round to whole character cells.
+ * Anchored at the slot's top-left, that leftover ends up BETWEEN windows, so a
+ * gap meant to be gaps_in reads as gaps_in plus a stray 6-16px. It is why the
+ * layout looked right with two windows and wrong from three: two side-by-side
+ * tiles are both full height, so there is no interior gap to get wrong yet.
+ *
+ * bsp_place_actual() does the arithmetic; this feeds it the committed sizes
+ * and moves the windows to what it decided. No size is touched, so this cannot
+ * provoke the commits that would call it again.
+ */
+void server_align_tiles(FwmServer *server, int desktop) {
+    if (desktop < 0 || desktop >= 10) return;
+    BspNode *root = server->bsp_roots[desktop];
+    if (!root) return;
+
+    BspNode *leaves[MAX_WINDOWS];
+    int count = 0;
+    bsp_collect_leaves(root, leaves, &count, MAX_WINDOWS);
+    if (count == 0) return;
+
+    BspActual actual[MAX_WINDOWS];
+    int bar[MAX_WINDOWS];
+    for (int i = 0; i < count; i++) {
+        BspNode *n = leaves[i];
+        FwmView *view = server_find_view(server, n->id);
+        int w = n->w, h = n->h;
+        if (view) view_committed_size(view, &w, &h);
+        /* A tab-stack's bar sits above the client but inside the slot, so it
+         * counts toward the space this leaf occupies. */
+        bar[i] = (view && view->group && n->h > GROUP_TAB_H * 2) ? GROUP_TAB_H : 0;
+        actual[i] = (BspActual){ .id = n->id, .w = w, .h = h + bar[i] };
+    }
+
+    int x, y, w, h;
+    tile_area(server, desktop, &x, &y, &w, &h);
+    bsp_place_actual(root, x, y, server->config.tiling.gaps_in, actual, count);
+
+    for (int i = 0; i < count; i++) {
+        PhysicsBody *pb = physics_find_body(&server->physics, leaves[i]->id);
+        if (!pb) continue;
+        tile_move_to(server, server_find_view(server, leaves[i]->id), pb,
+                     leaves[i]->ax, leaves[i]->ay + bar[i]);
+    }
+}
+
+void server_apply_tiling(FwmServer *server, int desktop) {
+    int gin = server->config.tiling.gaps_in;
+    int x, y, usable_w, usable_h;
+    tile_area(server, desktop, &x, &y, &usable_w, &usable_h);
+
+    bsp_recalc(server->bsp_roots[desktop], x, y, usable_w, usable_h, gin);
 
     BspNode *leaves[MAX_WINDOWS];
     int count = 0;
     bsp_collect_leaves(server->bsp_roots[desktop], leaves, &count, MAX_WINDOWS);
 
-    // No glide while the user drags a BSP border: the layout must track the
-    // mouse 1:1, a lagging animation there feels like jelly.
-    int animate = server->config.tiling.anim_speed > 0.0 &&
-                  server->interactive.action != FWM_ACTION_BSP_RESIZE;
-
+    /* Sizes first, for every tile. Positions come afterwards, from the sizes
+     * clients have actually committed — see tile_place(). */
     for (int i = 0; i < count; i++) {
         BspNode *n = leaves[i];
         PhysicsBody *pb = physics_find_body(&server->physics, n->id);
         if (!pb) continue;
-        // Size applies immediately (clients resize asynchronously anyway);
-        // position glides there via the tile animation in physics_tick_cb.
         // `tiled` turns the body into a static anchor: the layout owns tiles,
         // physics must never shove them (transient overlaps while several
         // windows glide to new slots used to scatter finished ones).
@@ -907,53 +980,23 @@ void server_apply_tiling(FwmServer *server, int desktop) {
         pb->vy = 0;
         pb->flying = 0;
 
-        // Update client view size and position
-        FwmView *view = NULL;
-        FwmView *v;
-        wl_list_for_each(v, &server->views, link) {
-            if (v->id == n->id) {
-                view = v;
-                break;
-            }
-        }
+        FwmView *view = server_find_view(server, n->id);
+        int nh = n->h;
         // A tab-stack draws its bar above the window, outside the client area.
         // The layout has to hand that strip over, or the bar hangs into the
         // slot above -- for the top row that is our tray.
-        int nx = n->x, ny = n->y, nw = n->w, nh = n->h;
-        if (view && view->group && nh > GROUP_TAB_H * 2) {
-            ny += GROUP_TAB_H;
-            nh -= GROUP_TAB_H;
-        }
-        pb->width = nw;
+        if (view && view->group && nh > GROUP_TAB_H * 2) nh -= GROUP_TAB_H;
+        pb->width  = n->w;
         pb->height = nh;
 
-        if (!view) {
-            pb->x = nx;
-            pb->y = ny;
-            continue;
-        }
-
-        view->width = pb->width;
+        if (!view) continue;
+        view->width  = pb->width;
         view->height = pb->height;
         view_set_size(view, view->width, view->height);
-
-        if (animate) {
-            view->tile_anim = 1;
-            view->tile_tx = nx;
-            view->tile_ty = ny;
-        } else {
-            view->tile_anim = 0;
-            pb->x = nx;
-            pb->y = ny;
-            view->x = pb->x;
-            view->y = pb->y;
-            if (view->scene_tree) {
-                wlr_scene_node_set_position(&view->scene_tree->node, (int)lround(view->x - server->camera_x), (int)lround(view->y));
-            }
-        }
     }
-}
 
+    server_align_tiles(server, desktop);
+}
 void server_start_interactive_move(FwmServer *server, struct FwmView *view, uint32_t serial) {
     (void)serial;
     PhysicsBody *pb = physics_find_body(&server->physics, view->id);

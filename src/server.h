@@ -270,6 +270,9 @@ void server_schedule_frames(FwmServer *server);
 void server_refocus(FwmServer *server, int desktop, struct FwmView *skip);
 void server_focus_view(FwmServer *server, struct FwmView *view);
 void server_apply_tiling(FwmServer *server, int desktop);
+/* Re-run tile positioning against the sizes clients actually committed. Called
+ * when a tiled window commits a size different from the one it was asked for. */
+void server_align_tiles(FwmServer *server, int desktop);
 /* Move one desktop to DESKTOP_MODE_*, running the leave/enter work for both
  * the old and the new mode. No-op when the desktop is already in that mode. */
 void server_set_desktop_mode(FwmServer *server, int d, int mode);

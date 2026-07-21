@@ -45,6 +45,11 @@ typedef struct FwmView {
     int tile_anim;
     double tile_tx, tile_ty;
 
+    /* Size this view was last aligned against. The layout re-runs when a
+     * client commits a different one; without this it would re-run on every
+     * commit, cursor blink included. */
+    int aligned_w, aligned_h;
+
     /* Focus border: 4 rects (top, bottom, left, right) parented to scene_tree,
      * so they move with the window for free. NULL when borders are disabled. */
     struct wlr_scene_rect *border[4];
@@ -125,6 +130,11 @@ void view_set_fullscreen_hint(FwmView *view, bool fullscreen);
 void view_sync_position(FwmView *view);
 
 /* Border helpers (no-ops when borders are disabled or the view is unmapped). */
+/* The size the client actually committed, which is not always the size it was
+ * asked for — see server_align_tiles(). Falls back to the requested size
+ * before the first commit. */
+void view_committed_size(FwmView *view, int *w, int *h);
+
 void view_update_border_geometry(FwmView *view);
 
 /* Impact squash & stretch (see the squash_* fields above).

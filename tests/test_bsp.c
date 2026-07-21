@@ -254,6 +254,128 @@ static void test_find_border(void) {
     bsp_free(root);
 }
 
+/* The bug this was written for: a terminal rounds its height down to whole
+ * character cells, so it commits less than its slot. Anchored at the slot's
+ * top-left, that leftover sits between windows and the gap reads far wider
+ * than gaps_in — invisible with two side-by-side tiles, glaring from three. */
+static void test_place_actual(void) {
+    CASE("slot-sized clients place exactly like the slot grid");
+    BspNode *root = tree_of(2);
+    root->split_h = 1;
+    bsp_recalc(root, 0, 0, 100, 600, 10);
+    BspActual same[] = { {1, root->left->w, root->left->h},
+                         {2, root->right->w, root->right->h} };
+    bsp_place_actual(root, 0, 0, 10, same, 2);
+    CHECK_INT(root->left->ay, root->left->y);
+    CHECK_INT(root->right->ay, root->right->y);
+    bsp_free(root);
+
+    CASE("a short client does not widen the gap below it");
+    root = tree_of(2);
+    root->split_h = 1;
+    bsp_recalc(root, 0, 0, 100, 600, 10);           /* slots 295 | gap | 295 */
+    CHECK_INT(root->left->h, 295);
+    /* The upper window took 289 of its 295. */
+    BspActual act[] = { {1, 100, 289}, {2, 100, 295} };
+    bsp_place_actual(root, 0, 0, 10, act, 2);
+    CHECK_INT(root->left->ay, 0);
+    CHECK_INT(root->right->ay, 299);                /* 289 + 10, not 305 */
+    /* Which is the whole point: the visible gap is the configured one. */
+    CHECK_INT(root->right->ay - (root->left->ay + 289), 10);
+    bsp_free(root);
+
+    CASE("every gap in a column stays exact");
+    root = tree_of(3);
+    /* Force a single column: three tiles stacked. */
+    root->split_h = 1;
+    BspNode *sub = root->right->id == 0 ? root->right : root->left;
+    sub->split_h = 1;
+    bsp_recalc(root, 0, 0, 100, 900, 10);
+    BspActual a3[] = { {1, 100, 440}, {2, 100, 210}, {3, 100, 200} };
+    bsp_place_actual(root, 0, 0, 10, a3, 3);
+
+    BspNode *lv[8]; int n = 0;
+    bsp_collect_leaves(root, lv, &n, 8);
+    CHECK_INT(n, 3);
+    /* Walk the column top to bottom and check each seam. */
+    for (int i = 0; i + 1 < n; i++) {
+        int hi = 0;
+        for (int k = 0; k < 3; k++) if (a3[k].id == lv[i]->id) hi = a3[k].h;
+        CHECK_INT(lv[i + 1]->ay - (lv[i]->ay + hi), 10);
+    }
+    bsp_free(root);
+
+    CASE("horizontal neighbours line up the same way");
+    root = tree_of(2);
+    root->split_h = 0;
+    bsp_recalc(root, 0, 0, 1000, 100, 10);
+    BspActual h2[] = { {1, 480, 100}, {2, 495, 100} };   /* left is 15 short */
+    bsp_place_actual(root, 0, 0, 10, h2, 2);
+    CHECK_INT(root->left->ax, 0);
+    CHECK_INT(root->right->ax, 490);                     /* 480 + 10 */
+    bsp_free(root);
+
+    /* A subtree reports the space it occupies to its parent, gaps included.
+     * Only a nested split placed FIRST exposes that: its accumulated extent is
+     * what the sibling after it is measured from. */
+    CASE("a nested subtree reports its own gaps to the parent");
+    root = NULL;
+    bsp_insert(&root, 0, 1);
+    bsp_insert(&root, 1, 2);            /* root: leaf1 | leaf2 */
+    bsp_insert(&root, 1, 3);            /* leaf1 becomes a split of 1 and 3 */
+    CHECK_INT(root->left->id, 0);       /* the subtree really is first */
+    CHECK_INT(root->right->id, 2);
+    root->split_h = 1;                  /* subtree on top, leaf2 below */
+    root->left->split_h = 1;            /* and the subtree is a column too */
+    bsp_recalc(root, 0, 0, 200, 900, 10);
+
+    BspActual nest[] = { {1, 200, 100}, {3, 200, 150}, {2, 200, 300} };
+    bsp_place_actual(root, 0, 0, 10, nest, 3);
+    BspNode *l1 = bsp_find(root, 1), *l3 = bsp_find(root, 3), *l2 = bsp_find(root, 2);
+    CHECK_INT(l1->ay, 0);
+    CHECK_INT(l3->ay, 110);             /* 100 + gap */
+    /* leaf2 sits below the whole subtree: 100 + gap + 150, then one more gap.
+     * Drop the gap from the subtree's reported height and this lands at 260. */
+    CHECK_INT(l2->ay, 270);
+    bsp_free(root);
+
+    CASE("the same for widths");
+    root = NULL;
+    bsp_insert(&root, 0, 1);
+    bsp_insert(&root, 1, 2);
+    bsp_insert(&root, 1, 3);
+    root->split_h = 0;                  /* subtree left, leaf2 right */
+    root->left->split_h = 0;            /* subtree splits side by side */
+    bsp_recalc(root, 0, 0, 900, 200, 10);
+    BspActual wide[] = { {1, 100, 200}, {3, 150, 200}, {2, 300, 200} };
+    bsp_place_actual(root, 0, 0, 10, wide, 3);
+    l1 = bsp_find(root, 1); l3 = bsp_find(root, 3); l2 = bsp_find(root, 2);
+    CHECK_INT(l1->ax, 0);
+    CHECK_INT(l3->ax, 110);
+    CHECK_INT(l2->ax, 270);
+    bsp_free(root);
+
+    CASE("a leaf with no committed size falls back to its slot");
+    root = tree_of(2);
+    root->split_h = 1;
+    bsp_recalc(root, 0, 0, 100, 600, 10);
+    bsp_place_actual(root, 0, 0, 10, NULL, 0);
+    CHECK_INT(root->left->ay, root->left->y);
+    CHECK_INT(root->right->ay, root->right->y);
+    bsp_free(root);
+
+    CASE("origin is honoured");
+    root = tree_of(2);
+    root->split_h = 1;
+    bsp_recalc(root, 40, 70, 100, 600, 10);
+    BspActual off[] = { {1, 100, 289}, {2, 100, 295} };
+    bsp_place_actual(root, 40, 70, 10, off, 2);
+    CHECK_INT(root->left->ax, 40);
+    CHECK_INT(root->left->ay, 70);
+    CHECK_INT(root->right->ay, 70 + 289 + 10);
+    bsp_free(root);
+}
+
 int main(void) {
     test_leaf();
     test_find();
@@ -264,5 +386,6 @@ int main(void) {
     test_collect_leaves();
     test_swap();
     test_find_border();
+    test_place_actual();
     return t_report("bsp");
 }
