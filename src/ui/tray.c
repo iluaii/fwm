@@ -212,7 +212,10 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
             int active = (i == data->active_desktop);
 
             if (count > 0) {
-                char buf[8];
+                /* Sized for any int, not for the count we expect: the compiler
+                 * cannot know it is bounded by MAX_WINDOWS, and neither can a
+                 * future caller feeding this from somewhere else. */
+                char buf[12];
                 snprintf(buf, sizeof(buf), "%d", count);
                 pango_layout_set_text(layout, buf, -1);
                 int nw;

@@ -18,7 +18,10 @@
 
 /* One rendered row: "Super+Q" -> "close window". */
 struct HintRow {
-    char key[64];
+    /* Wide enough for the longest thing written into it: a 31-char modifier
+     * string followed by a 63-char key list. Sizing it to the common case
+     * meant a crowded group silently lost its tail. */
+    char key[96];
     char action[64];
 };
 
