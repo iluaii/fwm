@@ -27,7 +27,9 @@ This is the primary, actively developed version. The legacy X11 version lives on
 
 ### World
 - **10 virtual desktops** on one continuous strip — the world is 10 screens wide, windows keep absolute positions.
+- **Three modes per desktop** — physics (default), BSP tiling (`Super+T`), and floating (`Super+Alt+Space`), where windows stay exactly where you drop them and overlap freely, like an ordinary desktop environment. Each desktop picks its own.
 - **Smooth camera** — scroll with `Super+H`/`Super+L` (hold to repeat), jump with `Super+1`…`0`.
+- **Send windows across** — `Super+Shift+1`…`0`. Under physics and floating you can also just drag a window past the screen edge; a tiled window's geometry belongs to the layout, so this is the way out of tiling.
 - **Parallax wallpaper** — multi-layer background images (PNG/JPEG/WebP) that scroll as you move across desktops. `pan` mode turns one large image into a world you walk across.
 
 ### Tiling (Hyprland-style)
@@ -45,6 +47,8 @@ This is the primary, actively developed version. The legacy X11 version lives on
 - **Wallpaper picker** (`Super+Shift+P`) — browse a folder and apply an image instantly; the choice is remembered without ever rewriting your config.
 - **Keybind cheat-sheet** (`Super+Shift+/`) — generated from your actual binds, not a static list.
 - **Config never costs you the session** — a broken file falls back to built-in binds and reports the problem in a tray pill; fix it and press `Super+Shift+R` to reload live.
+- **Window rules** — `[[rule]]` matches `app_id` / `title` with regexes and decides where a window opens and whether physics touches it.
+- **A crash no longer costs your layout** — fwm records which applications are running and on which desktop, and the `fwm-session` wrapper brings them back after an unclean exit. They are relaunched, not resumed.
 
 ### Visuals
 - **Focus borders** — accent color on the focused window, muted on the rest; colors and width in the config.
@@ -81,7 +85,7 @@ wlroots must be built with Xwayland support — CMake refuses to configure other
 
 ## Install
 
-One command — installs dependencies (pacman / apt / dnf / xbps), builds Box2D v3 from source if your distro doesn't ship it, builds fwm, and registers a `fwm` session for your display manager:
+One command — installs dependencies (pacman / apt / dnf / xbps), builds Box2D v3 from source if your distro doesn't ship it, builds fwm and `fwmctl`, and registers a `fwm` session for your display manager. The session entry launches `fwm-session`, the supervisor that restarts the compositor after a crash (see [Session restore](#session-restore)):
 
 ```sh
 git clone https://github.com/iluaii/fwm.git
@@ -122,9 +126,13 @@ WLR_BACKENDS=wayland ./build/fwm-wayland  # nested Wayland window
 
 A compositor cannot hot-restart the way an X11 window manager can: it *is* the
 display server, so when the process exits every client's connection dies with
-it and no amount of saved state brings the windows back. Nesting is the working
-substitute — run fwm inside your current session and restart it as often as you
-like while the session you actually work in never notices.
+it. Nothing brings those *connections* back — preserving the listening socket
+across `exec` does not help, because the new process cannot adopt connections
+whose protocol objects lived in the old one's heap. ([Session restore](#session-restore)
+relaunches the applications, which is a different and lesser thing.) Nesting is
+the working substitute for development — run fwm inside your current session and
+restart it as often as you like while the session you actually work in never
+notices.
 
 ```sh
 ./dev.sh                      # rebuild and run nested
@@ -150,7 +158,24 @@ fwmctl state                    # compositor state as JSON
 fwmctl windows                  # open windows as JSON
 fwmctl dispatch view:3          # run any action from config.toml
 fwmctl reload                   # reload the config
+fwmctl config                   # every settable option, with values and ranges
+fwmctl get physics.gravity      # read one option
+fwmctl set physics.gravity 200  # change it, live
 ```
+
+Every numeric and colour option in the config is addressable by name, so you can
+tune the feel while watching it rather than editing, reloading and guessing:
+
+```sh
+fwmctl set physics.gravity 200        # watch a window fall in slow motion
+fwmctl set effects.squash 0           # turn impact deformation off
+fwmctl set decor.col_active "#ff0000"
+```
+
+`set` is **runtime-only** — `config.toml` stays the source of truth and is never
+rewritten, so `fwmctl reload` (or `Super+Shift+R`) puts everything back. Values
+outside an option's range are refused rather than clamped, because over a socket
+a silent clamp is indistinguishable from the value having been accepted.
 
 Replies are JSON, so `jq` does the rest:
 
@@ -175,6 +200,40 @@ as `$FWM_SOCKET`, which children inherit — a program spawned from a keybind ca
 talk back to the compositor that started it without being told where it is.
 Naming the socket after the Wayland display means a nested dev instance and
 your real session never collide.
+
+## Session restore
+
+Because a compositor crash takes every client with it, fwm keeps a note of what
+is running — the command line of each application and the desktop it is on — in
+`~/.local/state/fwm/session`, refreshed every few seconds. `install.sh`
+registers `fwm-session` as your display-manager entry: it starts the compositor,
+and if it dies unexpectedly, starts it again and lets the note put your
+applications back.
+
+Applications are **relaunched, not resumed**. Anything unsaved inside them is
+still gone; what you get back is the layout, not the state.
+
+By default this only happens after an unclean exit. fwm deletes the note on a
+normal shutdown, so a file that survived is itself the evidence that the last
+run died — a deliberate logout gives you an empty desktop, as it should.
+
+```toml
+[session]
+restore = "crash"    # default: only after an unclean exit
+# restore = "always" # every start, including a normal login
+# restore = "never"  # nothing recorded, nothing relaunched
+```
+
+Three failures within a minute and `fwm-session` gives up rather than spinning
+in front of a user with no way to intervene; the reason lands in
+`~/.local/state/fwm/crash.log`.
+
+Two known limits: an application whose window belongs to a different process
+than the one launched (some browsers, Electron apps) will come back on the
+current desktop rather than its old one, and at most 64 applications are
+recorded.
+
+---
 
 ## Configuration
 
@@ -220,6 +279,20 @@ squash       = 1.0   # windows deform on impact, scaled by speed; 0 disables
 # "always" also pans the camera to whichever desktop it lives on.
 on_activate = "same_desktop"
 
+[session]
+restore = "crash"    # "crash" (default) | "always" | "never" — see above
+
+# Per-window rules, applied once when the window opens. app_id and title are
+# POSIX extended regexes; a rule with both needs both to match, and later rules
+# override earlier ones field by field.
+# There is deliberately no per-window "float": tiling here is a property of the
+# DESKTOP, not of the window.
+[[rule]]
+app_id    = "^mpv$"
+nocollide = true     # video should not get shoved around by physics
+# pin     = true     # immovable: physics never pushes it
+# desktop = 3        # always open on desktop 4
+
 [decor]
 border_width = 2
 col_active   = "#7aa2f7"   # "#RRGGBB" or "#RRGGBBAA"
@@ -261,6 +334,7 @@ fit  = "pan"
 "super+space"        = "launcher"
 "super+q"            = "killclient"
 "super+t"            = "toggle_tiling"
+"super+alt+space"    = "toggle_floating"
 "super+d"            = "fake_fullscreen"
 "super+f"            = "real_fullscreen"
 "super+h"            = "move_camera:-50"
@@ -283,6 +357,7 @@ fit  = "pan"
 "super+Tab"          = "group_next"
 "super+shift+w"      = "group_add"
 "super+1"            = "view:0"          # ... "super+0" = "view:9"
+"super+shift+1"      = "move_to:0"       # ... "super+shift+0" = "move_to:9"
 ```
 
 ### Actions
@@ -292,14 +367,17 @@ fit  = "pan"
 | `spawn:<cmd>` | run a command |
 | `killclient` | close focused window |
 | `toggle_tiling` | physics ⇄ BSP tiling for the current desktop |
+| `toggle_floating` | physics ⇄ floating (windows stay put and overlap) |
 | `fake_fullscreen` / `real_fullscreen` | fullscreen below the tray / whole output |
 | `move_camera:<px>` | scroll the camera (repeats while held) |
 | `view:<0-9>` | jump to desktop |
+| `move_to:<0-9>` | send the focused window to a desktop, camera stays |
+| `move_to_view:<0-9>` | send it there and follow, keeping it focused |
 | `tile_focus:l\|r\|u\|d` | focus tile in direction |
 | `tile_move:l\|r\|u\|d` | swap tile in direction |
 | `toggle_split` | flip split orientation of the focused tile |
 | `pin_window`, `toggle_nocollide`, `calm_all`, `cycle_gravity` | physics toggles |
-| `toggle_nocollide_all` / `toggle_tiling_all` | same, but every window / every desktop at once |
+| `toggle_nocollide_all` / `toggle_tiling_all` / `toggle_floating_all` | same, but every window / every desktop at once |
 | `group_toggle`, `group_add`, `group_next`, `group_prev` | tab-stacks: make a stack, join it, cycle tabs |
 | `launcher` | built-in app launcher |
 | `show_hints` | keybind cheat-sheet overlay |
