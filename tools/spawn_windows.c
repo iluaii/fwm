@@ -128,8 +128,11 @@ int main(int argc, char **argv) {
     struct win *wins = calloc(count, sizeof(*wins));
     for (int i = 0; i < count; i++) {
         struct win *w = &wins[i];
-        char title[32];
-        snprintf(title, sizeof(title), "spawn %d", i + 1);
+        /* argv[2] overrides the title: the tray clamps long titles, and that
+         * path needs a title long enough to actually hit the clamp. */
+        char title[512];
+        if (argc > 2) snprintf(title, sizeof(title), "%s", argv[2]);
+        else          snprintf(title, sizeof(title), "spawn %d", i + 1);
 
         w->buffer = buffer;
         w->surface = wl_compositor_create_surface(compositor);
@@ -155,8 +158,15 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, "spawn_windows: all %d windows mapped\n", count);
 
-    /* Exit rather than hold the windows open: the paths under test all run at
-     * map time, and a spawner that never returns just hangs the harness. */
+    /* Exit by default rather than hold the windows open: the map-time paths
+     * are what the stress test exercises, and a spawner that never returns
+     * just hangs the harness. "hold" is for screenshots, where the windows
+     * must still exist when the shot is taken. */
+    if (argc > 3 && !strcmp(argv[3], "hold")) {
+        fprintf(stderr, "spawn_windows: holding open\n");
+        while (wl_display_dispatch(display) != -1) { }
+        return 2;
+    }
     wl_display_roundtrip(display);
     return 0;
 }

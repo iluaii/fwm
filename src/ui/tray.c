@@ -16,6 +16,9 @@
  * No gradients, no shadows — depth comes from spacing alone. */
 
 #define PILL_PAD    20.0  /* horizontal padding inside an island (covers the point) */
+#define PILL_GAP     8.0  /* clearance kept between two islands */
+#define DESK_SPACING 18.0 /* centre-to-centre of the desktop indicators */
+#define TITLE_MIN   40.0  /* never squeeze the title below this before giving up */
 
 /* Palette comes from the live theme (see src/theme.h) so the tray follows
  * [decor] color_source. Amber stays hardcoded: a warning must not blend into
@@ -98,6 +101,12 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
     pango_layout_get_pixel_size(layout, NULL, &th);
     double text_y = (h - th) / 2.0;
 
+    /* The centre island has a fixed width and is centred, so its left edge is
+     * a hard ceiling for everything drawn from the left. Worked out up here
+     * because the title pill needs it before the centre block runs. */
+    const double desk_pw = PILL_PAD * 2 + DESK_SPACING * 9 + 6;
+    const double desk_px = (w - desk_pw) / 2.0;
+
     /* ── error pill: leftmost, only while the config has problems ── */
     double left_x = 0.0;
     g_err_pill.valid = 0;
@@ -144,6 +153,26 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
         pango_layout_get_pixel_size(layout, &params_w, NULL);
 
         double gap = 10.0;
+
+        /* Window titles are arbitrarily long, so an unclamped pill grew until
+         * it ran under the centre island -- which, being drawn later, painted
+         * over it. It showed up on narrow screens first: the centre island is
+         * centred, so a 1366px panel leaves the title barely a third of the
+         * room a 2560px one does.
+         *
+         * Only the title gives way; the physics readout is short, fixed and
+         * the reason this pill exists at all. */
+        double avail = desk_px - PILL_GAP - left_x
+                       - (PILL_PAD + gap + params_w + PILL_PAD);
+        if (avail < TITLE_MIN) avail = TITLE_MIN;
+        int ellipsized = title_w > avail;
+        if (ellipsized) {
+            pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+            pango_layout_set_width(layout, (int)(avail * PANGO_SCALE));
+            pango_layout_set_text(layout, data->win_name, -1);
+            pango_layout_get_pixel_size(layout, &title_w, NULL);
+        }
+
         double pw = PILL_PAD + title_w + gap + params_w + PILL_PAD;
         draw_pill(cr, left_x, 0, pw, h, data->opacity);
 
@@ -151,6 +180,13 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
         pango_layout_set_text(layout, data->win_name, -1);
         cairo_move_to(cr, left_x + PILL_PAD, text_y);
         pango_cairo_show_layout(cr, layout);
+
+        /* Hand the layout back unclamped: the params, the clock and the
+         * desktop counters all reuse it and must not inherit the ellipsis. */
+        if (ellipsized) {
+            pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
+            pango_layout_set_width(layout, -1);
+        }
 
         cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
         pango_layout_set_text(layout, params, -1);
@@ -160,9 +196,9 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
 
     /* ── center pill: desktop indicators ── */
     {
-        double spacing = 18.0;
-        double pw = PILL_PAD * 2 + spacing * 9 + 6;
-        double px = (w - pw) / 2.0;
+        double spacing = DESK_SPACING;
+        double pw = desk_pw;
+        double px = desk_px;
         draw_pill(cr, px, 0, pw, h, data->opacity);
 
         g_desk.x = px; g_desk.y = 0; g_desk.w = pw; g_desk.h = h;
