@@ -898,7 +898,10 @@ bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
         launcher_close(l);
         return true;
     case XKB_KEY_Up:
-        if (l->sel > 0) l->sel--;
+    case XKB_KEY_ISO_Left_Tab:   /* what Shift+Tab arrives as */
+        /* Wraps to the last entry, mirroring Down. Clamping at 0 instead made
+         * the two directions behave differently at the ends of the list. */
+        if (shown > 0) l->sel = (l->sel + shown - 1) % shown;
         return true;
     case XKB_KEY_Down:
     case XKB_KEY_Tab:
