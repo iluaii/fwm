@@ -100,14 +100,20 @@ start() {
     done
     [ -n "$SOCK" ] || return 1
     export WAYLAND_DISPLAY="$SOCK"
+    # Pin fwmctl to the instance we just started. It prefers $FWM_SOCKET over
+    # $WAYLAND_DISPLAY, so running this harness from inside a live fwm session
+    # would otherwise send every act() below into the developer's own session
+    # — which is the one thing this script promises never to touch.
+    export FWM_SOCKET="${XDG_RUNTIME_DIR:-/tmp}/fwm-$SOCK.sock"
     KIDS=""
     return 0
 }
 
 # Ask the compositor to do something. Failures are ignored on purpose: an
 # action that is a no-op in the current state must not fail the scenario, only
-# a sanitizer report or a crash may.
-act() { timeout 5 "$FWMCTL" action "$1" >/dev/null 2>&1 || true; sleep "${2:-0.3}"; }
+# a sanitizer report or a crash may. The command is `dispatch`: an unknown one
+# would be swallowed by that same `|| true` and quietly test nothing.
+act() { timeout 5 "$FWMCTL" dispatch "$1" >/dev/null 2>&1 || true; sleep "${2:-0.3}"; }
 
 client() {
     [ -n "$TERM_CMD" ] || return 0
