@@ -1074,6 +1074,18 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
         }
         view_set_border_enabled(view, 0); // borderless fullscreen
         view->fs_real = real ? 1 : 0;
+
+        /* On a tiling desktop the window must leave the layout while
+         * fullscreen: otherwise its own fullscreen commit trips
+         * server_align_tiles (view.c) and shrinks it straight back into its
+         * tile slot. Pull it from the tree and re-tile what remains. */
+        if (server->desktop_mode[d] == DESKTOP_MODE_TILING) {
+            b->tiled = 0;
+            if (bsp_find(server->bsp_roots[d], view->id)) {
+                bsp_remove(&server->bsp_roots[d], view->id);
+                server_apply_tiling(server, d);
+            }
+        }
     } else {
         if (b->fullscreen) {
             b->fullscreen = 0;
@@ -1090,7 +1102,15 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
             }
             view_set_border_enabled(view, 1);
             view->fs_real = 0;
+            /* Rejoin the tiling layout. The window may never have been a tile
+             * (fullscreened under physics, then tiling switched on), so insert
+             * it if the tree does not know it yet before re-applying. */
             if (server->desktop_mode[d] == DESKTOP_MODE_TILING) {
+                if (!bsp_find(server->bsp_roots[d], view->id)) {
+                    bsp_insert(&server->bsp_roots[d],
+                               server->focused_view ? server->focused_view->id : 0,
+                               view->id);
+                }
                 server_apply_tiling(server, d);
             }
         }

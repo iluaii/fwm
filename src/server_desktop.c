@@ -72,9 +72,12 @@ static void desktop_enter_tiling(FwmServer *server, int d) {
     FwmView *view;
     wl_list_for_each(view, &server->views, link) {
         PhysicsBody *b = physics_find_body(&server->physics, view->id);
-        if (b && b->desktop_id == d && !b->tiling_saved) {
-            b->sav_x = b->x; b->sav_y = b->y;
-            b->sav_w = b->width; b->sav_h = b->height;
+        /* A fullscreen window keeps its own pre-fullscreen geometry in sav_*,
+         * and is excluded from the tile tree below — don't hand it a tiling
+         * restore point derived from its (temporary) fullscreen geometry. */
+        if (b && b->desktop_id == d && !b->fullscreen && !b->tiling_saved) {
+            b->tile_sav_x = b->x; b->tile_sav_y = b->y;
+            b->tile_sav_w = b->width; b->tile_sav_h = b->height;
             b->tiling_saved = 1;
         }
     }
@@ -98,8 +101,8 @@ static void desktop_leave_tiling(FwmServer *server, int d) {
         if (!b || b->desktop_id != d) continue;
 
         if (b->tiling_saved) {
-            b->x = b->sav_x; b->y = b->sav_y;
-            b->width = b->sav_w; b->height = b->sav_h;
+            b->x = b->tile_sav_x; b->y = b->tile_sav_y;
+            b->width = b->tile_sav_w; b->height = b->tile_sav_h;
             b->tiling_saved = 0;
         } else {
             b->width = server->screen_width / 2;
