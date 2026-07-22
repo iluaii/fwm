@@ -470,4 +470,4 @@ fit  = "pan"
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GPLv2 — see [LICENSE](LICENSE).

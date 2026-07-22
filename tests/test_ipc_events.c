@@ -1,3 +1,17 @@
+/*
+ * fwm — a Wayland compositor
+ * Copyright (C) 2026 Ilu
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /* The `subscribe` argument, which is the only part of the event stream that
  * makes a decision worth checking. Whether an event reaches a socket needs a
  * compositor and belongs to the dynamic harness; what a client asked for is

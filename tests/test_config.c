@@ -1,3 +1,17 @@
+/*
+ * fwm — a Wayland compositor
+ * Copyright (C) 2026 Ilu
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 /* config.c parses attacker-adjacent input — a hand-edited file that the user
  * can get arbitrarily wrong — and it carries a hard promise: a broken config
  * must never cost the session. These tests hold it to that, and pin down the
