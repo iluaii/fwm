@@ -304,6 +304,41 @@ void server_schedule_frames(FwmServer *server) {
     }
 }
 
+/* Fires at the playing video wallpaper's own fps. Uploading the next frame here
+ * and scheduling one output frame is what lets the compositor render at, say,
+ * 24 Hz for a 24 fps clip instead of the 60 Hz the physics heartbeat would
+ * otherwise impose — the biggest single CPU saving for video wallpaper. */
+static int video_timer_cb(void *data) {
+    FwmServer *server = data;
+    wallpaper_present(server->wallpaper);
+    wallpaper_present(server->wallpaper_prev);
+    server_schedule_frames(server);
+
+    int ms = wallpaper_video_interval_ms(server->wallpaper);
+    if (wallpaper_playing(server->wallpaper) && ms > 0) {
+        wl_event_source_timer_update(server->video_timer, ms);
+    } else {
+        server->video_timer_on = 0; /* paused/gone: stop until re-armed */
+    }
+    return 0;
+}
+
+/* Arm or disarm the video-frame timer to match the current state. Cheap and
+ * idempotent, so it is safe to call every physics tick and on every wallpaper
+ * change. */
+void server_video_sync(FwmServer *server) {
+    if (!server->video_timer) return;
+    int ms = wallpaper_video_interval_ms(server->wallpaper);
+    int want = wallpaper_playing(server->wallpaper) && ms > 0;
+    if (want && !server->video_timer_on) {
+        server->video_timer_on = 1;
+        wl_event_source_timer_update(server->video_timer, ms);
+    } else if (!want && server->video_timer_on) {
+        server->video_timer_on = 0;
+        wl_event_source_timer_update(server->video_timer, 0); /* disarm */
+    }
+}
+
 static int physics_tick_cb(void *data) {
     FwmServer *server = data;
     
@@ -463,20 +498,25 @@ static int physics_tick_cb(void *data) {
     // (overlays outrank windows in the scene, so the surface can't cover it).
     // Fake fullscreen keeps the tray — that's its point. Checking every tick
     // also covers desktop switches and the fullscreen window closing.
-    if (server->tray_buffer) {
-        int active_d = (server->camera_x + server->screen_width / 2) / server->screen_width;
-        bool hide = false;
-        FwmView *fsv;
-        wl_list_for_each(fsv, &server->views, link) {
-            if (!fsv->fs_real) continue;
-            PhysicsBody *fb = physics_find_body(&server->physics, fsv->id);
-            if (fb && fb->fullscreen && fb->desktop_id == active_d) {
-                hide = true;
-                break;
-            }
-        }
-        wlr_scene_node_set_enabled(&server->tray_buffer->node, !hide);
+    int active_d = (server->camera_x + server->screen_width / 2) / server->screen_width;
+    bool real_fs = false;    /* hides the tray */
+    bool wp_covered = false; /* hides the wallpaper: real OR fake fullscreen */
+    FwmView *fsv;
+    wl_list_for_each(fsv, &server->views, link) {
+        PhysicsBody *fb = physics_find_body(&server->physics, fsv->id);
+        if (!fb || !fb->fullscreen || fb->desktop_id != active_d) continue;
+        wp_covered = true;
+        if (fsv->fs_real) { real_fs = true; break; } /* strongest: also hides tray */
     }
+    /* Real fullscreen hides the tray; fake fullscreen deliberately keeps it. */
+    if (server->tray_buffer)
+        wlr_scene_node_set_enabled(&server->tray_buffer->node, !real_fs);
+
+    /* Either kind of fullscreen fully hides the wallpaper (fake fills the work
+     * area and the tray covers the strip above it), so pause a video behind it:
+     * the decode thread then blocks on its full queue and stops burning CPU. */
+    wallpaper_set_paused(server->wallpaper, wp_covered);
+    server_video_sync(server); /* (dis)arm the video-frame timer for the new state */
 
     // Redraw tray if data changed
     server_request_tray_redraw(server);
@@ -701,6 +741,8 @@ bool server_init(FwmServer *server) {
     // Setup physics timer callback (60Hz)
     server->physics_timer = wl_event_loop_add_timer(event_loop, physics_tick_cb, server);
     wl_event_source_timer_update(server->physics_timer, (int)(1000.0 / PHYSICS_TICK_RATE));
+    /* Disarmed until a video wallpaper starts playing; server_video_sync arms it. */
+    server->video_timer = wl_event_loop_add_timer(event_loop, video_timer_cb, server);
 
     // Held-key auto-repeat timer for repeatable binds (armed on demand).
     server->repeat_action = NULL;
@@ -778,6 +820,10 @@ void server_destroy(FwmServer *server) {
     launcher_destroy(server->launcher);
     server->launcher = NULL;
     
+    if (server->video_timer) {
+        wl_event_source_remove(server->video_timer);
+        server->video_timer = NULL;
+    }
     if (server->physics_timer) {
         wl_event_source_remove(server->physics_timer);
     }

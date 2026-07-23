@@ -38,7 +38,13 @@ pkg_check_modules(GDK_PIXBUF REQUIRED gdk-pixbuf-2.0)
 # Used directly for pointer-constraint regions (pixman_region32_contains_point);
 # wlroots exposes pixman types in its API but does not link it for us.
 pkg_check_modules(PIXMAN REQUIRED pixman-1)
+# Video wallpaper decode. ffmpeg 6 on Void is the split libav* set + headers in
+# ffmpeg6-devel; the runtime is libav*6. Software decode only, so no libva pin.
+pkg_check_modules(LIBAV REQUIRED libavformat libavcodec libavutil libswscale)
 find_package(box2d REQUIRED)
+# The video decode runs on its own pthread; the compositor stays single-threaded.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 
 # List of source files
 set(SOURCES
@@ -49,6 +55,7 @@ set(SOURCES
     src/config.c
     src/theme.c
     src/wallpaper.c
+    src/video.c
     src/view.c
     src/layer.c
     src/lock.c
@@ -107,6 +114,7 @@ target_include_directories(fwm PRIVATE
         ${PANGOCAIRO_INCLUDE_DIRS}
         ${GDK_PIXBUF_INCLUDE_DIRS}
         ${PIXMAN_INCLUDE_DIRS}
+        ${LIBAV_INCLUDE_DIRS}
         src
         ${CMAKE_BINARY_DIR}
         src/ui
@@ -121,7 +129,9 @@ target_link_libraries(fwm PRIVATE
         ${PANGOCAIRO_LIBRARIES}
         ${PIXMAN_LIBRARIES}
         ${GDK_PIXBUF_LIBRARIES}
+        ${LIBAV_LIBRARIES}
         box2d::box2d
+        Threads::Threads
         m
 )
 

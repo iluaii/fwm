@@ -168,6 +168,7 @@ enum {
     WALLPAPER_FIT_COVER   = 0, /* fill screen, crop overflow, static */
     WALLPAPER_FIT_CONTAIN = 1, /* whole image, letterboxed, static */
     WALLPAPER_FIT_PAN     = 2, /* fill screen height, walk across the width (parallax) */
+    WALLPAPER_FIT_VIDEO   = 3, /* looping video, scaled to cover the screen */
 };
 
 typedef struct {
@@ -180,6 +181,8 @@ typedef struct {
     double zoom;   /* "pan" only: render width = screen_w * zoom; <= 0 = auto
                     * (image's native width — sharpest, no upscaling). Larger
                     * zoom = more travel but the image is scaled up (softer). */
+    double fps;    /* "video" only: cap presentation fps; <= 0 = source rate
+                    * (clamped to 30). Lower it to cut CPU on weak hardware. */
 } WallpaperLayer;
 
 /* ── window rules ────────────────────────────────────────────────────── */
@@ -283,6 +286,8 @@ typedef struct {
     /* [wallpaper_picker] dir — where the built-in picker looks for images.
      * "~" is expanded at load. */
     char            wallpaper_dir[512];
+    double          wallpaper_picker_fps; /* base fps cap for videos set via the
+                                           * picker; 0 = the clip's own rate */
 
     /* diagnostics from the last config_load */
     ConfigError     errors[CONFIG_MAX_ERRORS];

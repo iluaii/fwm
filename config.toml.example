@@ -200,8 +200,18 @@ repeat_delay = 600
 # The pick is remembered in ~/.local/state/fwm/wallpaper and overrides the
 # first [[wallpaper]] layer on the next start; this file is never rewritten.
 # Deleting that state file goes back to the wallpaper configured here.
+# The picker lists videos too (their icon is a random frame); picking one makes
+# it a looping video wallpaper.
+#
+# fps: base cap applied to any VIDEO chosen through the picker — one knob for
+# everything you pick, so you don't need a [[wallpaper]] block to cap it. 0 (or
+# unset) = the clip's own rate. An explicit fps on a [[wallpaper]] layer is only
+# overridden while this is > 0. Set it to ~half the clip's rate (e.g. 15) to
+# also drop B-frames and cut the decode itself — the biggest saving on weak
+# hardware (see the [[wallpaper]] fps note below).
 [wallpaper_picker]
 dir = "~/Pictures"
+#fps = 15
 
 # Window rules: per-window overrides applied once, when the window opens.
 # Match on app_id and/or title with POSIX extended regexes — the same anchored
@@ -237,7 +247,8 @@ dir = "~/Pictures"
 # this file is never rewritten, so the comments you are reading survive.
 
 # Wallpaper. fit = "cover" (fill+crop, static) | "contain" (whole image,
-# letterboxed, static) | "pan" (walk across the image as you switch desktops).
+# letterboxed, static) | "pan" (walk across the image as you switch desktops)
+# | "video" (a looping video, scaled to cover the screen).
 # "pan" moves only images wide enough to stick out past the screen at native
 # scale (roughly: wider than your screen's aspect). Those walk with nothing
 # cropped. A narrower image is shown still rather than zoomed in, because
@@ -252,3 +263,21 @@ dir = "~/Pictures"
 #[[wallpaper]]
 #path = "/path/to/wallpaper.png"
 #fit  = "pan"
+
+# Animated (video) wallpaper. Any format ffmpeg can decode (mp4, mkv, webm…)
+# loops forever, scaled to cover the screen. Decoding runs on its own thread
+# (software) and is kept cheap: the compositor renders at the clip's fps (not a
+# fixed 60), the H.264 loop filter is skipped, and it is PAUSED whenever a
+# real-fullscreen window covers it. fit = "video" is optional — a path with a
+# video extension is detected on its own.
+#
+# fps caps presentation (default: the clip's own rate). Set it to about HALF the
+# clip's rate or less (e.g. 15 for a 30 fps clip) and the decoder also drops
+# B-frames — the only thing that cuts the decode itself, ~30% on 1080p and ~35%
+# on 4K here, at the cost of choppier motion. Above half it just paces output.
+# On a 1080p screen prefer a 1080p clip: decoding 4K to shrink it to 1080p costs
+# ~2x for nothing. It also pauses whenever any fullscreen window covers it.
+#[[wallpaper]]
+#path = "/home/you/Pictures/wallpaper.mp4"
+#fit  = "video"
+#fps  = 15

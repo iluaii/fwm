@@ -47,6 +47,7 @@ struct FwmKeyboard {
 
 /* ── server.c ─────────────────────────────────────────────────────────── */
 void server_shake_tick(FwmServer *server, double dt);
+void server_video_sync(FwmServer *server);
 void server_dispatch_action(FwmServer *server, const char *action);
 FwmView *server_find_view(FwmServer *server, uint32_t id);
 

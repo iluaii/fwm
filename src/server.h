@@ -257,6 +257,11 @@ typedef struct FwmServer {
     FwmInteractiveState interactive;
     
     struct wl_event_source *physics_timer;
+    /* Drives frames at a playing video wallpaper's own fps, so video does not
+     * pin the whole compositor to 60 Hz. Armed only while a video plays and is
+     * not covered; see server_video_sync. */
+    struct wl_event_source *video_timer;
+    int video_timer_on;
     struct timespec last_anim; /* frame-time clock for visual animations */
     
     /* UI scene nodes */

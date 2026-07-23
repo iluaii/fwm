@@ -506,19 +506,25 @@ static void expand_tilde(const char *in, char *out, size_t cap) {
 
 static void load_wallpaper_picker(toml_table_t *root, FwmConfig *cfg) {
     expand_tilde("~/Pictures", cfg->wallpaper_dir, sizeof(cfg->wallpaper_dir));
+    cfg->wallpaper_picker_fps = 0.0; /* 0 = clip's own rate */
     if (!root) return;
 
     toml_table_t *tbl = toml_table_in(root, "wallpaper_picker");
     if (!tbl) return;
 
+    /* `dir` and `fps` are independent — parse both, so an fps with no dir (or a
+     * dir with no fps) still takes effect. */
     toml_datum_t d = toml_string_in(tbl, "dir");
-    if (!d.ok) return;
-    expand_tilde(d.u.s, cfg->wallpaper_dir, sizeof(cfg->wallpaper_dir));
-    free(d.u.s);
+    if (d.ok) {
+        expand_tilde(d.u.s, cfg->wallpaper_dir, sizeof(cfg->wallpaper_dir));
+        free(d.u.s);
+        if (access(cfg->wallpaper_dir, R_OK | X_OK) != 0)
+            config_report_error(cfg, "[wallpaper_picker] dir: cannot read \"%s\"",
+                                cfg->wallpaper_dir);
+    }
 
-    if (access(cfg->wallpaper_dir, R_OK | X_OK) != 0)
-        config_report_error(cfg, "[wallpaper_picker] dir: cannot read \"%s\"",
-                            cfg->wallpaper_dir);
+    toml_datum_t f = toml_double_in(tbl, "fps");
+    if (f.ok) cfg->wallpaper_picker_fps = f.u.d;
 }
 
 static void load_wallpaper(toml_table_t *root, FwmConfig *cfg) {
@@ -558,6 +564,7 @@ static void load_wallpaper(toml_table_t *root, FwmConfig *cfg) {
         if (fit.ok) {
             if (strcmp(fit.u.s, "contain") == 0)   mode = WALLPAPER_FIT_CONTAIN;
             else if (strcmp(fit.u.s, "pan") == 0)  mode = WALLPAPER_FIT_PAN;
+            else if (strcmp(fit.u.s, "video") == 0) mode = WALLPAPER_FIT_VIDEO;
             else if (strcmp(fit.u.s, "cover") != 0)
                 config_report_error(cfg, "[[wallpaper]] #%d: unknown fit \"%s\" — using cover",
                         i + 1, fit.u.s);
@@ -573,6 +580,9 @@ static void load_wallpaper(toml_table_t *root, FwmConfig *cfg) {
 
         toml_datum_t zoom = toml_double_in(tbl, "zoom");
         cfg->wallpapers[idx].zoom = zoom.ok ? zoom.u.d : 0.0; /* 0 = auto (native) */
+
+        toml_datum_t fps = toml_double_in(tbl, "fps");
+        cfg->wallpapers[idx].fps = fps.ok ? fps.u.d : 0.0; /* 0 = source rate */
 
         idx++;
     }

@@ -153,9 +153,14 @@ void server_state_apply_wallpaper(FwmServer *server) {
                     server->config.wallpaper_count = 1;
                 }
             }
-            if (server->config.wallpaper_count > 0)
+            if (server->config.wallpaper_count > 0) {
                 snprintf(server->config.wallpapers[0].path,
                          sizeof(server->config.wallpapers[0].path), "%s", line);
+                /* Remembered picks are picker choices, so honour the picker's
+                 * base fps here too — a restart must not revert to source rate. */
+                if (server->config.wallpaper_picker_fps > 0.0)
+                    server->config.wallpapers[0].fps = server->config.wallpaper_picker_fps;
+            }
         }
     }
     fclose(f);
@@ -183,6 +188,12 @@ void server_set_wallpaper(FwmServer *server, const char *path) {
     snprintf(server->config.wallpapers[0].path,
              sizeof(server->config.wallpapers[0].path), "%s", path);
 
+    /* A video chosen through the picker takes the picker's base fps cap, so the
+     * user has a single knob for everything they pick. Only when one is set
+     * (>0), so an explicit per-layer [[wallpaper]] fps is not clobbered. */
+    if (server->config.wallpaper_picker_fps > 0.0)
+        server->config.wallpapers[0].fps = server->config.wallpaper_picker_fps;
+
     /* Cross-fade rather than cut: the outgoing set stays underneath (the new
      * one is created later, so the scene draws it on top) until the fade ends.
      * A swap still in flight is finished immediately, so rapid picking cannot
@@ -206,6 +217,9 @@ void server_set_wallpaper(FwmServer *server, const char *path) {
             server->wallpaper_prev = NULL;
         }
     }
+
+    /* Start (or stop) driving video frames for whatever was just built. */
+    server_video_sync(server);
 
     /* The palette may be derived from the image that just changed. */
     theme_build(&server->config);

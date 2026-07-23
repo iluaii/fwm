@@ -218,6 +218,12 @@ static void server_animate(FwmServer *server) {
     // Panel appear animations (hints, errors, welcome).
     cairo_overlay_tick(dt);
 
+    // Video wallpaper: upload the next decoded frame if the fps cap allows. The
+    // outgoing set is presented too so a video->video swap keeps moving under
+    // the fade instead of freezing on its last frame.
+    wallpaper_present(server->wallpaper);
+    wallpaper_present(server->wallpaper_prev);
+
     // Wallpaper cross-fade: drop the outgoing set once the new one is opaque.
     if (server->wallpaper_prev && wallpaper_fade_tick(server->wallpaper, dt)) {
         wallpaper_destroy(server->wallpaper_prev);
@@ -290,6 +296,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
         // Parallax wallpaper (below the window layer)
         server->wallpaper = wallpaper_create(server->layer_background, &server->config,
                                              server->screen_width, server->screen_height);
+        server_video_sync(server); // begin driving frames if it is a video
 
         // Initialize UI panels
         server->tray_buffer = tray_init(server->layer_overlay, server->screen_width);

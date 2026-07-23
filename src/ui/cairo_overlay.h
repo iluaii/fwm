@@ -48,6 +48,16 @@ void cairo_overlay_tick(double dt);
  * keep driving the frame loop. */
 bool cairo_overlay_animating(void);
 
+/* Replace the overlay's pixels with a centre-crop of a raw BGRA image, without
+ * going through cairo. Used by the video wallpaper to push a decoded frame
+ * every tick: it copies the overlay's own width*height starting at (src_x,
+ * src_y) out of `src` (whose row stride is `src_stride`), so the source may be
+ * larger than the overlay (a scaled-to-cover frame). BGRA byte order matches
+ * the overlay's ARGB8888 backing on little-endian. */
+void cairo_overlay_blit_bgra(struct wlr_scene_buffer *scene_buffer,
+                             const unsigned char *src, int src_stride,
+                             int src_x, int src_y);
+
 /* For overlays that are drawn once and never updated again (wallpaper layers,
  * welcome, hints): free the CPU-side pixel copy and keep only the GPU texture.
  * Do not call cairo_overlay_update() on the overlay afterwards. */

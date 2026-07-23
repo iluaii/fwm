@@ -13,6 +13,7 @@
  */
 
 #include "wallpaper.h"
+#include "video.h"
 #include "ui/cairo_overlay.h"
 
 #include <cairo.h>
@@ -21,6 +22,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 #include <wlr/util/log.h>
 
 /* `fit = "pan"` with no explicit zoom pans ONLY images wide enough to stick
@@ -44,7 +47,20 @@
 struct WallpaperRT {
     struct wlr_scene_buffer *buffer;
     int slack;
+    FwmVideo *video; /* non-NULL for a "video" layer; owns `buffer` */
 };
+
+/* A video layer either declares fit = "video" or just points at a file with a
+ * video extension, so the picker (which only sets a path) can hand us one too. */
+static bool is_video_layer(const WallpaperLayer *layer) {
+    if (layer->fit == WALLPAPER_FIT_VIDEO) return true;
+    const char *dot = strrchr(layer->path, '.');
+    if (!dot) return false;
+    static const char *exts[] = { "mp4", "mkv", "webm", "mov", "m4v", "avi", NULL };
+    for (int i = 0; exts[i]; i++)
+        if (strcasecmp(dot + 1, exts[i]) == 0) return true;
+    return false;
+}
 
 struct FwmWallpaper {
     struct WallpaperRT *layers;
@@ -172,6 +188,19 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
 
     for (int i = 0; i < cfg->wallpaper_count; i++) {
         const WallpaperLayer *layer = &cfg->wallpapers[i];
+
+        // Video layer: its own module owns the scene buffer and the decode
+        // thread. It never pans (slack 0), so wallpaper_update leaves it put.
+        if (is_video_layer(layer)) {
+            FwmVideo *vid = video_create(parent, layer->path, screen_w, screen_h,
+                                         layer->fps);
+            if (!vid) continue;   // fell back: bad file, no stream — skip the layer
+            int idx = wp->count++;
+            wp->layers[idx].video  = vid;
+            wp->layers[idx].buffer = video_scene_buffer(vid);
+            wp->layers[idx].slack  = 0;
+            continue;
+        }
 
         // Header only. The fit maths below needs the dimensions, but decoding
         // at native size just to discard most of the pixels is what made
@@ -333,10 +362,45 @@ bool wallpaper_fade_tick(FwmWallpaper *wp, double dt) {
     return done;
 }
 
+void wallpaper_present(FwmWallpaper *wp) {
+    if (!wp) return;
+    for (int i = 0; i < wp->count; i++) {
+        if (wp->layers[i].video) video_present(wp->layers[i].video);
+    }
+}
+
+void wallpaper_set_paused(FwmWallpaper *wp, bool paused) {
+    if (!wp) return;
+    for (int i = 0; i < wp->count; i++) {
+        if (wp->layers[i].video) video_set_paused(wp->layers[i].video, paused);
+    }
+}
+
+bool wallpaper_playing(FwmWallpaper *wp) {
+    if (!wp) return false;
+    for (int i = 0; i < wp->count; i++) {
+        if (video_playing(wp->layers[i].video)) return true;
+    }
+    return false;
+}
+
+int wallpaper_video_interval_ms(FwmWallpaper *wp) {
+    if (!wp) return 0;
+    int best = 0; /* smallest interval (fastest layer) drives the timer */
+    for (int i = 0; i < wp->count; i++) {
+        int ms = video_interval_ms(wp->layers[i].video);
+        if (ms > 0 && (best == 0 || ms < best)) best = ms;
+    }
+    return best;
+}
+
 void wallpaper_destroy(FwmWallpaper *wp) {
     if (!wp) return;
     for (int i = 0; i < wp->count; i++) {
-        if (wp->layers[i].buffer) {
+        if (wp->layers[i].video) {
+            /* Owns its scene buffer: tears the thread down and destroys it. */
+            video_destroy(wp->layers[i].video);
+        } else if (wp->layers[i].buffer) {
             cairo_overlay_destroy(wp->layers[i].buffer);
         }
     }

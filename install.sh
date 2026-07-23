@@ -37,14 +37,15 @@ install_deps() {
         $SUDO pacman -S --needed --noconfirm \
             gcc make cmake pkgconf git \
             wayland wlroots0.20 libxkbcommon cairo pango gdk-pixbuf2 box2d \
-            xorg-xwayland
+            ffmpeg xorg-xwayland
     elif command -v apt-get >/dev/null 2>&1; then
         msg "Installing dependencies (apt)"
         $SUDO apt-get update
         $SUDO apt-get install -y \
             gcc make cmake pkg-config git \
             libwayland-dev libxkbcommon-dev libcairo2-dev \
-            libpango1.0-dev libgdk-pixbuf-2.0-dev xwayland
+            libpango1.0-dev libgdk-pixbuf-2.0-dev \
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev xwayland
         # wlroots: the 0.20 -dev package name varies by release; try in order.
         local ok=0
         for p in libwlroots-0.20-dev libwlroots-0.19-dev libwlroots-dev; do
@@ -58,14 +59,14 @@ install_deps() {
         $SUDO dnf install -y \
             gcc make cmake pkgconf-pkg-config git \
             wayland-devel wlroots-devel libxkbcommon-devel \
-            cairo-devel pango-devel gdk-pixbuf2-devel \
+            cairo-devel pango-devel gdk-pixbuf2-devel ffmpeg-free-devel \
             xorg-x11-server-Xwayland
     elif command -v xbps-install >/dev/null 2>&1; then
         msg "Installing dependencies (xbps/Void)"
         $SUDO xbps-install -Sy \
             gcc make cmake pkg-config git \
             wayland-devel wlroots0.20-devel libxkbcommon-devel \
-            cairo-devel pango-devel gdk-pixbuf-devel seatd \
+            cairo-devel pango-devel gdk-pixbuf-devel ffmpeg6-devel seatd \
             xorg-server-xwayland
         # Void has no systemd-logind: wlroots needs seatd for DRM/input access.
         if [ ! -e /var/service/seatd ]; then
@@ -75,7 +76,7 @@ install_deps() {
         fi
     else
         warn "unknown package manager — install deps manually:"
-        warn "  wayland, wlroots-0.20, xkbcommon, cairo, pango, gdk-pixbuf, box2d v3, xwayland"
+        warn "  wayland, wlroots-0.20, xkbcommon, cairo, pango, gdk-pixbuf, box2d v3, ffmpeg (libav*), xwayland"
     fi
 }
 

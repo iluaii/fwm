@@ -37,6 +37,7 @@ This is the primary, actively developed version. The legacy X11 version lives on
 - **Smooth camera** — scroll with `Super+H`/`Super+L` (hold to repeat), jump with `Super+1`…`0`.
 - **Send windows across** — `Super+Shift+1`…`0`. Under physics and floating you can also just drag a window past the screen edge; a tiled window's geometry belongs to the layout, so this is the way out of tiling.
 - **Parallax wallpaper** — multi-layer background images (PNG/JPEG/WebP) that scroll as you move across desktops. `pan` mode turns one large image into a world you walk across.
+- **Animated wallpaper** — set a video (`fit = "video"`, any format ffmpeg decodes) as a looping background. Software decode on a dedicated thread; the compositor renders at the clip's fps rather than a fixed 60, and playback pauses whenever a fullscreen window covers it. A per-layer `fps` cap trims CPU further on weak hardware.
 
 ### Tiling (Hyprland-style)
 - **Per-desktop BSP tiling** — toggle `Super+T`; dwindle-style splits along the longer side.
@@ -383,15 +384,19 @@ icon_theme   = ""          # launcher icons; "" = auto (gtk settings, hicolor)
 color_source  = "config"
 tint_strength = 0.4        # 0..1: how far the islands move toward that hue
 
-# Where the built-in wallpaper picker (super+shift+p) looks for images.
-# The chosen image is remembered in ~/.local/state/fwm/wallpaper and overrides
-# the first [[wallpaper]] layer below on the next start — your config file is
-# never rewritten.
+# Where the built-in wallpaper picker (super+shift+p) looks for images and
+# videos (a video's icon is a random frame). The choice is remembered in
+# ~/.local/state/fwm/wallpaper and overrides the first [[wallpaper]] layer below
+# on the next start — your config file is never rewritten.
+# fps: base cap applied to any video picked here (0/unset = the clip's own
+# rate). One knob for everything you pick; lower it to cut CPU on weak hardware.
 [wallpaper_picker]
 dir = "~/Pictures"
+#fps = 20
 
 # Wallpaper layers, drawn back-to-front.
 # fit = "cover" (fill+crop) | "contain" (letterboxed) | "pan" (walk across)
+#     | "video" (looping video, scaled to cover)
 [[wallpaper]]
 path = "/path/to/image.png"
 fit  = "pan"
@@ -400,6 +405,20 @@ fit  = "pan"
 # travel would have to be bought by cropping its height. Opt in per layer:
 # pan_crop = 0.25   # trade 25% of the height for some travel
 # zoom     = 1.6    # or set the render width directly (screen_w * zoom)
+
+# Animated wallpaper: any video ffmpeg can decode (mp4/mkv/webm…) loops
+# forever. Software decode on its own thread; the compositor renders at the
+# clip's fps (not 60), skips the H.264 loop filter, and pauses while a
+# real-fullscreen window covers it. fit = "video" is optional: a path with a
+# video extension is detected on its own. It pauses whenever any fullscreen
+# window (real or fake) covers it. fps caps the rate; set it to ~half the clip's
+# rate (e.g. 15 for a 30fps clip) to also drop B-frames and cut the decode
+# itself (~30% on 1080p, ~35% on 4K), at the cost of choppier motion. Prefer a
+# 1080p clip over 4K on a 1080p screen (4K costs ~2x for nothing).
+#[[wallpaper]]
+#path = "/path/to/wallpaper.mp4"
+#fit  = "video"
+#fps  = 15
 
 [binds]
 "super+Return"       = "spawn:kitty"

@@ -16,6 +16,7 @@
 #include "../theme.h"
 #include "cairo_overlay.h"
 #include "../server.h"
+#include "../video.h"
 
 #include <box2d/box2d.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -66,6 +67,7 @@ typedef struct {
     int  terminal;
     cairo_surface_t *icon_surf; /* lazily resolved+loaded; NULL if none */
     int  icon_tried;
+    int  is_video;              /* wallpaper row backed by a video file */
 } LApp;
 
 enum { LMODE_APPS = 0, LMODE_WALLPAPERS = 1 };
@@ -343,6 +345,14 @@ static void ensure_thumb(Launcher *l, LApp *item) {
     if (item->icon_tried) return;
     item->icon_tried = 1;
 
+    /* A video row previews a single frame grabbed from a random point in the
+     * clip — same cost profile as an image decode, so it rides the same
+     * one-per-frame loading in launcher_tick. */
+    if (item->is_video) {
+        item->icon_surf = video_thumbnail(item->exec, (int)THUMB_W, (int)THUMB_H);
+        return;
+    }
+
     /* Aspect preserved: the preview is meant to tell wallpapers apart, and a
      * squashed portrait image defeats that. It is centred in the THUMB box by
      * the draw code, so rows stay aligned whatever the shape. */
@@ -357,6 +367,16 @@ static int has_image_ext(const char *name) {
     const char *dot = strrchr(name, '.');
     if (!dot) return 0;
     static const char *ext[] = { ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", NULL };
+    for (int i = 0; ext[i]; i++)
+        if (strcasecmp(dot, ext[i]) == 0) return 1;
+    return 0;
+}
+
+/* Kept in step with is_video_layer() in src/wallpaper.c. */
+static int has_video_ext(const char *name) {
+    const char *dot = strrchr(name, '.');
+    if (!dot) return 0;
+    static const char *ext[] = { ".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", NULL };
     for (int i = 0; ext[i]; i++)
         if (strcasecmp(dot, ext[i]) == 0) return 1;
     return 0;
@@ -388,10 +408,12 @@ static void scan_wallpapers(Launcher *l) {
     struct dirent *e;
     while ((e = readdir(d)) && l->wall_count < MAX_APPS) {
         if (e->d_name[0] == '.') continue;
-        if (!has_image_ext(e->d_name)) continue;
+        int is_video = has_video_ext(e->d_name);
+        if (!has_image_ext(e->d_name) && !is_video) continue;
 
         LApp *it = &l->walls[l->wall_count];
         memset(it, 0, sizeof(*it));
+        it->is_video = is_video;
         /* A truncated path is not this file's path: it names some shorter one
          * that may well exist, so stat() is no guard. Drop the entry instead
          * of listing a thumbnail that loads the wrong image, or none. */

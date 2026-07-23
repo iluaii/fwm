@@ -16,6 +16,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 #include <wlr/interfaces/wlr_buffer.h>
 
 #ifndef DRM_FORMAT_ARGB8888
@@ -194,6 +195,33 @@ void cairo_overlay_make_static(struct wlr_scene_buffer *scene_buffer) {
         wlr_buffer_unlock(info->current);
         info->current = NULL;
     }
+}
+
+void cairo_overlay_blit_bgra(struct wlr_scene_buffer *scene_buffer,
+                             const unsigned char *src, int src_stride,
+                             int src_x, int src_y) {
+    if (!scene_buffer || !src) return;
+    struct CairoOverlayInfo *info = scene_buffer->node.data;
+    if (!info || info->width <= 0 || info->height <= 0) return;
+
+    struct CairoOverlayBuffer *buffer = overlay_buffer_alloc(info->width, info->height);
+    if (!buffer) return;
+
+    unsigned char *dst = cairo_image_surface_get_data(buffer->surface);
+    int dst_stride = cairo_image_surface_get_stride(buffer->surface);
+    int row_bytes = info->width * 4;
+    const unsigned char *s = src + (size_t)src_y * src_stride + (size_t)src_x * 4;
+    for (int y = 0; y < info->height; y++) {
+        memcpy(dst + (size_t)y * dst_stride, s + (size_t)y * src_stride, row_bytes);
+    }
+    cairo_surface_mark_dirty(buffer->surface);
+
+    struct wlr_buffer *buf = overlay_buffer_own(buffer);
+    wlr_scene_buffer_set_buffer_with_damage(scene_buffer, buf, NULL);
+    if (info->current) {
+        wlr_buffer_unlock(info->current);
+    }
+    info->current = buf;
 }
 
 void cairo_overlay_animate_in(struct wlr_scene_buffer *scene_buffer,
