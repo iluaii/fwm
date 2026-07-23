@@ -307,17 +307,37 @@ void server_schedule_frames(FwmServer *server) {
     }
 }
 
-/* Fires at the playing video wallpaper's own fps. Uploading the next frame here
- * and scheduling one output frame is what lets the compositor render at, say,
- * 24 Hz for a 24 fps clip instead of the 60 Hz the physics heartbeat would
- * otherwise impose — the biggest single CPU saving for video wallpaper. */
+/* Wake-up period for the frame timer: HALF the video's frame interval.
+ *
+ * On an otherwise idle desktop this timer is the only thing scheduling output
+ * frames, so its ticks are the only moments at which a video frame can reach
+ * the screen. Waking exactly once per frame interval makes that a knife-edge:
+ * the timer has millisecond granularity, re-arms only after the blit, and its
+ * phase drifts freely against the refresh clock — so a tick that lands just
+ * after a vblank pushes its frame a whole refresh late and the wallpaper
+ * hitches, no matter how exact the pacing in video.c is.
+ *
+ * Waking twice per interval gives every deadline a second chance. The extra
+ * tick is nearly free: presenting nothing leaves the scene undamaged, and
+ * wlr_scene_output_commit returns immediately when nothing needs a frame. */
+static int video_wake_ms(FwmServer *server) {
+    int ms = wallpaper_video_interval_ms(server->wallpaper);
+    if (ms <= 0) return 0;
+    return ms > 1 ? ms / 2 : 1;
+}
+
+/* Fires at twice the playing video wallpaper's own fps. Uploading the next
+ * frame here (when it is due) and scheduling one output frame is what lets the
+ * compositor render at, say, 24 Hz for a 24 fps clip instead of the 60 Hz the
+ * physics heartbeat would otherwise impose — the biggest single CPU saving for
+ * video wallpaper. */
 static int video_timer_cb(void *data) {
     FwmServer *server = data;
     wallpaper_present(server->wallpaper);
     wallpaper_present(server->wallpaper_prev);
     server_schedule_frames(server);
 
-    int ms = wallpaper_video_interval_ms(server->wallpaper);
+    int ms = video_wake_ms(server);
     if (wallpaper_playing(server->wallpaper) && ms > 0) {
         wl_event_source_timer_update(server->video_timer, ms);
     } else {
@@ -345,7 +365,7 @@ void server_reclaim_memory(void) {
  * change. */
 void server_video_sync(FwmServer *server) {
     if (!server->video_timer) return;
-    int ms = wallpaper_video_interval_ms(server->wallpaper);
+    int ms = video_wake_ms(server);
     int want = wallpaper_playing(server->wallpaper) && ms > 0;
     if (want && !server->video_timer_on) {
         server->video_timer_on = 1;
