@@ -215,6 +215,10 @@ void server_set_wallpaper(FwmServer *server, const char *path) {
         if (server->wallpaper_prev) {
             wallpaper_destroy(server->wallpaper_prev);
             server->wallpaper_prev = NULL;
+            /* Instant cut: the outgoing set is gone right here, so reclaim now.
+             * With a fade it happens in server_animate instead, once the new
+             * set is opaque. */
+            server_reclaim_memory();
         }
     }
 
@@ -282,6 +286,9 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
                                                  server->screen_width, server->screen_height);
             if (server->wallpaper) wallpaper_update(server->wallpaper, server->camera_x);
         }
+        /* A reload that drops a video wallpaper releases the same hundreds of
+         * MB as picking a new one, and takes the same cut-not-fade path. */
+        server_reclaim_memory();
     }
 
     /* New gaps / anim settings take effect on tiled desktops. */

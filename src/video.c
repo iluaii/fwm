@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -36,6 +37,10 @@
 /* Never present faster than this, whatever the source fps. A wallpaper does not
  * need 60 fps, and the cap halves upload/redraw work on a high-fps clip. */
 #define VIDEO_FPS_CAP   30.0
+/* Upper bound on libav frame threads. Each one holds its own reference-frame
+ * set and, in practice, its own malloc arena — memory that outlives the clip.
+ * Four keeps a 4K clip comfortably above the 30 fps cap. */
+#define VIDEO_MAX_THREADS 4
 
 /* One decoded frame handed thread -> compositor: plain malloc'd BGRA, sized to
  * the cover buffer. The decode thread produces only this — never a wlr_buffer,
@@ -266,13 +271,21 @@ FwmVideo *video_create(struct wlr_scene_tree *parent, const char *path,
     if (!v->codec) goto fail;
     if (avcodec_parameters_to_context(v->codec, st->codecpar) < 0) goto fail;
     /* Speed over strict fidelity — this is an out-of-focus background, and the
-     * machine running a compositor + video decode may be weak. thread_count 0
-     * lets libav use every core (a 4K clip needs them just to reach 30 fps);
-     * FLAG2_FAST allows non-compliant shortcuts; and dropping the in-loop
-     * deblocking filter (the single most expensive stage of H.264 decode) buys
-     * ~20% on 1080p and pushes 4K past real time, with no visible loss at
-     * wallpaper scale. */
-    v->codec->thread_count = 0;
+     * machine running a compositor + video decode may be weak. FLAG2_FAST
+     * allows non-compliant shortcuts; and dropping the in-loop deblocking
+     * filter (the single most expensive stage of H.264 decode) buys ~20% on
+     * 1080p and pushes 4K past real time, with no visible loss at wallpaper
+     * scale.
+     *
+     * thread_count is CAPPED rather than left at 0 ("every core"). Frame
+     * threading costs a full set of reference frames per thread and gives each
+     * thread its own malloc arena, so on a 12-core box the decoder alone
+     * accounted for dozens of arenas and hundreds of MB. Capping at
+     * VIDEO_MAX_THREADS still clears 30 fps on 4K — the cap is a frame rate we
+     * deliberately hold down, not one we are straining to reach. */
+    long cores = sysconf(_SC_NPROCESSORS_ONLN);
+    if (cores < 1) cores = 1;
+    v->codec->thread_count = cores < VIDEO_MAX_THREADS ? (int)cores : VIDEO_MAX_THREADS;
     v->codec->flags2 |= AV_CODEC_FLAG2_FAST;
     v->codec->skip_loop_filter = AVDISCARD_ALL;
     if (avcodec_open2(v->codec, codec, NULL) < 0) goto fail;

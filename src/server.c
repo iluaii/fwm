@@ -23,6 +23,9 @@
 #include "ipc.h"
 #include "session.h"
 #include <signal.h>
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 #include "ui/tray.h"
 #include "ui/hints.h"
 #include "ui/errors.h"
@@ -321,6 +324,20 @@ static int video_timer_cb(void *data) {
         server->video_timer_on = 0; /* paused/gone: stop until re-armed */
     }
     return 0;
+}
+
+/* Hand freed heap back to the kernel after a wallpaper set is torn down.
+ *
+ * Tearing one down releases tens to hundreds of MB in a handful of very large
+ * chunks. main() pins the mmap threshold so most of that is munmapped on the
+ * spot, but the decode threads also leave whole arenas dirty, and free() alone
+ * only trims what happens to sit at the top of a heap. malloc_trim walks every
+ * arena (glibc >= 2.26), which is exactly what is wanted here: it costs a few
+ * ms and runs only on a wallpaper change, never in the frame loop. */
+void server_reclaim_memory(void) {
+#ifdef __GLIBC__
+    malloc_trim(0);
+#endif
 }
 
 /* Arm or disarm the video-frame timer to match the current state. Cheap and

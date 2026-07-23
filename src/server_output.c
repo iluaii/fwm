@@ -228,6 +228,10 @@ static void server_animate(FwmServer *server) {
     if (server->wallpaper_prev && wallpaper_fade_tick(server->wallpaper, dt)) {
         wallpaper_destroy(server->wallpaper_prev);
         server->wallpaper_prev = NULL;
+        /* The fade is over and nothing is animating on the next frame anyway,
+         * so this is the cheapest moment in the whole swap to give the heap
+         * back — the outgoing set was only just released. */
+        server_reclaim_memory();
     }
 }
 
