@@ -41,6 +41,11 @@
  * set and, in practice, its own malloc arena — memory that outlives the clip.
  * Four keeps a 4K clip comfortably above the 30 fps cap. */
 #define VIDEO_MAX_THREADS 4
+/* How early a frame may be presented against its deadline. It absorbs the
+ * millisecond-scale jitter between a vblank and the moment the event loop
+ * dispatches our callback; the deadline itself still advances by exact
+ * intervals, so early frames cost nothing but a fraction of a refresh. */
+#define PRESENT_SLACK 0.004
 
 /* One decoded frame handed thread -> compositor: plain malloc'd BGRA, sized to
  * the cover buffer. The decode thread produces only this — never a wlr_buffer,
@@ -66,6 +71,9 @@ struct FwmVideo {
     int                stream_index;
     AVRational         time_base;
     double             frame_interval; /* seconds between presented frames */
+    /* Minimum video-clock gap between two queued frames, or 0 when the source
+     * is not faster than the cap and nothing should ever be dropped. */
+    double             drop_min_gap;
 
     /* Decode thread + bounded queue. */
     pthread_t         thread;
@@ -77,8 +85,12 @@ struct FwmVideo {
     int               head, count;
     int               stop; /* set by destroy(); guarded by lock */
 
-    /* Compositor-thread presentation pacing (single thread, no lock needed). */
-    struct timespec last_present;
+    /* Compositor-thread presentation pacing (single thread, no lock needed).
+     * `next_deadline` is when the NEXT frame is due, on CLOCK_MONOTONIC. It is
+     * advanced by exactly one interval per presented frame rather than reset to
+     * the time we happened to present, so the cadence tracks the video clock
+     * instead of drifting slower by however late each call arrived. */
+    double          next_deadline;
     int             primed;
     bool            paused;
 };
@@ -151,8 +163,8 @@ static void *decode_thread(void *arg) {
                 t = (last_pushed < -1e8) ? 0.0 : last_pushed + v->frame_interval;
             } else {
                 t = ts * av_q2d(v->time_base);
-                if (last_pushed > -1e8 &&
-                    t - last_pushed < v->frame_interval * 0.999) {
+                if (v->drop_min_gap > 0.0 && last_pushed > -1e8 &&
+                    t - last_pushed < v->drop_min_gap) {
                     av_frame_unref(frame); /* too soon — cap drop */
                     continue;
                 }
@@ -199,23 +211,39 @@ static bool pop_frame(FwmVideo *v, uint8_t **out) {
     return true;
 }
 
+static double now_sec(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
+}
+
 static void present(FwmVideo *v, bool force) {
     if (!v || v->paused) return;
 
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
-    if (!force && v->primed) {
-        double dt = (double)(now.tv_sec - v->last_present.tv_sec)
-                  + (double)(now.tv_nsec - v->last_present.tv_nsec) / 1e9;
-        if (dt < v->frame_interval * 0.999) return; /* not time for a new frame */
-    }
+    double now = now_sec();
+    /* Present a frame that is merely CLOSE to its deadline, not only one that is
+     * past it. Every caller is quantised to a display refresh, so a deadline
+     * missed by a hair costs a whole refresh: at 30 fps on 60 Hz the frame is
+     * due 33.33 ms after the last one and the next refresh lands at 33.34 ms —
+     * 0.04 ms of margin against dispatch jitter measured in milliseconds. Lose
+     * that race and the frame is held for three refreshes instead of two. Being
+     * a refresh early is invisible; being one late is the judder. */
+    if (!force && v->primed && now < v->next_deadline - PRESENT_SLACK) return;
 
     uint8_t *buf;
     if (!pop_frame(v, &buf)) return; /* decoder has not caught up: keep last frame */
 
     cairo_overlay_blit_bgra(v->scene_buffer, buf, v->cover_w * 4, v->crop_x, v->crop_y);
     free(buf);
-    v->last_present = now;
+
+    /* Advance the deadline by one interval, so presenting a little early or a
+     * little late does not shift every frame after it. Resync outright when we
+     * are more than an interval behind (unpause, a decode stall, a suspend) —
+     * without that, catching up would mean a burst of frames. */
+    if (!v->primed || now > v->next_deadline + v->frame_interval)
+        v->next_deadline = now + v->frame_interval;
+    else
+        v->next_deadline += v->frame_interval;
     v->primed = 1;
 }
 
@@ -231,7 +259,10 @@ bool video_playing(FwmVideo *v) {
 
 int video_interval_ms(FwmVideo *v) {
     if (!v || v->frame_interval <= 0.0) return 0;
-    int ms = (int)lround(v->frame_interval * 1000.0);
+    /* Floor, not round: a timer that fires a fraction early is gated by the
+     * deadline in present(), while one that fires late (24 fps -> 42 ms against
+     * a 41.67 ms interval) makes every frame late by construction. */
+    int ms = (int)floor(v->frame_interval * 1000.0);
     return ms < 1 ? 1 : ms;
 }
 
@@ -311,6 +342,13 @@ FwmVideo *video_create(struct wlr_scene_tree *parent, const char *path,
     if (!(src_fps > 0.0)) src_fps = cap;
     double fps = src_fps > cap ? cap : src_fps;
     v->frame_interval = 1.0 / fps;
+
+    /* Drop on the decode side only when the clip really does run faster than
+     * the cap, and then with a loose threshold. Comparing against the interval
+     * itself dropped genuine frames: a 30 fps clip in a millisecond time base
+     * has PTS gaps of 33, 33, 34 ms, and two of every three fall a hair short
+     * of 33.33 — the "cap" silently ate a third of the frames. */
+    v->drop_min_gap = src_fps > fps * 1.02 ? v->frame_interval * 0.75 : 0.0;
 
     /* Asking for roughly half the clip's rate (or less) is a clear signal that
      * smoothness is being traded for CPU, so let the decoder drop non-reference
