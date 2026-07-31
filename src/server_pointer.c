@@ -140,36 +140,40 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
             event->unaccel_dx, event->unaccel_dy);
     }
 
+    bool locked = false;
     if (server->active_constraint && !lock_is_active(server)) {
         if (server->active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
-            /* Mouse-look: the cursor does not move at all. */
-            server_notify_activity(server);
-            return;
-        }
-        /* Confined: allow the move only while it stays inside the region. */
-        FwmView *cv = view_from_surface(server, server->active_constraint->surface);
-        if (cv) {
-            double nx = server->cursor->x + event->delta_x;
-            double ny = server->cursor->y + event->delta_y;
-            double vsx, vsy;
-            /* Only testable while the window has a place on a screen. With its
-             * desktop off every monitor there is nothing to measure the region
-             * against, and confining the pointer to a rectangle read out of
-             * uninitialised memory would strand the cursor; let the move
-             * through instead. */
-            if (server_world_to_screen(server, cv->x, cv->y, &vsx, &vsy)) {
-                double sx = nx - vsx;
-                double sy = ny - vsy;
-                if (!pixman_region32_contains_point(&server->active_constraint->region,
-                                                    (int)sx, (int)sy, NULL)) {
-                    server_notify_activity(server);
-                    return;
+            /* Mouse-look: the cursor does not move at all, but we still need
+             * to send motion events with constant coordinates. */
+            locked = true;
+        } else {
+            /* Confined: allow the move only while it stays inside the region. */
+            FwmView *cv = view_from_surface(server, server->active_constraint->surface);
+            if (cv) {
+                double nx = server->cursor->x + event->delta_x;
+                double ny = server->cursor->y + event->delta_y;
+                double vsx, vsy;
+                /* Only testable while the window has a place on a screen. With its
+                 * desktop off every monitor there is nothing to measure the region
+                 * against, and confining the pointer to a rectangle read out of
+                 * uninitialised memory would strand the cursor; let the move
+                 * through instead. */
+                if (server_world_to_screen(server, cv->x, cv->y, &vsx, &vsy)) {
+                    double sx = nx - vsx;
+                    double sy = ny - vsy;
+                    if (!pixman_region32_contains_point(&server->active_constraint->region,
+                                                        (int)sx, (int)sy, NULL)) {
+                        server_notify_activity(server);
+                        return;
+                    }
                 }
             }
         }
     }
 
-    wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
+    if (!locked) {
+        wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
+    }
     
     // Process pointer movement
     double lx = server->cursor->x;
@@ -212,8 +216,10 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
             // view == NULL happens over unmanaged X11 surfaces (menus,
             // tooltips): they still get pointer events, just no focus change.
             if (view) server_focus_view(server, view);
-            wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
-            wlr_seat_pointer_notify_motion(server->seat, event->time_msec, sx, sy);
+            if (!locked) {
+                wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
+                wlr_seat_pointer_notify_motion(server->seat, event->time_msec, sx, sy);
+            }
             constraints_follow_focus(server, surface);
         } else {
             // Over the empty background: no client owns the cursor, so restore
