@@ -159,8 +159,10 @@ void view_set_size(FwmView *view, int width, int height) {
     } else {
         // X11 configure carries position too; send screen coords (X clients
         // use them as global root coordinates for e.g. popup placement).
+        double sx = view->x, sy = view->y;
+        server_world_to_screen(view->server, view->x, view->y, &sx, &sy);
         wlr_xwayland_surface_configure(view->xwl_surface,
-            (int16_t)view->x, (int16_t)view->y,
+            (int16_t)sx, (int16_t)sy,
             (uint16_t)width, (uint16_t)height);
     }
 }
