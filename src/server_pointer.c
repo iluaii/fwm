@@ -81,6 +81,7 @@
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/util/log.h>
+#include <wlr/util/region.h>
 #include <xkbcommon/xkbcommon.h>
 #include "server_internal.h"
 
@@ -447,10 +448,24 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
             return;
         }
         /* Confined: allow the move only while it stays inside the region. */
-        if (!constraint_allows_at(server, server->cursor->x + event->delta_x,
-                                  server->cursor->y + event->delta_y)) {
-            server_notify_activity(server);
-            return;
+        double ox, oy;
+        if (pointer_surface_origin(server, server->active_constraint->surface, &ox, &oy)) {
+            double sx1 = server->cursor->x - ox;
+            double sy1 = server->cursor->y - oy;
+            double sx2 = server->cursor->x + event->delta_x - ox;
+            double sy2 = server->cursor->y + event->delta_y - oy;
+            double sx2_out, sy2_out;
+            
+            if (wlr_region_confine(&server->active_constraint->region,
+                                   sx1, sy1, sx2, sy2, &sx2_out, &sy2_out)) {
+                event->delta_x = sx2_out - sx1;
+                event->delta_y = sy2_out - sy1;
+            } else {
+                /* The old position was outside the region entirely. Drop it to prevent escape. */
+                server_notify_activity(server);
+                return;
+            }
+        }
         }
     }
 
