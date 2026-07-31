@@ -202,7 +202,7 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
 
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
-    
+
     /* A gesture in progress owns the motion; only otherwise does the cursor
      * mean "what is under me". */
     if (server_drag_motion(server, lx, ly, &now)) return;
@@ -215,7 +215,7 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
         if (surface) {
             // view == NULL happens over unmanaged X11 surfaces (menus,
             // tooltips): they still get pointer events, just no focus change.
-            if (view) server_focus_view(server, view);
+            if (view && !locked) server_focus_view(server, view);
             if (!locked) {
                 wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
                 wlr_seat_pointer_notify_motion(server->seat, event->time_msec, sx, sy);
@@ -225,9 +225,11 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
             // Over the empty background: no client owns the cursor, so restore
             // our default image (otherwise it keeps the last client's cursor or
             // none at all).
-            wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
-            wlr_seat_pointer_clear_focus(server->seat);
-            constraints_follow_focus(server, NULL);
+            if (!locked) {
+                wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+                wlr_seat_pointer_clear_focus(server->seat);
+                constraints_follow_focus(server, NULL);
+            }
         }
     }
 }
