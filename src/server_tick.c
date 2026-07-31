@@ -1850,10 +1850,17 @@ static int physics_tick_cb(void *data) {
                 double jump = body->x - view->x;
                 if (fabs(jump) > 5.0 * server->screen_width)
                     view_jelly_carry(view, jump, 0.0);
+                int dx = body->x - view->x;
+                int dy = body->y - view->y;
                 view->x = body->x;
                 view->y = body->y;
                 server_place_view(server, view, body->x, body->y);
                 view_sync_position(view);
+                
+                if ((dx != 0 || dy != 0) && server->active_constraint && 
+                    view_from_surface(server, server->active_constraint->surface) == view) {
+                    wlr_cursor_move(server->cursor, NULL, dx, dy);
+                }
             }
             if (body && view->tile_anim == TILE_ANIM_FLIGHT)
                 body->desktop_id = flight_desktop(server, view);
