@@ -55,6 +55,7 @@ typedef struct FwmView {
     
     /* Saved geometry (local coordinates in desktop) */
     int x, y;
+    int last_sync_x, last_sync_y;
     int width, height;
 
     /* Tile-glide animation: when tile_anim is set, the physics tick eases the

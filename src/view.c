@@ -169,6 +169,9 @@ void view_set_size(FwmView *view, int width, int height) {
 
 void view_sync_position(FwmView *view) {
     if (view->type != FWM_VIEW_XWAYLAND) return;
+    if (view->last_sync_x == view->x && view->last_sync_y == view->y) return;
+    view->last_sync_x = view->x;
+    view->last_sync_y = view->y;
     view_set_size(view, view->width, view->height);
 }
 
@@ -357,6 +360,8 @@ FwmView *view_xwl_create(struct wlr_xwayland_surface *xsurface, struct FwmServer
     view->type = FWM_VIEW_XWAYLAND;
     view->xwl_surface = xsurface;
     view->server = server;
+    view->last_sync_x = -999999;
+    view->last_sync_y = -999999;
 
     // map/unmap/commit attach on associate (no wlr_surface yet); init the
     // links so removal in view_destroy is safe even if it never associates.
