@@ -217,9 +217,17 @@ static void xwl_unmanaged_create(FwmServer *server, struct wlr_xwayland_surface 
 static void handle_xwl_ready(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, xwl_ready);
     wlr_xwayland_set_seat(server->xwayland, server->seat);
+
+    // Set a fallback cursor theme for Xwayland so it doesn't default to the black X.
+    // While the compositor renders the cursor, Xwayland still dictates the image
+    // when over X11 windows and will provide the X11 default 'black X' otherwise.
+    struct wlr_xcursor *xcursor = wlr_xcursor_manager_get_xcursor(server->cursor_mgr, "default", 1);
+    if (xcursor && xcursor->image_count > 0) {
+        struct wlr_xcursor_image *image = xcursor->images[0];
+        wlr_xwayland_set_cursor(server->xwayland, wlr_xcursor_image_get_buffer(image), image->hotspot_x, image->hotspot_y);
+    }
+
     // Spawned children inherit DISPLAY, so binds can launch X11 apps.
-    // (No wlr_xwayland_set_cursor: the compositor draws the pointer itself,
-    // the X-side cursor image is never shown.)
     setenv("DISPLAY", server->xwayland->display_name, true);
 }
 
