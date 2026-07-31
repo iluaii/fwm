@@ -1346,6 +1346,7 @@ void server_drag_swing_place(FwmServer *server) {
     view->y = (int)lround(ny);
     if (view->scene_tree)
         server_place_view(server, view, nx, ny);
+    view_sync_position(view);
 }
 
 /* The camera has come to rest. Called from the tick when a slide or a pan
@@ -1852,6 +1853,7 @@ static int physics_tick_cb(void *data) {
                 view->x = body->x;
                 view->y = body->y;
                 server_place_view(server, view, body->x, body->y);
+                view_sync_position(view);
             }
             if (body && view->tile_anim == TILE_ANIM_FLIGHT)
                 body->desktop_id = flight_desktop(server, view);
