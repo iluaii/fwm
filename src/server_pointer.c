@@ -76,6 +76,7 @@
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/util/log.h>
+#include <wlr/util/region.h>
 #include <xkbcommon/xkbcommon.h>
 #include "server_internal.h"
 
@@ -159,10 +160,18 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
                  * uninitialised memory would strand the cursor; let the move
                  * through instead. */
                 if (server_world_to_screen(server, cv->x, cv->y, &vsx, &vsy)) {
-                    double sx = nx - vsx;
-                    double sy = ny - vsy;
-                    if (!pixman_region32_contains_point(&server->active_constraint->region,
-                                                        (int)sx, (int)sy, NULL)) {
+                    double sx1 = server->cursor->x - vsx;
+                    double sy1 = server->cursor->y - vsy;
+                    double sx2 = nx - vsx;
+                    double sy2 = ny - vsy;
+                    double sx2_out, sy2_out;
+                    
+                    if (wlr_region_confine(&server->active_constraint->region,
+                                           sx1, sy1, sx2, sy2, &sx2_out, &sy2_out)) {
+                        event->delta_x = sx2_out - sx1;
+                        event->delta_y = sy2_out - sy1;
+                    } else {
+                        // The old position was outside the region entirely. Drop it to prevent escape.
                         server_notify_activity(server);
                         return;
                     }
