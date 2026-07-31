@@ -1154,11 +1154,27 @@ static int physics_tick_cb(void *data) {
         if (view->scene_tree) {
             PhysicsBody *body = physics_find_body(&server->physics, view->id);
             if (body && !body->pinned && view->id != dragged_win) {
+                int dx = body->x - view->x;
+                int dy = body->y - view->y;
                 view->x = body->x;
                 view->y = body->y;
                 server_place_node(server, &view->scene_tree->node, body->x, body->y);
                 view_sync_position(view);
+                
+                if ((dx != 0 || dy != 0) && server->active_constraint && 
+                    view_from_surface(server, server->active_constraint->surface) == view) {
+                    wlr_cursor_move(server->cursor, NULL, dx, dy);
+                }
             }
+        }
+    }
+
+    if (server->active_constraint) {
+        FwmView *cv = view_from_surface(server, server->active_constraint->surface);
+        if (cv && !server_world_to_screen(server, cv->x, cv->y, NULL, NULL)) {
+            wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+            wlr_seat_pointer_clear_focus(server->seat);
+            constraints_follow_focus(server, NULL);
         }
     }
 
