@@ -626,6 +626,8 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
                         server->interactive.vx = 0;
                         server->interactive.vy = 0;
                         server->interactive.hist_count = 0;
+                        server->interactive.cam_have = 0;
+                        server->interactive.cam_output = NULL;
                         server->interactive.swirl_have = 0;
                         server->interactive.swirl_acc = 0.0;
                         server->interactive.swirl_abs = 0.0;
