@@ -177,9 +177,8 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
                         event->delta_x = sx2_out - sx1;
                         event->delta_y = sy2_out - sy1;
                     } else {
-                        // The old position was outside the region entirely. Drop it to prevent escape.
+                        // The old position was outside the region entirely. Let it move so focus can update and break the constraint.
                         server_notify_activity(server);
-                        return;
                     }
                 }
             }
