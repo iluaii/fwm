@@ -1176,8 +1176,6 @@ static int physics_tick_cb(void *data) {
     if (server->active_constraint) {
         FwmView *cv = view_from_surface(server, server->active_constraint->surface);
         if (cv && !server_world_to_screen(server, cv->x, cv->y, NULL, NULL)) {
-            wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
-            wlr_seat_pointer_clear_focus(server->seat);
             constraints_follow_focus(server, NULL);
         }
     }
