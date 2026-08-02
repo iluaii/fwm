@@ -190,8 +190,8 @@ static void constraint_set_active(FwmServer *server,
     if (server->active_constraint == constraint) return;
 
     if (server->active_constraint) {
-        wlr_pointer_constraint_v1_send_deactivated(server->active_constraint);
         wl_list_remove(&server->constraint_destroy.link);
+        wlr_pointer_constraint_v1_send_deactivated(server->active_constraint);
         server->active_constraint = NULL;
     }
     if (constraint) {
