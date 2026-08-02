@@ -159,7 +159,13 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
                  * against, and confining the pointer to a rectangle read out of
                  * uninitialised memory would strand the cursor; let the move
                  * through instead. */
-                if (server_world_to_screen(server, cv->x, cv->y, &vsx, &vsy)) {
+                double surface_x = cv->x;
+                double surface_y = cv->y;
+                if (cv->type == FWM_VIEW_XDG && cv->xdg_toplevel && cv->xdg_toplevel->base) {
+                    surface_x -= cv->xdg_toplevel->base->current.geometry.x;
+                    surface_y -= cv->xdg_toplevel->base->current.geometry.y;
+                }
+                if (server_world_to_screen(server, surface_x, surface_y, &vsx, &vsy)) {
                     double sx1 = server->cursor->x - vsx;
                     double sy1 = server->cursor->y - vsy;
                     double sx2 = nx - vsx;
