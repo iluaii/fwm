@@ -1858,7 +1858,11 @@ static int physics_tick_cb(void *data) {
                 view_sync_position(view);
                 
                 if ((dx != 0 || dy != 0) && server->active_constraint && 
+                    server->active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED &&
                     view_from_surface(server, server->active_constraint->surface) == view) {
+                    /* dx/dy are world deltas passed to wlr_cursor_move(), which takes layout
+                     * coordinates. They agree only while the camera is standing still, which
+                     * is not true during a slide. */
                     wlr_cursor_move(server->cursor, NULL, dx, dy);
                 }
             }
