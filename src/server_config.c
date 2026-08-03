@@ -796,7 +796,7 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
                   server->config.tiling.force_split);
 
     /* New gaps / anim settings take effect on tiled desktops. */
-    for (int d = 0; d < 10; d++) {
+    for (int d = 0; d < FWM_DESKTOPS; d++) {
         if (server->desktop_mode[d] == DESKTOP_MODE_TILING) server_apply_tiling(server, d);
     }
 

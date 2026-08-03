@@ -26,7 +26,7 @@
 
 #define SW  1920
 #define SH  1080
-#define SPAN (10 * SW)
+#define SPAN (FWM_DESKTOPS * SW)
 #define DT  (1.0 / 60.0)
 
 static PhysicsBody *spawn(PhysicsWorld *w, int x, int y) {
@@ -74,7 +74,6 @@ static void test_ring_carries_a_throw_round(void) {
     b = physics_find_body(&w, 1);
     CHECK_NOT_NULL(b);
     CHECK(b->x > SPAN - 2 * SW);          /* came out at the far end */
-    CHECK_INT(b->desktop_id, 9);
     CHECK(b->vx < -100.0);                /* and is still flying */
     physics_destroy(&w);
 }

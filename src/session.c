@@ -178,7 +178,7 @@ static void build_snapshot(struct FwmServer *server, char *out, size_t cap) {
         int desktop = b ? b->desktop_id
                         : (server->screen_width > 0 ? view->x / server->screen_width : 0);
         if (desktop < 0) desktop = 0;
-        if (desktop > 9) desktop = 9;
+        if (desktop > FWM_DESKTOPS - 1) desktop = FWM_DESKTOPS - 1;
 
         int w = snprintf(out + used, cap - used, "%d\t%s\n", desktop, key);
         if (w < 0 || (size_t)w >= cap - used) break;
@@ -310,7 +310,7 @@ void session_restore(struct FwmServer *server) {
 
         int desktop = atoi(line);
         if (desktop < 0) desktop = 0;
-        if (desktop > 9) desktop = 9;
+        if (desktop > FWM_DESKTOPS - 1) desktop = FWM_DESKTOPS - 1;
 
         struct PendingEntry *e = &st->pending[st->pending_count++];
         e->desktop = desktop;

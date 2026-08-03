@@ -177,7 +177,7 @@ static void activate_member(FwmServer *server, FwmGroup *g, struct FwmView *view
 
         // In a tiling desktop the group occupies one BSP leaf under the id of
         // its active member — rewrite the leaf to the new front window.
-        for (int d = 0; d < 10; d++) {
+        for (int d = 0; d < FWM_DESKTOPS; d++) {
             BspNode *leaf = bsp_find(server->bsp_roots[d], from->id);
             if (leaf) leaf->id = view->id;
         }

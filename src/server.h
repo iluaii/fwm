@@ -724,8 +724,8 @@ typedef struct FwmServer {
     int screen_width;
     int screen_height;
 
-    BspNode *bsp_roots[10];
-    int desktop_mode[10];
+    BspNode *bsp_roots[FWM_DESKTOPS];
+    int desktop_mode[FWM_DESKTOPS];
     /* Desktops asking to be looked at — the red digit in the tray. Per desktop
      * rather than per window on purpose; see src/urgent.h for why, and for the
      * three things that raise one. */
