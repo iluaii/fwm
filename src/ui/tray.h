@@ -17,11 +17,12 @@
 
 #include <wlr/types/wlr_scene.h>
 #include <wlr/render/wlr_renderer.h>
+#include "../defines.h"
 
 #define TRAY_HEIGHT 28
-/* Markers for monitors other than the one the strip is drawn on: the world has
- * ten desktops and a desktop belongs to one monitor, so nine is the ceiling. */
-#define TRAY_MAX_OTHER 9
+/* Markers for monitors other than the one the strip is drawn on: a desktop
+ * belongs to one monitor, so one short of the desktop count is the ceiling. */
+#define TRAY_MAX_OTHER (FWM_DESKTOPS - 1)
 /* The tray floats: it is inset from the top edge, so the strip it actually
  * occupies runs down to TRAY_BOTTOM, not to TRAY_HEIGHT. Anything reserving
  * space for the tray must use TRAY_BOTTOM, or the gap it leaves comes out
@@ -35,12 +36,12 @@ typedef struct {
     double angle;
     double mass;
     int flying;
-    int desktop_window_counts[10];
+    int desktop_window_counts[FWM_DESKTOPS];
     /* Desktops asking to be looked at: their number is drawn red (src/urgent.h).
      * Kept apart from the counts because an EMPTY desktop can be urgent too —
      * `fwmctl urgent` needs no window to point at — and then it is the dot that
      * goes red instead of a digit. */
-    int desktop_urgent[10];
+    int desktop_urgent[FWM_DESKTOPS];
     int active_desktop;
     double active_pos; /* fractional desktop position (camera_x / screen_w):
                         * the underline marker glides with the camera slide */
@@ -49,8 +50,8 @@ typedef struct {
      * holds is not somewhere this one can simply go: asking for it TRADES the
      * two screens' desktops (server_output_show_desktop). The strip has to say
      * which those are, or half the desktops answer a click with a move nobody
-     * asked for. Ten desktops, one monitor each at most, so nine is every
-     * marker that can exist; any monitor past that is dropped. */
+     * asked for. One monitor per desktop at most, so one short of the desktop
+     * count is every marker that can exist; any monitor past that is dropped. */
     double other_pos[TRAY_MAX_OTHER];
     int other_count;
     double opacity; /* island fill alpha 0..1 (decor.tray_opacity) */
@@ -95,8 +96,8 @@ typedef struct {
     /* Redraw signature. Opaque outside tray.c; here so each strip owns one. */
     char sig_name[128];
     int  sig_speed, sig_angle, sig_mass10, sig_flying;
-    int  sig_counts[10];
-    int  sig_urgent;   /* the ten flags as a bitmask */
+    int  sig_counts[FWM_DESKTOPS];
+    int  sig_urgent;   /* one flag per desktop, as a bitmask */
     int  sig_active_desktop, sig_pos_mil, sig_opacity1000, sig_minute;
     int  sig_other_count, sig_other_mil[TRAY_MAX_OTHER];
     char sig_kbd[8];

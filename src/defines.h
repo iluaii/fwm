@@ -22,6 +22,7 @@
 #define MAX_WINDOWS             256
 /* Virtual desktops on the strip. The world is this many screens wide. */
 #define FWM_DESKTOPS            10
+_Static_assert(FWM_DESKTOPS >= 4, "FWM_DESKTOPS must be at least 4");
 #define DRAG_MARGIN             5
 #define PHYSICS_MARGIN          3
 #define MASS_DENSITY            0.0005
