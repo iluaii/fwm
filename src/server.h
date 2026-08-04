@@ -516,8 +516,8 @@ typedef struct FwmServer {
     int screen_width;
     int screen_height;
 
-    BspNode *bsp_roots[10];
-    int desktop_mode[10];
+    BspNode *bsp_roots[FWM_DESKTOPS];
+    int desktop_mode[FWM_DESKTOPS];
     
     FwmConfig config;
     FwmInteractiveState interactive;

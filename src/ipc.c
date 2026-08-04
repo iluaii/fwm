@@ -267,7 +267,7 @@ static void cmd_state(FwmServer *server, struct Buf *b) {
     buf_puts(b, "\"mode\":");
     buf_json_string(b, mode_name(server->desktop_mode[desktop]));
     buf_puts(b, ",\"modes\":[");
-    for (int d = 0; d < 10; d++) {
+    for (int d = 0; d < FWM_DESKTOPS; d++) {
         if (d) buf_puts(b, ",");
         buf_json_string(b, mode_name(server->desktop_mode[d]));
     }
@@ -727,7 +727,7 @@ void ipc_emit_desktop(FwmIpc *ipc, int desktop) {
 
     struct Buf b = {0};
     buf_printf(&b, "{\"event\":\"desktop\",\"desktop\":%d,\"mode\":", desktop);
-    buf_json_string(&b, mode_name(desktop >= 0 && desktop < 10
+    buf_json_string(&b, mode_name(desktop >= 0 && desktop < FWM_DESKTOPS
                                   ? ipc->server->desktop_mode[desktop] : -1));
     buf_puts(&b, "}\n");
     ipc_broadcast(ipc, FWM_EV_DESKTOP, &b);

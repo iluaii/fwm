@@ -547,14 +547,14 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         /* Same rule: bring every desktop to one mode rather than flipping each
          * independently. Tiling wins unless everything is already tiled. */
         int all_tiled = 1;
-        for (int d = 0; d < 10; d++) {
+        for (int d = 0; d < FWM_DESKTOPS; d++) {
             if (server->desktop_mode[d] != DESKTOP_MODE_TILING) { all_tiled = 0; break; }
         }
         int want = all_tiled ? DESKTOP_MODE_PHYSICS : DESKTOP_MODE_TILING;
         /* Set the mode outright instead of toggling: a floating desktop would
          * otherwise be flipped INTO tiling on the "everything back to physics"
          * pass, which is the opposite of what was asked. */
-        for (int d = 0; d < 10; d++) server_set_desktop_mode(server, d, want);
+        for (int d = 0; d < FWM_DESKTOPS; d++) server_set_desktop_mode(server, d, want);
     } else if (strcmp(action, "toggle_tray") == 0) {
         /* Hide the tray outright: the node goes away AND the strip it reserved
          * comes back, so tiles and fake-fullscreen windows grow into the top of
@@ -567,7 +567,7 @@ void server_dispatch_action(FwmServer *server, const char *action) {
                 wlr_scene_node_set_enabled(&to->tray_buffer->node, !server->tray_hidden);
         }
 
-        for (int d = 0; d < 10; d++) {
+        for (int d = 0; d < FWM_DESKTOPS; d++) {
             if (server->desktop_mode[d] == DESKTOP_MODE_TILING)
                 server_apply_tiling(server, d);
         }
@@ -586,11 +586,11 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         server_toggle_desktop_floating(server, server_active_desktop(server));
     } else if (strcmp(action, "toggle_floating_all") == 0) {
         int all_floating = 1;
-        for (int d = 0; d < 10; d++) {
+        for (int d = 0; d < FWM_DESKTOPS; d++) {
             if (server->desktop_mode[d] != DESKTOP_MODE_FLOATING) { all_floating = 0; break; }
         }
         int want = all_floating ? DESKTOP_MODE_PHYSICS : DESKTOP_MODE_FLOATING;
-        for (int d = 0; d < 10; d++) server_set_desktop_mode(server, d, want);
+        for (int d = 0; d < FWM_DESKTOPS; d++) server_set_desktop_mode(server, d, want);
     } else if (strcmp(action, "calm_all") == 0) {
         for (int i = 0; i < server->physics.body_count; i++) {
             PhysicsBody *b = &server->physics.bodies[i];
@@ -701,7 +701,7 @@ void server_dispatch_action_external(FwmServer *server, const char *action) {
 void server_modes_state(FwmServer *server, ModesState *out) {
     int d = server_active_desktop(server);
     if (d < 0) d = 0;
-    if (d > 9) d = 9;
+    if (d > FWM_DESKTOPS - 1) d = FWM_DESKTOPS - 1;
     out->tiling   = server->desktop_mode[d] == DESKTOP_MODE_TILING;
     out->floating = server->desktop_mode[d] == DESKTOP_MODE_FLOATING;
     out->gravity  = server->physics.gravity_scale > 0.0;
@@ -770,7 +770,7 @@ int server_modes_menu_click(FwmServer *server, int row, int seg) {
     int d = expo_view_desktop(server);
     if (d < 0) d = server_active_desktop(server);
     if (d < 0) d = 0;
-    if (d > 9) d = 9;
+    if (d > FWM_DESKTOPS - 1) d = FWM_DESKTOPS - 1;
 
     switch (row) {
     case MODES_ROW_TILING:

@@ -28,7 +28,7 @@ static void handle_request_activate(struct wl_listener *listener, void *data) {
      * unless the camera goes there — unlike xdg-activation, this IS a direct
      * user action on that window, so it always pans. */
     PhysicsBody *pb = physics_find_body(&view->server->physics, view->id);
-    if (pb && pb->desktop_id >= 0 && pb->desktop_id < 10) {
+    if (pb && pb->desktop_id >= 0 && pb->desktop_id < FWM_DESKTOPS) {
         /* Bring the window's desktop up on the monitor the user is at. */
         server_output_show_desktop(view->server, server_active_output(view->server),
                                    pb->desktop_id, 0);

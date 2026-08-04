@@ -1244,7 +1244,7 @@ static void server_output_first_layout(FwmServer *server) {
     if (tc) {
         int d = atoi(tc);
         if (d < 0) d = 0;
-        if (d > 9) d = 9;
+        if (d > FWM_DESKTOPS - 1) d = FWM_DESKTOPS - 1;
         FwmOutput *po = server_primary_output(server);
         if (po) {
             po->desktop = d;

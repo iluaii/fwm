@@ -690,7 +690,7 @@ void view_unmap(FwmView *view) {
     group_remove(view->server, view); /* no-op when not grouped */
     physics_remove_body(&view->server->physics, view->id);
     
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < FWM_DESKTOPS; i++) {
         if (bsp_find(view->server->bsp_roots[i], view->id)) {
             bsp_remove(&view->server->bsp_roots[i], view->id);
             if (view->server->desktop_mode[i] == DESKTOP_MODE_TILING) {

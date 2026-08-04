@@ -229,7 +229,7 @@ static void server_consume_impacts(FwmServer *server) {
          * into the real range instead of trusting the division. */
         int impact_d = (int)(im->x / server->screen_width);
         if (impact_d < 0) impact_d = 0;
-        if (impact_d > 9) impact_d = 9;
+        if (impact_d > FWM_DESKTOPS - 1) impact_d = FWM_DESKTOPS - 1;
 
         /* Before the "is anyone watching" test below, and deliberately: the
          * shake and the knock are presentation and there is no point spending

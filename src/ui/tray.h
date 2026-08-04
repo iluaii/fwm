@@ -17,6 +17,7 @@
 
 #include <wlr/types/wlr_scene.h>
 #include <wlr/render/wlr_renderer.h>
+#include "../defines.h"
 
 #define TRAY_HEIGHT 28
 /* The tray floats: it is inset from the top edge, so the strip it actually
@@ -32,7 +33,7 @@ typedef struct {
     double angle;
     double mass;
     int flying;
-    int desktop_window_counts[10];
+    int desktop_window_counts[FWM_DESKTOPS];
     int active_desktop;
     double active_pos; /* fractional desktop position (camera_x / screen_w):
                         * the underline marker glides with the camera slide */
@@ -70,7 +71,7 @@ typedef struct {
     /* Redraw signature. Opaque outside tray.c; here so each strip owns one. */
     char sig_name[128];
     int  sig_speed, sig_angle, sig_mass10, sig_flying;
-    int  sig_counts[10];
+    int  sig_counts[FWM_DESKTOPS];
     int  sig_active_desktop, sig_pos_mil, sig_opacity1000, sig_minute;
     char sig_kbd[8];
     int  sig_errors, sig_err_expanded;

@@ -962,7 +962,7 @@ static void load_outputs(toml_table_t *root, FwmConfig *cfg) {
 
         toml_datum_t desk = toml_int_in(tbl, "desktop");
         if (desk.ok) {
-            if (desk.u.i < 0 || desk.u.i >= 10)
+            if (desk.u.i < 0 || desk.u.i >= FWM_DESKTOPS)
                 config_report_error(cfg, "[[output]] %s: desktop %lld out of range 0..9 — ignored",
                                     o->name, (long long)desk.u.i);
             else
@@ -1073,7 +1073,7 @@ static void load_rules(toml_table_t *root, FwmConfig *cfg) {
         r->desktop = -1;
         toml_datum_t desk = toml_int_in(tbl, "desktop");
         if (desk.ok) {
-            if (desk.u.i < 0 || desk.u.i > 9)
+            if (desk.u.i < 0 || desk.u.i >= FWM_DESKTOPS)
                 config_report_error(cfg, "[[rule]] #%d: desktop %lld out of range 0..9 — ignored",
                                     i + 1, (long long)desk.u.i);
             else

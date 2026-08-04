@@ -66,7 +66,7 @@ int tray_desktop_hit(const TrayStrip *strip, double x, double y) {
      * itself: the dots are 4-7px across, which is not a clickable target. */
     int i = (int)lround((x - strip->desk_first_cx) / strip->desk_spacing);
     if (i < 0) i = 0;
-    if (i > 9) i = 9;
+    if (i > FWM_DESKTOPS - 1) i = FWM_DESKTOPS - 1;
     return i;
 }
 
@@ -250,7 +250,7 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
         strip->desk_first_cx = px + PILL_PAD + 3;
         strip->desk_spacing = spacing;
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < FWM_DESKTOPS; i++) {
             double cx = px + PILL_PAD + 3 + i * spacing;
             int count = data->desktop_window_counts[i];
             int active = (i == data->active_desktop);

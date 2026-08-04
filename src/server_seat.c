@@ -258,7 +258,7 @@ static void handle_xdg_activation_request_activate(struct wl_listener *listener,
     if (!view) return;
 
     PhysicsBody *pb = physics_find_body(&server->physics, view->id);
-    int target_d = (pb && pb->desktop_id >= 0 && pb->desktop_id < 10) ? pb->desktop_id : -1;
+    int target_d = (pb && pb->desktop_id >= 0 && pb->desktop_id < FWM_DESKTOPS) ? pb->desktop_id : -1;
     int visible_d = server_active_desktop(server);
 
     if (target_d >= 0 && target_d != visible_d) {
