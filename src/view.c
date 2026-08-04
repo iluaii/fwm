@@ -159,8 +159,31 @@ void view_set_size(FwmView *view, int width, int height) {
     } else {
         // X11 configure carries position too; send screen coords (X clients
         // use them as global root coordinates for e.g. popup placement).
+        double sx = view->x, sy = view->y;
+        bool on_screen = server_world_to_screen(view->server, view->x, view->y, &sx, &sy);
+        int isx = (int)lround(sx);
+        int isy = (int)lround(sy);
+        
+        // Only allow the early-out if it's actually on-screen
+        if (on_screen && view->last_sync_x == isx && view->last_sync_y == isy &&
+            view->last_sync_w == width && view->last_sync_h == height) {
+            return;
+        }
+        
+        if (on_screen) {
+            view->last_sync_x = isx;
+            view->last_sync_y = isy;
+        } else {
+            // Invalidate the cache completely so it doesn't accidentally match later
+            view->last_sync_x = -999999;
+            view->last_sync_y = -999999;
+        }
+        
+        view->last_sync_w = width;
+        view->last_sync_h = height;
+        
         wlr_xwayland_surface_configure(view->xwl_surface,
-            (int16_t)view->x, (int16_t)view->y,
+            (int16_t)isx, (int16_t)isy,
             (uint16_t)width, (uint16_t)height);
     }
 }
@@ -355,6 +378,10 @@ FwmView *view_xwl_create(struct wlr_xwayland_surface *xsurface, struct FwmServer
     view->type = FWM_VIEW_XWAYLAND;
     view->xwl_surface = xsurface;
     view->server = server;
+    view->last_sync_x = -999999;
+    view->last_sync_y = -999999;
+    view->last_sync_w = -1;
+    view->last_sync_h = -1;
 
     // map/unmap/commit attach on associate (no wlr_surface yet); init the
     // links so removal in view_destroy is safe even if it never associates.

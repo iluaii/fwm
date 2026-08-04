@@ -177,6 +177,7 @@ static void drag_place(FwmServer *server, double lx, double ly) {
             server_place_node(server, &view->scene_tree->node, view->x, view->y);
     }
 
+    view_sync_position(view);
     physics_sync_body(&server->physics, view->id, view->x, view->y,
                       view->width, view->height, server->screen_width);
 }
@@ -626,6 +627,8 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
                         server->interactive.vx = 0;
                         server->interactive.vy = 0;
                         server->interactive.hist_count = 0;
+                        server->interactive.cam_have = 0;
+                        server->interactive.cam_output = NULL;
                         server->interactive.swirl_have = 0;
                         server->interactive.swirl_acc = 0.0;
                         server->interactive.swirl_abs = 0.0;

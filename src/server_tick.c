@@ -930,6 +930,7 @@ void server_drag_swing_place(FwmServer *server) {
     view->x = (int)lround(nx);
     view->y = (int)lround(ny);
     if (view->scene_tree) server_place_node(server, &view->scene_tree->node, nx, ny);
+    view_sync_position(view);
 }
 
 /* The camera has come to rest. Called from the tick when a slide or a pan
@@ -1230,10 +1231,29 @@ static int physics_tick_cb(void *data) {
         if (view->scene_tree) {
             PhysicsBody *body = physics_find_body(&server->physics, view->id);
             if (body && !body->pinned && view->id != dragged_win) {
+                int dx = body->x - view->x;
+                int dy = body->y - view->y;
                 view->x = body->x;
                 view->y = body->y;
                 server_place_node(server, &view->scene_tree->node, body->x, body->y);
+                view_sync_position(view);
+                
+                if ((dx != 0 || dy != 0) && server->active_constraint && 
+                    server->active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED &&
+                    view_from_surface(server, server->active_constraint->surface) == view) {
+                    /* dx/dy are world deltas passed to wlr_cursor_move(), which takes layout
+                     * coordinates. They agree only while the camera is standing still, which
+                     * is not true during a slide. */
+                    wlr_cursor_move(server->cursor, NULL, dx, dy);
+                }
             }
+        }
+    }
+
+    if (server->active_constraint) {
+        FwmView *cv = view_from_surface(server, server->active_constraint->surface);
+        if (cv && !server_world_to_screen(server, cv->x, cv->y, NULL, NULL)) {
+            constraints_follow_focus(server, NULL);
         }
     }
 
