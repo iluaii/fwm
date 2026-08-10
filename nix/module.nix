@@ -37,6 +37,7 @@
 
         programs = {
           dconf.enable = lib.mkDefault true;
+          xwayland.enable = lib.mkDefault true;
         };
 
         services.graphical-desktop.enable = true;
