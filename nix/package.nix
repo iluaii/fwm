@@ -28,9 +28,7 @@
           pcre2,
           util-linux,
           libpulseaudio,
-          cava,
           gdk-pixbuf,
-          withCava ? true,
           ...
         }:
 
@@ -39,7 +37,7 @@
             name = "fwm";
             desktopName = "fwm";
             comment = "Wayland compositor written in C where windows are physical objects";
-            exec = "@out@/bin/fwm";
+            exec = "@out@/bin/fwm-session";
             destination = "/share/wayland-sessions";
             keywords = [
               "tiling"
@@ -98,15 +96,20 @@
 
             # misc
             util-linux
-          ]
-          ++ lib.optionals withCava [ cava ];
+          ];
 
           installPhase = ''
             mkdir -p $out/bin
+
             cp fwm $out/bin -r
+            cp fwmctl $out/bin -r
+            cp $src/session/fwm-session $out/bin/fwm-session
 
             mkdir -p $out/share/wayland-sessions
             cp ${desktopItem}/share/wayland-sessions/* $out/share/wayland-sessions -r
+
+            mkdir -p $out/share/xdg-desktop-portal
+            cp $src/session/fwm-portals.conf $out/share/xdg-desktop-portal/fwm-portals.conf
 
             substituteInPlace $out/share/wayland-sessions/fwm.desktop \
                 --replace-fail "@out@" "$out"
