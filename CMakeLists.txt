@@ -56,6 +56,7 @@ pkg_check_modules(LIBINPUT REQUIRED libinput)
 # context (see the header for why). Nothing else in fwm touches GL.
 pkg_check_modules(EGL REQUIRED egl)
 pkg_check_modules(GLESV2 REQUIRED glesv2)
+pkg_check_modules(DRM REQUIRED libdrm)
 # Video wallpaper decode. ffmpeg 6 on Void is the split libav* set + headers in
 # ffmpeg6-devel; the runtime is libav*6. Software decode only, so no libva pin.
 pkg_check_modules(LIBAV REQUIRED libavformat libavcodec libavutil libswscale)
@@ -95,7 +96,6 @@ find_package(box2d REQUIRED)
 # The video decode runs on its own pthread; the compositor stays single-threaded.
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-pkg_check_modules(DRM REQUIRED libdrm)
 
 # List of source files
 set(SOURCES
