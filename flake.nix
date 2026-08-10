@@ -7,8 +7,6 @@
     };
 
     flake-parts.url = "github:hercules-ci/flake-parts";
-    import-tree.url = "github:vic/import-tree";
-
   };
 
   outputs =
@@ -23,7 +21,9 @@
         ];
 
         imports = [
-          (inputs.import-tree ./nix)
+          ./nix/package.nix
+          ./nix/module.nix
+          ./nix/shell.nix
         ];
       }
     );
