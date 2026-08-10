@@ -41,6 +41,21 @@ Left to right:
 Opacity is `[decor] tray_opacity`; the whole palette can be derived from the
 wallpaper with `[decor] color_source = "wallpaper"`.
 
+**It can stand down for an external bar**, with `[decor] tray_yield = true`.
+Then, on a monitor where a layer-shell client reserved space along the top —
+waybar, quickshell, a dock — fwm's strip hides itself and stops reserving its
+own band, so the two never stack. Per monitor: a second screen with no bar keeps
+its strip, and closing the bar brings it back.
+
+**Off by default.** A client asking for space must not be able to take fwm's own
+chrome off the screen; running a bar instead of the strip is a decision, and
+this is where it is made. Left off, the strip stays put and an external bar
+simply sits below it.
+
+Only an **exclusive zone** counts even then. A panel that anchors to the top
+without reserving space is asking to float over the screen rather than replace
+anything, and the strip stays. `Super+J` (`toggle_tray`) still hides it by hand.
+
 ## The modes menu
 
 Click the modes pill (or bind `modes_menu`). Eight rows:

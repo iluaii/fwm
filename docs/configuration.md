@@ -44,6 +44,7 @@ gravity                = 981.0   # px/s^2; 981 = earth at 100 px/m
 tick_rate              = 60.0    # simulation steps per second
 gravity_steps          = [0.0, 0.15, 1.0]   # what Super+G cycles
 hp_break_speed         = 0.0     # 0 = follow max_throw_speed
+solid_bars             = false   # do panels hold the floor up?
 ```
 
 | Key | Meaning |
@@ -61,6 +62,7 @@ hp_break_speed         = 0.0     # 0 = follow max_throw_speed
 | `tick_rate` | Simulation steps per second. Read once at startup; a change needs a restart, not a reload. |
 | `gravity_steps` | The multipliers `cycle_gravity` (`Super+G`) walks, in order. Up to 8. |
 | `hp_break_speed` | How fast a window must hit another **of its own mass** to destroy it, px/s. 0 (the default) means "use `max_throw_speed`". Only tunes the mode; it cannot switch it on. |
+| `solid_bars` | Turn a layer-shell panel that reserved space into a solid object: the floor stands on top of a bar at the bottom of the screen, and a bar at the top is a ceiling. Off by default, and windows slide underneath one as they always have. Only **exclusive zones** count — fwm's own tray floats above the windows and is not one. The floor is one line across all ten desktops, so it follows the **primary** monitor's bars. |
 
 ### breakable windows
 
@@ -237,11 +239,18 @@ col_inactive      = "#45475a"
 fade_in_ms        = 260.0         # window open fade; 0 disables
 wallpaper_fade_ms = 420.0         # wallpaper cross-fade; 0 = instant cut
 tray_opacity      = 0.92          # tray island fill alpha
+tray_yield        = false         # hide the strip where a bar reserved the top
 launcher_opacity  = 0.92
 icon_theme        = ""            # launcher icons; "" = auto (gtk3, then hicolor)
 color_source      = "config"      # or "wallpaper"
 tint_strength     = 0.4           # 0..1, only with color_source = "wallpaper"
 ```
+
+`tray_yield` is what lets an external bar **replace** the status strip rather
+than stack with it: on a monitor where a layer-shell client reserved space along
+the top, fwm's strip hides and stops reserving its own band. Off by default —
+a client asking for space should not be able to take fwm's chrome off the screen
+on its own. See [the interface](interface.md#the-tray).
 
 `color_source = "wallpaper"` derives the whole UI palette — island fill, accent,
 text — from the current wallpaper image, so the tray belongs to the desktop
@@ -410,7 +419,7 @@ the ones only a drag can express:
 |---|---|---|
 | `move` | drag the window; let go while moving to throw it | drags the tile out of the layout |
 | `move_nocollide` | drag it through everything else | swaps two tiles |
-| `resize` | resize from the nearest corner | drags the BSP border under the cursor |
+| `resize` | resize from the nearest corner | resizes the tile from its nearest corner, moving the layout dividers |
 | `swap` | — | swaps two tiles |
 | `twist` | turn the window about its centre; let go spinning and it keeps spinning | — |
 

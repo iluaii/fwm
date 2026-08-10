@@ -110,7 +110,27 @@ struct FwmView *view_at(FwmServer *server, double lx, double ly,
     if (tree == NULL) {
         return NULL;
     }
-    return tree->node.data;
+
+    /* A tag in node.data is NOT proof of a view. A layer-shell surface stows
+     * its own FwmLayerSurface in the same field (layer.c), and a bar or a dock
+     * is exactly what the cursor crosses on its way to a window — so this
+     * handed back a pointer into an unrelated struct, which server_focus_view
+     * then walked. Hovering a dock killed the compositor outright.
+     *
+     * Confirmed against the list rather than trusted: the field cannot say what
+     * type it holds, and the answer has to stay right for whatever puts
+     * something there next. The walk is over at most MAX_WINDOWS entries, once
+     * per pointer motion.
+     *
+     * Returning NULL here does not silence the bar: *surface is already set
+     * from the scene, and the callers send pointer events to a surface with no
+     * view behind it — the path unmanaged X11 menus have always taken. */
+    FwmView *found = tree->node.data;
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        if (v == found) return found;
+    }
+    return NULL;
 }
 
 /* The monitor whose status strip is under the pointer, and where in that strip

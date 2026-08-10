@@ -20,6 +20,13 @@
 #include "bsp.h"
 #include <stdlib.h>
 
+/* One window's committed size, with no floor under it — which is every window
+ * that has never refused a size, and so every window in these cases but the
+ * ones that are about floors. */
+#define ACT(id, w, h) { (id), (w), (h), 0, 0 }
+/* ... and one that will not go below (mw, mh), whatever it is offered. */
+#define ACT_MIN(id, w, h, mw, mh) { (id), (w), (h), (mw), (mh) }
+
 /* Build a tree of `n` leaves with ids 1..n, each split off the previous one. */
 static BspNode *tree_of(int n) {
     BspNode *root = NULL;
@@ -252,19 +259,108 @@ static void test_swap(void) {
     bsp_free(root);
 }
 
-static void test_find_border(void) {
-    CASE("border is found within the threshold");
+/* Where the windows actually are, which is what a cursor is tested against.
+ * bsp_recalc alone fills the slot grid and leaves ax/ay/aw/ah at zero. */
+static void place(BspNode *root, int x, int y, int w, int h, int gap) {
+    bsp_recalc(root, x, y, w, h, gap);
+    bsp_place_actual(root, x, y, w, h, gap, NULL, 0);
+}
+
+static void test_leaf_at(void) {
+    CASE("the window under a point, and nothing in the gap between two");
     BspNode *root = tree_of(2);
     root->split_h = 0;
-    bsp_recalc(root, 0, 0, 100, 50, 10);   /* border sits at x = 45 */
+    place(root, 0, 0, 100, 50, 10);       /* 45 | gap | 45 */
 
-    CHECK(bsp_find_border(root, 45, 25, 3) == root);
-    CHECK(bsp_find_border(root, 47, 25, 3) == root);   /* inside threshold */
-    CHECK_NULL(bsp_find_border(root, 60, 25, 3));      /* outside it */
-    CHECK_NULL(bsp_find_border(root, 45, 99, 3));      /* past the node's height */
+    CHECK(bsp_leaf_at(root, 10, 25) == root->left);
+    CHECK(bsp_leaf_at(root, 90, 25) == root->right);
+    CHECK_NULL(bsp_leaf_at(root, 50, 25));    /* in the gap */
+    CHECK_NULL(bsp_leaf_at(root, 10, 80));    /* below the layout */
+    CHECK_NULL(bsp_leaf_at(NULL, 10, 25));
+    bsp_free(root);
+}
 
-    CASE("a leaf has no border");
-    CHECK_NULL(bsp_find_border(root->left, 45, 25, 3));
+static void test_edge_node(void) {
+    CASE("each edge names the split that moves it");
+    /* Three in a row: 1 | 2 | 3, the second split nested in the first's right. */
+    BspNode *root = tree_of(3);
+    root->split_h = 0;
+    root->right->split_h = 0;
+    BspNode *one = bsp_find(root, 1), *two = bsp_find(root, 2);
+
+    /* The leftmost window has a divider on its right and none on its left. */
+    CHECK(bsp_edge_node(one, 0, 1) == root);
+    CHECK_NULL(bsp_edge_node(one, 0, 0));
+    /* The middle one has a divider either side, and they are different. */
+    CHECK(bsp_edge_node(two, 0, 1) == root->right);
+    CHECK(bsp_edge_node(two, 0, 0) == root);
+
+    CASE("a split along the other axis is not an answer");
+    CHECK_NULL(bsp_edge_node(two, 1, 1));
+    CHECK_NULL(bsp_edge_node(two, 1, 0));
+    bsp_free(root);
+}
+
+static void test_insert_at(void) {
+    CASE("dropped on the right of a window, it follows it");
+    BspNode *root = NULL;
+    bsp_insert(&root, 0, 1);
+    bsp_insert_at(&root, 1, 2, BSP_SIDE_RIGHT);
+    CHECK_INT(root->split_h, 0);
+    CHECK_INT(root->left->id, 1);
+    CHECK_INT(root->right->id, 2);
+
+    CASE("dropped on the left, it goes first");
+    bsp_insert_at(&root, 1, 3, BSP_SIDE_LEFT);
+    BspNode *split = bsp_find(root, 3)->parent;
+    CHECK_INT(split->split_h, 0);
+    CHECK_INT(split->left->id, 3);
+    CHECK_INT(split->right->id, 1);
+
+    CASE("dropped above and below, the split turns");
+    bsp_insert_at(&root, 2, 4, BSP_SIDE_UP);
+    BspNode *up = bsp_find(root, 4)->parent;
+    CHECK_INT(up->split_h, 1);
+    CHECK_INT(up->left->id, 4);
+    CHECK_INT(up->right->id, 2);
+
+    CASE("dropped on a window that is not there, it still lands");
+    bsp_insert_at(&root, 999, 5, BSP_SIDE_RIGHT);
+    CHECK_NOT_NULL(bsp_find(root, 5));
+
+    CASE("the first window in an empty tree is the root");
+    bsp_free(root);
+    root = NULL;
+    bsp_insert_at(&root, 7, 1, BSP_SIDE_DOWN);
+    CHECK_INT(root->id, 1);
+    bsp_free(root);
+}
+
+/* A window with a minimum size — Discord will not go below about 940px wide —
+ * used to be laid out as though it had taken the smaller size it was offered,
+ * and its neighbour was then placed over the top of it. */
+static void test_min_size(void) {
+    CASE("a window that refuses to shrink keeps its room");
+    BspNode *root = tree_of(2);
+    root->split_h = 0;
+    root->ratio = 0.2f;                    /* asks the left one to be 190px */
+    BspActual act[] = { ACT_MIN(1, 400, 100, 400, 0), ACT(2, 590, 100) };
+    bsp_place_actual(root, 0, 0, 1000, 100, 10, act, 2);
+
+    CHECK_INT(root->left->aw, 400);        /* its floor, not the 190 asked for */
+    /* And the neighbour starts after it rather than under it. */
+    CHECK(root->right->ax >= root->left->ax + root->left->aw + 10);
+
+    CASE("the ratio may not be dragged past that floor");
+    float lo, hi;
+    bsp_ratio_limits(root, 10, act, 2, &lo, &hi);
+    CHECK(lo >= 400.0f / 990.0f - 0.001f);
+    CHECK(hi <= 0.95f);
+
+    CASE("two floors that cannot both fit are ignored rather than crossed");
+    BspActual big[] = { ACT_MIN(1, 800, 100, 800, 0), ACT_MIN(2, 800, 100, 800, 0) };
+    bsp_ratio_limits(root, 10, big, 2, &lo, &hi);
+    CHECK(lo < hi);
     bsp_free(root);
 }
 
@@ -307,8 +403,8 @@ static void test_place_actual(void) {
     BspNode *root = tree_of(2);
     root->split_h = 1;
     bsp_recalc(root, 0, 0, 100, 600, 10);
-    BspActual same[] = { {1, root->left->w, root->left->h},
-                         {2, root->right->w, root->right->h} };
+    BspActual same[] = { ACT(1, root->left->w, root->left->h),
+                         ACT(2, root->right->w, root->right->h) };
     bsp_place_actual(root, 0, 0, 100, 600, 10, same, 2);
     CHECK_INT(root->left->ay, root->left->y);
     CHECK_INT(root->right->ay, root->right->y);
@@ -320,7 +416,7 @@ static void test_place_actual(void) {
     bsp_recalc(root, 0, 0, 100, 600, 10);           /* slots 295 | gap | 295 */
     CHECK_INT(root->left->h, 295);
     /* The upper window took 289 of its 295. */
-    BspActual act[] = { {1, 100, 289}, {2, 100, 295} };
+    BspActual act[] = { ACT(1, 100, 289), ACT(2, 100, 295) };
     bsp_place_actual(root, 0, 0, 100, 600, 10, act, 2);
     /* 594 of the 600 is taken, and the leftover 6 is split between the two
      * edges rather than dumped below the last window: everything shifts by 3. */
@@ -337,7 +433,7 @@ static void test_place_actual(void) {
     BspNode *sub = root->right->id == 0 ? root->right : root->left;
     sub->split_h = 1;
     bsp_recalc(root, 0, 0, 100, 900, 10);
-    BspActual a3[] = { {1, 100, 440}, {2, 100, 210}, {3, 100, 200} };
+    BspActual a3[] = { ACT(1, 100, 440), ACT(2, 100, 210), ACT(3, 100, 200) };
     bsp_place_actual(root, 0, 0, 100, 900, 10, a3, 3);
 
     BspNode *lv[8]; int n = 0;
@@ -355,7 +451,7 @@ static void test_place_actual(void) {
     root = tree_of(2);
     root->split_h = 0;
     bsp_recalc(root, 0, 0, 1000, 100, 10);
-    BspActual h2[] = { {1, 480, 100}, {2, 495, 100} };   /* left is 15 short */
+    BspActual h2[] = { ACT(1, 480, 100), ACT(2, 495, 100) };   /* left is 15 short */
     bsp_place_actual(root, 0, 0, 1000, 100, 10, h2, 2);
     CHECK_INT(root->left->ax, 7);                        /* 15 leftover, halved */
     CHECK_INT(root->right->ax, 497);                     /* 7 + 480 + 10 */
@@ -376,7 +472,7 @@ static void test_place_actual(void) {
     root->left->split_h = 1;            /* and the subtree is a column too */
     bsp_recalc(root, 0, 0, 200, 900, 10);
 
-    BspActual nest[] = { {1, 200, 100}, {3, 200, 150}, {2, 200, 300} };
+    BspActual nest[] = { ACT(1, 200, 100), ACT(3, 200, 150), ACT(2, 200, 300) };
     bsp_place_actual(root, 0, 0, 200, 900, 10, nest, 3);
     BspNode *l1 = bsp_find(root, 1), *l3 = bsp_find(root, 3), *l2 = bsp_find(root, 2);
     /* The column occupies 570 of 900, so the whole thing sits 165 lower. */
@@ -395,7 +491,7 @@ static void test_place_actual(void) {
     root->split_h = 0;                  /* subtree left, leaf2 right */
     root->left->split_h = 0;            /* subtree splits side by side */
     bsp_recalc(root, 0, 0, 900, 200, 10);
-    BspActual wide[] = { {1, 100, 200}, {3, 150, 200}, {2, 300, 200} };
+    BspActual wide[] = { ACT(1, 100, 200), ACT(3, 150, 200), ACT(2, 300, 200) };
     bsp_place_actual(root, 0, 0, 900, 200, 10, wide, 3);
     l1 = bsp_find(root, 1); l3 = bsp_find(root, 3); l2 = bsp_find(root, 2);
     CHECK_INT(l1->ax, 165);
@@ -414,7 +510,7 @@ static void test_place_actual(void) {
     bsp_recalc(root, 0, 0, 100, 600, 10);
     CHECK_INT(root->left->h, 295);                  /* even slots to start */
     CHECK_INT(root->right->h, 295);
-    BspActual shy[] = { {1, 100, 289}, {2, 100, 600} };   /* upper is 6 short */
+    BspActual shy[] = { ACT(1, 100, 289), ACT(2, 100, 600) };   /* upper is 6 short */
     bsp_place_actual(root, 0, 0, 100, 600, 10, shy, 2);
     l1 = bsp_find(root, 1); l2 = bsp_find(root, 2);
     CHECK_INT(l1->ah, 295);                         /* offered its share */
@@ -430,7 +526,7 @@ static void test_place_actual(void) {
     root->split_h = 0;
     bsp_recalc(root, 0, 0, 1000, 100, 10);
     CHECK_INT(root->left->w, 495);
-    BspActual narrow[] = { {1, 480, 100}, {2, 1000, 100} };   /* left is 15 short */
+    BspActual narrow[] = { ACT(1, 480, 100), ACT(2, 1000, 100) };   /* left is 15 short */
     bsp_place_actual(root, 0, 0, 1000, 100, 10, narrow, 2);
     l1 = bsp_find(root, 1); l2 = bsp_find(root, 2);
     CHECK_INT(l1->aw, 495);                         /* offered its share */
@@ -445,7 +541,7 @@ static void test_place_actual(void) {
     (root->right->id == 0 ? root->right : root->left)->split_h = 1;
     bsp_recalc(root, 0, 0, 100, 900, 10);
     /* Every window comes up 6 short of whatever it is offered. */
-    BspActual s3[] = { {1, 100, 439}, {2, 100, 209}, {3, 100, 900} };
+    BspActual s3[] = { ACT(1, 100, 439), ACT(2, 100, 209), ACT(3, 100, 900) };
     bsp_place_actual(root, 0, 0, 100, 900, 10, s3, 3);
     BspNode *w3[8]; int n3 = 0;
     bsp_collect_leaves(root, w3, &n3, 8);
@@ -458,7 +554,7 @@ static void test_place_actual(void) {
     root = tree_of(2);
     root->split_h = 1;
     bsp_recalc(root, 0, 0, 100, 600, 10);
-    BspActual greedy[] = { {1, 100, 5000}, {2, 100, 100} };
+    BspActual greedy[] = { ACT(1, 100, 5000), ACT(2, 100, 100) };
     bsp_place_actual(root, 0, 0, 100, 600, 10, greedy, 2);
     l2 = bsp_find(root, 2);
     CHECK(l2->ay >= 0);
@@ -481,7 +577,7 @@ static void test_place_actual(void) {
     CASE("the final leftover is split between the two edges, not dumped at the end");
     root = tree_of(1);
     bsp_recalc(root, 0, 0, 100, 600, 10);
-    BspActual lone[] = { {1, 100, 560} };   /* client 40 short of the area */
+    BspActual lone[] = { ACT(1, 100, 560) };   /* client 40 short of the area */
     bsp_place_actual(root, 0, 0, 100, 600, 10, lone, 1);
     CHECK_INT(root->ay, 20);                /* 40 / 2 above, 40 / 2 below */
     CHECK_INT(600 - (root->ay + 560), 20);  /* the two edges match */
@@ -490,7 +586,7 @@ static void test_place_actual(void) {
     CASE("an odd leftover never pushes the layout out of its area");
     root = tree_of(1);
     bsp_recalc(root, 0, 0, 100, 600, 10);
-    BspActual odd[] = { {1, 100, 599} };
+    BspActual odd[] = { ACT(1, 100, 599) };
     bsp_place_actual(root, 0, 0, 100, 600, 10, odd, 1);
     CHECK_INT(root->ay, 0);                 /* half of 1 rounds down to 0 */
     bsp_free(root);
@@ -498,7 +594,7 @@ static void test_place_actual(void) {
     CASE("a client that fills its area is not moved");
     root = tree_of(1);
     bsp_recalc(root, 0, 0, 100, 600, 10);
-    BspActual full[] = { {1, 100, 600} };
+    BspActual full[] = { ACT(1, 100, 600) };
     bsp_place_actual(root, 0, 0, 100, 600, 10, full, 1);
     CHECK_INT(root->ay, 0);
     bsp_free(root);
@@ -507,7 +603,7 @@ static void test_place_actual(void) {
     root = tree_of(2);
     root->split_h = 1;
     bsp_recalc(root, 40, 70, 100, 600, 10);
-    BspActual off[] = { {1, 100, 289}, {2, 100, 295} };
+    BspActual off[] = { ACT(1, 100, 289), ACT(2, 100, 295) };
     bsp_place_actual(root, 40, 70, 100, 600, 10, off, 2);
     CHECK_INT(root->left->ax, 40);
     CHECK_INT(root->left->ay, 73);              /* origin + half the leftover */
@@ -524,8 +620,11 @@ int main(void) {
     test_recalc();
     test_collect_leaves();
     test_swap();
-    test_find_border();
+    test_leaf_at();
+    test_edge_node();
+    test_insert_at();
     test_contains();
     test_place_actual();
+    test_min_size();
     return t_report("bsp");
 }

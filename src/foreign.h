@@ -19,6 +19,7 @@
 
 struct FwmServer;
 struct FwmView;
+struct wlr_output;
 
 /* wlr-foreign-toplevel-management-v1: publishes the window list so external
  * panels can show a taskbar (waybar's wlr/taskbar) and window switchers can
@@ -36,5 +37,17 @@ void foreign_view_unmap(struct FwmView *view);
 void foreign_view_title_changed(struct FwmView *view);
 void foreign_view_set_activated(struct FwmView *view, bool activated);
 void foreign_view_set_fullscreen(struct FwmView *view, bool fullscreen);
+/* Push both size states at once, read back off the window rather than passed
+ * in: fake fullscreen is published as maximised, real fullscreen as
+ * fullscreen. Call after anything that changes either. */
+void foreign_view_sync_fullscreen(struct FwmView *view);
+/* Publish which monitor this window is on — the one showing its desktop, or
+ * none at all while nobody is showing it. Cheap, and called every tick: a
+ * window changes desktop by being thrown across the seam, with no event to
+ * hang this off. */
+void foreign_view_sync_output(struct FwmView *view);
+/* A monitor is being destroyed: send the leave while it is still there to name
+ * and drop every cached pointer to it. */
+void foreign_output_gone(struct FwmServer *server, struct wlr_output *output);
 
 #endif /* FWM_FOREIGN_H */

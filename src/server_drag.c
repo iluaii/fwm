@@ -96,6 +96,13 @@
  * meaning anything. See the dead-zone note in the motion handler. */
 #define TWIST_DEAD_ZONE 28.0
 
+/* How far the hand must travel before a tiled window is taken out of the
+ * layout. Without it, a click that happens to carry the move chord would tear
+ * the window out and put it straight back — possibly on the other side of its
+ * neighbour, since where it lands is read from the cursor. The layout is not
+ * something to rearrange by accident. */
+#define TILE_TEAR_PX 12.0
+
 /* Winding a spinning window up by stirring the mouse in circles (see the drag
  * handler).
  *
@@ -223,6 +230,71 @@ void server_drag_follow_camera(FwmServer *server) {
     drag_place(server, server->cursor->x, server->cursor->y);
 }
 
+/* Take a tiled window out of the layout so it can be carried.
+ *
+ * The slot closes over the hole immediately — that is what makes this feel like
+ * picking a window up rather than dragging a placeholder around — and the
+ * window becomes an ordinary free one, which is all the drag needs it to be:
+ * every other part of carrying a window (the camera following the hand to the
+ * screen edge, the desktop it lands on, the throw at the end) already works on
+ * free windows and is untouched by this.
+ *
+ * It goes back to whatever size it had before the desktop was tiled, held so
+ * the hand keeps the same grip on it: shrinking a full-height tile under a
+ * cursor that stays where it was would otherwise leave the window hanging off
+ * a corner it was not picked up by. */
+static void tile_tear_out(FwmServer *server, FwmView *view, PhysicsBody *pb,
+                          double wx, double wy) {
+    int d = pb->desktop_id;
+
+    bsp_remove(&server->bsp_roots[d], view->id);
+    pb->tiled = 0;
+    pb->vx = 0; pb->vy = 0; pb->flying = 0;
+    view->tile_anim = 0;
+
+    double fx = view->width  > 0 ? (wx - view->x) / view->width  : 0.5;
+    double fy = view->height > 0 ? (wy - view->y) / view->height : 0.5;
+
+    if (pb->tiling_saved && pb->tile_sav_w > 0 && pb->tile_sav_h > 0) {
+        pb->width  = view->width  = pb->tile_sav_w;
+        pb->height = view->height = pb->tile_sav_h;
+        view_set_size(view, view->width, view->height);
+    }
+
+    pb->x = wx - fx * view->width;
+    pb->y = wy - fy * view->height;
+    view->x = (int)lround(pb->x);
+    view->y = (int)lround(pb->y);
+    if (view->scene_tree)
+        wlr_scene_node_set_position(&view->scene_tree->node, view->x, view->y);
+    view_sync_position(view);
+
+    /* The desktop it LEFT, laid out again without it. */
+    server_apply_tiling(server, d);
+}
+
+/* Put a carried window down on a tiling desktop: beside the window it was
+ * dropped on, on the side of that window the cursor is nearest to. Dropped on
+ * the gaps, or on an empty desktop, it simply joins the layout wherever
+ * bsp_insert would have put it. */
+static void tile_drop(FwmServer *server, FwmView *view, int d, double wx, double wy) {
+    BspNode *leaf = bsp_leaf_at(server->bsp_roots[d], wx, wy);
+    if (leaf && leaf->aw > 0 && leaf->ah > 0) {
+        /* Which edge of the target the cursor is nearest, measured as a
+         * fraction of the slot so a tall thin window is judged by its own
+         * shape rather than by pixels. */
+        double fx = (wx - leaf->ax) / leaf->aw - 0.5;
+        double fy = (wy - leaf->ay) / leaf->ah - 0.5;
+        BspSide side = fabs(fx) >= fabs(fy)
+            ? (fx < 0 ? BSP_SIDE_LEFT : BSP_SIDE_RIGHT)
+            : (fy < 0 ? BSP_SIDE_UP   : BSP_SIDE_DOWN);
+        bsp_insert_at(&server->bsp_roots[d], leaf->id, view->id, side);
+    } else {
+        bsp_insert(&server->bsp_roots[d], 0, view->id);
+    }
+    server_apply_tiling(server, d);
+}
+
 /* Motion while a gesture is held. False when there is none, and the caller
  * then does the ordinary hover-and-focus work. */
 bool server_drag_motion(FwmServer *server, double lx, double ly,
@@ -233,6 +305,37 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
         FwmView *view = server->interactive.view;
         if (!view) return true;   /* client exited mid-drag; see the resize arm */
         PhysicsBody *db = physics_find_body(&server->physics, view->id);
+
+        /* Still deciding whether this is a drag at all. Under the threshold the
+         * window stays where the layout put it — and the drag is re-seeded from
+         * HERE when it does leave, because the window has just changed size and
+         * moved under the hand, and the start it was given at the press
+         * describes a window that no longer exists. */
+        if (server->interactive.tile_grab) {
+            double dx = lx - server->interactive.start_x;
+            double dy = ly - server->interactive.start_y;
+            if (dx * dx + dy * dy < TILE_TEAR_PX * TILE_TEAR_PX) return true;
+
+            double wx, wy;
+            if (!db || !server_screen_to_world(server, lx, ly, &wx, &wy)) return true;
+            tile_tear_out(server, view, db, wx, wy);
+            server->interactive.tile_grab = 0;
+            server->interactive.start_x = lx;
+            server->interactive.start_y = ly;
+            server->interactive.view_start_x = view->x;
+            server->interactive.view_start_y = view->y;
+            server->interactive.view_start_width = view->width;
+            server->interactive.view_start_height = view->height;
+            server->interactive.cam_have = 0;
+            server->interactive.cam_output = NULL;
+            /* Where the hand is on the window it is now holding, for the swing.
+             * A tile cannot have been spinning, so its frame is unrotated. */
+            server->interactive.grab_lx = wx - (view->x + view->width  / 2.0);
+            server->interactive.grab_ly = wy - (view->y + view->height / 2.0);
+            server->interactive.pivot_have = 0;
+            view_jelly_begin(view, server->config.effects.jelly,
+                             wx - view->x, wy - view->y);
+        }
 
         drag_place(server, lx, ly);
 
@@ -409,34 +512,46 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
         view_set_size(view, view->width, view->height);
         physics_sync_body(&server->physics, view->id, view->x, view->y, view->width, view->height, server->screen_width);
     } else if (server->interactive.action == FWM_ACTION_BSP_RESIZE) {
-        BspNode *n = server->interactive.bsp_node;
         int d = server->interactive.bsp_desktop;
-        /* The border is a pointer into a tree that belongs to the layout, not
+        BspNode *root = (d >= 0 && d < FWM_DESKTOPS) ? server->bsp_roots[d] : NULL;
+        /* The dividers are pointers into a tree that belongs to the layout, not
          * to the drag: a window closing frees the node under the hand, and
          * toggling the desktop out of tiling frees the whole tree. Both are a
-         * keypress or a client exit away while a border is held, and the drag
-         * used to write the new ratio into that freed memory. Ask the tree
-         * whether the node is still in it, every event, and let go if not. */
-        if (d < 0 || d >= FWM_DESKTOPS || !bsp_contains(server->bsp_roots[d], n)) {
+         * keypress or a client exit away while one is held, and the drag used to
+         * write the new ratio into that freed memory. Ask the tree whether each
+         * node is still in it, every event, and let that axis go if not. */
+        if (!bsp_contains(root, server->interactive.bsp_node))
             server->interactive.bsp_node = NULL;
+        if (!bsp_contains(root, server->interactive.bsp_node_v))
+            server->interactive.bsp_node_v = NULL;
+        if (!server->interactive.bsp_node && !server->interactive.bsp_node_v) {
             server->interactive.action = FWM_ACTION_NONE;
             return true;
         }
-        /* A split with no extent yet — the layout has not been applied since
-         * the tree changed — has no distance to measure the drag against. */
-        if (n->w <= 0 || n->h <= 0) return true;
 
-        float delta;
-        if (!n->split_h) {
-            delta = (float)(lx - server->interactive.start_x) / n->w;
-        } else {
-            delta = (float)(ly - server->interactive.start_y) / n->h;
+        /* Measured from where the drag STARTED, not from the last event: a
+         * ratio that stops at its limit must not lose the travel that took it
+         * there, or pulling back would leave the divider behind the hand by
+         * however far it was pushed past the end. */
+        int gap = server->config.tiling.gaps_in;
+        BspNode *hn = server->interactive.bsp_node;
+        if (hn && hn->aw > gap + 1) {
+            float lo, hi;
+            server_tile_ratio_limits(server, d, hn, &lo, &hi);
+            float r = server->interactive.bsp_start_ratio
+                    + (float)(lx - server->interactive.start_x) / (float)(hn->aw - gap);
+            hn->ratio = r < lo ? lo : (r > hi ? hi : r);
         }
-        n->ratio = server->interactive.bsp_start_ratio + delta;
-        if (n->ratio < 0.1f) n->ratio = 0.1f;
-        if (n->ratio > 0.9f) n->ratio = 0.9f;
+        BspNode *vn = server->interactive.bsp_node_v;
+        if (vn && vn->ah > gap + 1) {
+            float lo, hi;
+            server_tile_ratio_limits(server, d, vn, &lo, &hi);
+            float r = server->interactive.bsp_start_ratio_v
+                    + (float)(ly - server->interactive.start_y) / (float)(vn->ah - gap);
+            vn->ratio = r < lo ? lo : (r > hi ? hi : r);
+        }
 
-        /* The desktop the border belongs to, which on a second monitor is not
+        /* The desktop the dividers belong to, which on a second monitor is not
          * the one the hand happens to be over. */
         server_apply_tiling(server, d);
     } else if (server->interactive.action == FWM_ACTION_TWIST) {
@@ -594,15 +709,42 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
                     }
                 } else if (strcmp(verb, FWM_MOUSE_RESIZE) == 0) {
                     if (tiling) {
+                        /* Resize by the CORNER the hand is nearest, from
+                         * anywhere inside the window — the same grab a floating
+                         * window gets, and the same one Hyprland gives a tile.
+                         *
+                         * It replaces hunting for the seam between two windows.
+                         * That was hard to hit and, worse, ambiguous: the search
+                         * ran from the root down and took the first divider
+                         * within reach, so an outer split passing anywhere near
+                         * the window's edge won over the one actually under the
+                         * cursor, and the wrong pair of windows moved. */
                         int d = pb ? pb->desktop_id : 0;
-                        BspNode *node = bsp_find_border(server->bsp_roots[d], wx, wy, 40);
-                        if (node) {
-                            server->interactive.action = FWM_ACTION_BSP_RESIZE;
-                            server->interactive.bsp_node = node;
-                            server->interactive.bsp_desktop = d;
-                            server->interactive.bsp_start_ratio = node->ratio;
-                            server->interactive.start_x = lx;
-                            server->interactive.start_y = ly;
+                        BspNode *leaf = bsp_leaf_at(server->bsp_roots[d], wx, wy);
+                        if (leaf) {
+                            int right = wx >= leaf->ax + leaf->aw / 2.0;
+                            int below = wy >= leaf->ay + leaf->ah / 2.0;
+                            /* The divider along the chosen edge, or the one on
+                             * the far side when this edge is the screen's: a
+                             * window in the corner of the layout still has to be
+                             * resizable, and it has only one divider to do it
+                             * with. Moving a divider always means "this way is
+                             * bigger", whichever side of it the window is on, so
+                             * neither case needs a sign of its own. */
+                            BspNode *hn = bsp_edge_node(leaf, 0, right);
+                            if (!hn) hn = bsp_edge_node(leaf, 0, !right);
+                            BspNode *vn = bsp_edge_node(leaf, 1, below);
+                            if (!vn) vn = bsp_edge_node(leaf, 1, !below);
+                            if (hn || vn) {
+                                server->interactive.action = FWM_ACTION_BSP_RESIZE;
+                                server->interactive.bsp_node = hn;
+                                server->interactive.bsp_node_v = vn;
+                                server->interactive.bsp_desktop = d;
+                                server->interactive.bsp_start_ratio = hn ? hn->ratio : 0.5f;
+                                server->interactive.bsp_start_ratio_v = vn ? vn->ratio : 0.5f;
+                                server->interactive.start_x = lx;
+                                server->interactive.start_y = ly;
+                            }
                         }
                     } else {
                         server->interactive.action = FWM_ACTION_RESIZE;
@@ -615,7 +757,18 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
                         server->interactive.view_start_height = view->height;
                     }
                 } else if (is_move || is_move_nc) {
+                    /* A tiled window is picked UP: it leaves the layout and
+                     * becomes a free window in the hand, carried by the ordinary
+                     * move below. Not one that owns the whole screen or is
+                     * nailed down — those two are not the layout's to give away.
+                     *
+                     * The window does not actually leave until the hand has
+                     * moved (server_drag_motion); all that is set up here is the
+                     * same drag it would get anywhere else. */
+                    int held_tile = tiling && pb && !pb->fullscreen && !pb->pinned;
+                    if (held_tile) tiling = 0;
                     if (!tiling) {
+                        server->interactive.tile_grab = held_tile;
                         server->interactive.action = FWM_ACTION_MOVE;
                         server->interactive.view = view;
                         server->interactive.start_x = lx;
@@ -678,13 +831,12 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
                          * frame the lattice works in. (Not interactive.grab_l*
                          * above: that one is measured from the CENTRE and
                          * un-rotated, for the pendulum a spinning window hangs
-                         * from.) A tiled window does not move under the drag at
-                         * all, so there would be nothing to lag behind. */
-                        if (!tiling) {
+                         * from.) A tile that has not been torn out yet does not
+                         * move under the hand, so there is nothing for the sheet
+                         * to lag behind until it does. */
+                        if (!held_tile)
                             view_jelly_begin(view, server->config.effects.jelly,
-                                             wx - view->x,
-                                             wy - view->y);
-                        }
+                                             wx - view->x, wy - view->y);
                     }
                 }
             }
@@ -709,7 +861,18 @@ void server_drag_release(FwmServer *server, double lx, double ly) {
                 PhysicsBody *pb = physics_find_body(&server->physics, view->id);
                 if (pb) {
                     if (server->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
-                        server_apply_tiling(server, pb->desktop_id);
+                        /* Landed on a tiling desktop: join the layout where it
+                         * was put down. Already in the tree means the drag never
+                         * took it out (fullscreen, pinned), and then there is
+                         * nothing to place — only the layout to restore. */
+                        int d = pb->desktop_id;
+                        double wx, wy;
+                        if (!bsp_find(server->bsp_roots[d], view->id)
+                            && server_screen_to_world(server, lx, ly, &wx, &wy)) {
+                            tile_drop(server, view, d, wx, wy);
+                        } else {
+                            server_apply_tiling(server, d);
+                        }
                     } else {
                         physics_push_overlapping(&server->physics, view->id, 280.0);
                         physics_throw_body(&server->physics, view->id, server->interactive.vx, server->interactive.vy);
@@ -735,25 +898,18 @@ void server_drag_release(FwmServer *server, double lx, double ly) {
             if (src_view) {
                 PhysicsBody *src_pb = physics_find_body(&server->physics, src_view->id);
                 if (src_pb) {
+                    /* The window under the cursor, in the world the layout is
+                     * measured in. Tested against where the windows actually
+                     * are: the slot grid this used to compare against is not
+                     * where a client that committed a smaller size ended up. */
                     int d = src_pb->desktop_id;
-                    BspNode *leaves[MAX_WINDOWS];
-                    int count = 0;
-                    bsp_collect_leaves(server->bsp_roots[d], leaves, &count, MAX_WINDOWS);
-                    
-                    uint32_t target_id = 0;
-                    for (int i = 0; i < count; i++) {
-                        BspNode *n = leaves[i];
-                        double sx, sy;
-                        if (!server_world_to_screen(server, n->x, n->y, &sx, &sy)) continue;
-                        if (server->interactive.cur_x >= sx && server->interactive.cur_x <= sx + n->w &&
-                            server->interactive.cur_y >= sy && server->interactive.cur_y <= sy + n->h) {
-                            target_id = n->id;
-                            break;
-                        }
-                    }
-                    
-                    if (target_id != 0 && target_id != src_view->id) {
-                        bsp_swap(server->bsp_roots[d], src_view->id, target_id);
+                    double wx, wy;
+                    BspNode *target = server_screen_to_world(server,
+                            server->interactive.cur_x, server->interactive.cur_y, &wx, &wy)
+                        ? bsp_leaf_at(server->bsp_roots[d], wx, wy) : NULL;
+
+                    if (target && target->id != src_view->id) {
+                        bsp_swap(server->bsp_roots[d], src_view->id, target->id);
                         server_apply_tiling(server, d);
                     }
                 }
@@ -764,6 +920,21 @@ void server_drag_release(FwmServer *server, double lx, double ly) {
         // client's idea of its root coordinates matches reality again.
         if (server->interactive.view) view_sync_position(server->interactive.view);
 
+        /* A divider that has just been let go: the desktop is laid out one more
+         * time below, after the action is cleared, so it settles against the
+         * sizes the clients really took. While the hand was on it the layout was
+         * following the slots instead — see server_align_tiles. */
+        int settle_d = server->interactive.action == FWM_ACTION_BSP_RESIZE
+                     ? server->interactive.bsp_desktop : -1;
+
         server->interactive.action = FWM_ACTION_NONE;
         server->interactive.view = NULL;
+        server->interactive.tile_grab = 0;
+        /* Nothing may keep a pointer into the layout's tree past the gesture
+         * that borrowed it: the next thing to touch the tree is free to free
+         * these nodes, and the check that guards them is in the drag. */
+        server->interactive.bsp_node = NULL;
+        server->interactive.bsp_node_v = NULL;
+
+        if (settle_d >= 0) server_apply_tiling(server, settle_d);
 }

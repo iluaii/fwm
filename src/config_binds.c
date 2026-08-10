@@ -88,6 +88,12 @@ static const struct { const char *bind; const char *action; } default_binds[] = 
     { "super+8",              "view:7"           },
     { "super+9",              "view:8"           },
     { "super+0",              "view:9"           },
+    /* One desktop over, without having to know which number it is. `next` and
+     * `prev` are steps rather than destinations, so with the strip closed into
+     * a ring they step off desktop 9 onto 0 and back — the same wrap super+h
+     * and super+l pan through. */
+    { "super+ctrl+Left",      "view:prev"        },
+    { "super+ctrl+Right",     "view:next"        },
 };
 
 void apply_default_binds(FwmConfig *cfg) {

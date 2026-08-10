@@ -683,7 +683,11 @@ static void ipc_handle_command(struct IpcClient *client, const char *line, struc
             strftime(built, sizeof(built), "%Y-%m-%d %H:%M:%S", &tm);
         }
 
-        buf_puts(out, "{\"ok\":true,\"version\":\"fwm ipc 1\",\"binary\":");
+        /* `fwm` is the release; `version` stays the IPC's own, which scripts
+         * branch on and which moves on its own schedule. Both, because "which
+         * fwm is this" and "what may I ask it" are different questions. */
+        buf_puts(out, "{\"ok\":true,\"fwm\":\"" FWM_VERSION
+                      "\",\"version\":\"fwm ipc 1\",\"binary\":");
         buf_json_string(out, n > 0 ? exe : "?");
         buf_puts(out, ",\"built\":");
         buf_json_string(out, built);

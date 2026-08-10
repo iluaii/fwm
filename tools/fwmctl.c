@@ -69,7 +69,7 @@ int main(int argc, char **argv) {
             "  set <name> <val>   change one option for this session only\n"
             "  dispatch <action>  run a keybind action (same names as config.toml)\n"
             "  reload             reload the config, discarding every `set`\n"
-            "  version            IPC protocol version\n"
+            "  version            the running fwm, its binary and the IPC version\n"
             "  subscribe [events] stream events as JSON lines until killed\n"
             "\n"
             "`set` never writes config.toml: the file stays the source of truth,\n"

@@ -30,6 +30,15 @@ tick_rate             = 60.0
 # The default is the built-in trio — weightless, a lick of it, earth.
 #gravity_steps        = [0.0, 0.15, 1.0]
 
+# Make an external bar a solid object. A layer-shell panel that reserved space
+# for itself (waybar, quickshell, a dock) then holds the floor up: a thrown
+# window lands ON the bar instead of sliding away underneath it, and a bar
+# along the top of the screen is a ceiling. Off by default, and the windows go
+# under the bar exactly as they always have.
+#
+# fwm's own tray is not affected — it floats above the windows and always has.
+#solid_bars           = true
+
 # Breakable windows. A single hard enough collision destroys a window; damage
 # is never accumulated, so anything that survives a hit is unharmed by it.
 #
@@ -131,6 +140,16 @@ fade_in_ms   = 260.0
 wallpaper_fade_ms = 420.0
 # Island fill opacity (0..1), separate for the tray bar and the app launcher.
 tray_opacity     = 0.92
+# Let an external bar REPLACE the status strip instead of stacking with it. On a
+# monitor where a layer-shell panel (waybar, quickshell, a dock) reserved space
+# along the top, fwm's strip hides itself and stops reserving its own band.
+#
+# Off by default: a client asking for space must not be able to take fwm's own
+# chrome off the screen by itself. Running a bar instead of the strip is your
+# decision, and this is where you make it. Per monitor — a second screen with no
+# bar keeps its strip. Only an exclusive zone counts; a panel that floats over
+# the top without reserving space changes nothing.
+#tray_yield       = true
 launcher_opacity = 0.92
 # Launcher icon theme. "" = auto: gtk-3.0 settings.ini, then hicolor.
 icon_theme = ""
@@ -511,6 +530,11 @@ tap = true
 "super+8"            = "view:7"
 "super+9"            = "view:8"
 "super+0"            = "view:9"
+# One desktop over, without naming it. These are steps, not destinations: with
+# wrap = true they carry on off desktop 9 onto 0 and back the other way, the
+# same join super+h and super+l pan through.
+"super+ctrl+Left"    = "view:prev"
+"super+ctrl+Right"   = "view:next"
 
 # Modes (submaps): a second keymap you step into, so bare keys can mean
 # something. Press the `enter` key and the mode owns the keyboard — its binds
@@ -545,12 +569,21 @@ tap = true
 #
 # Drag verbs:
 #   move            drag the window; let go and it is thrown at the speed
-#                   your hand had. Inert on a tiling desktop.
+#                   your hand had. On a tiling desktop the window LEAVES the
+#                   layout as soon as the hand moves — the slot closes behind
+#                   it — and is put back wherever it is dropped: beside the
+#                   window it is let go over, on whichever side of that window
+#                   the cursor is nearest, or onto another desktop entirely by
+#                   carrying it into the edge of the screen. Dropped on a
+#                   physics desktop it simply stays a free window.
 #   move_nocollide  the same, but shoving nothing on the way. On a tiling
 #                   desktop this drags one tile onto another to swap them.
 #   swap            swap two tiles, and only that.
 #   resize          drag the bottom-right corner. On a tiling desktop it
-#                   drags the BSP border under the cursor instead.
+#                   resizes the tile from the corner nearest the hand, from
+#                   anywhere inside the window: no aiming at the seam between
+#                   two of them, and both dividers move at once when the window
+#                   has one on each axis.
 #   twist           turn the window with the hand: it follows the angle from
 #                   its own centre to the cursor, winds up as you stir, and
 #                   keeps spinning at whatever rate you let go at. Needs

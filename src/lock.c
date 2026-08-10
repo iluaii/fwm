@@ -89,13 +89,9 @@ void lock_arrange(FwmServer *server) {
 /* Hand the keyboard to a lock surface. Done on every map and on unlock-failure
  * so the password field always has focus. */
 static void lock_focus_surface(FwmServer *server, struct wlr_surface *surface) {
-    struct wlr_keyboard *kbd = wlr_seat_get_keyboard(server->seat);
-    if (kbd) {
-        wlr_seat_keyboard_notify_enter(server->seat, surface,
-            kbd->keycodes, kbd->num_keycodes, &kbd->modifiers);
-    } else {
-        wlr_seat_keyboard_notify_enter(server->seat, surface, NULL, 0, NULL);
-    }
+    /* Without the bind's own key: the lock is usually reached through one, and
+     * a password field that believes `l` is held is not a good start. */
+    server_keyboard_enter(server, surface);
 }
 
 static void lock_surface_handle_map(struct wl_listener *listener, void *data) {

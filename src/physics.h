@@ -122,7 +122,16 @@ typedef struct {
      * every step, like gravity_scale, so toggling the ring reaches a throw
      * already in the air. */
     int wrap;
-    
+
+    /* How far the floor and the ceiling are pulled in from the screen, in px:
+     * the space a layer-shell bar reserved with an exclusive zone ([physics]
+     * solid_bars). 0 and 0 is the plain screen, which is what a world without
+     * bars — or with the setting off — always gets. Set on every step like
+     * wrap, so a bar appearing moves the floor under a window already resting
+     * on it and the window is pushed up rather than left buried. */
+    int inset_top, inset_bottom;
+
+
     /* Configurable physics parameters */
     double friction;
     double mass_density;

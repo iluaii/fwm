@@ -23,6 +23,7 @@
 #include "layer.h"
 #include "lock.h"
 #include "foreign.h"
+#include "workspace.h"
 #include "ipc.h"
 #include "session.h"
 #include <signal.h>
@@ -371,6 +372,12 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
     FwmOutput *output = wl_container_of(listener, output, destroy);
     /* Bars on this monitor go with it; they hold a pointer to it. */
     layer_output_gone(output->server, output->wlr_output);
+    /* And the panels are told the windows left this screen while it still
+     * exists to name — after this the pointer they cache is freed. */
+    foreign_output_gone(output->server, output->wlr_output);
+    /* This monitor's ext-workspace group is this monitor: it goes too, and the
+     * desktop it was holding becomes one nobody is showing. */
+    workspace_output_gone(output->server, output);
     /* So does the desktop strip, for the same reason: it is drawn on one
      * monitor and reads that monitor's camera and box every tick. Only a
      * change of SIZE tore it down before, so unplugging a second screen of
@@ -951,6 +958,15 @@ int server_output_set_enabled(FwmServer *server, FwmOutput *out, int on) {
  * matters more here than anywhere else in fwm — the failure mode of getting
  * this wrong is a black screen with no way left to type the undo. */
 
+FwmOutput *server_output_for(FwmServer *server, struct wlr_output *wlr_output) {
+    if (!wlr_output) return NULL;
+    FwmOutput *o;
+    wl_list_for_each(o, &server->outputs, link) {
+        if (o->wlr_output == wlr_output) return o;
+    }
+    return NULL;
+}
+
 FwmOutput *server_output_find(FwmServer *server, const char *name) {
     if (!name) return NULL;
     FwmOutput *o;
@@ -1223,6 +1239,10 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     wl_signal_add(&wlr_output->events.frame, &output->frame);
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
     wl_list_insert(&server->outputs, &output->link);
+
+    /* Its ext-workspace group, before the layout hands it a desktop: the next
+     * sync has to have somewhere to put that desktop. */
+    workspace_output_added(server, output);
 
     /* In the list BEFORE it joins the layout: adding fires the layout's change
      * event, and the handler walks server->outputs to find the primary. The

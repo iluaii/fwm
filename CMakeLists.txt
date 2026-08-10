@@ -1,7 +1,17 @@
 cmake_minimum_required(VERSION 3.10)
-project(fwm C)
+
+# The version lives in one file at the root, not in this one, so that everything
+# which needs it reads the same characters: the build, `fwm --version`, the IPC,
+# and packaging that has no business parsing CMake (a Nix derivation asked for
+# exactly this — see PR #19). Bumping a release means editing VERSION and
+# tagging v<that>.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FWM_VERSION)
+string(STRIP "${FWM_VERSION}" FWM_VERSION)
+
+project(fwm VERSION ${FWM_VERSION} LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
+add_compile_definitions(FWM_VERSION="${FWM_VERSION}")
 
 # A compositor cannot report its own memory corruption: it IS the display
 # server, so a smashed stack takes the whole session down with no way to see
@@ -119,6 +129,8 @@ set(SOURCES
     src/layer.c
     src/lock.c
     src/foreign.c
+    src/workspace.c
+    src/shortcuts.c
     src/group.c
     src/ipc.c
     src/ipc_events.c
@@ -171,6 +183,31 @@ foreach(proto ${WLR_PROTOCOLS})
         DEPENDS ${CMAKE_SOURCE_DIR}/protocols/${proto}.xml
         COMMENT "Generating ${proto} protocol header")
     list(APPEND PROTOCOL_HEADERS ${header})
+endforeach()
+
+# Protocols wlroots does NOT implement, so fwm implements the interfaces itself
+# (see src/shortcuts.c). These need the glue code as well as the header — the
+# loop above only produces headers because wlroots supplies the code for its
+# own protocols.
+set(OWN_PROTOCOLS
+    hyprland-global-shortcuts-v1)
+
+foreach(proto ${OWN_PROTOCOLS})
+    set(header ${CMAKE_BINARY_DIR}/${proto}-protocol.h)
+    set(code ${CMAKE_BINARY_DIR}/${proto}-protocol.c)
+    add_custom_command(
+        OUTPUT ${header}
+        COMMAND ${WAYLAND_SCANNER} server-header
+                ${CMAKE_SOURCE_DIR}/protocols/${proto}.xml ${header}
+        DEPENDS ${CMAKE_SOURCE_DIR}/protocols/${proto}.xml
+        COMMENT "Generating ${proto} protocol header")
+    add_custom_command(
+        OUTPUT ${code}
+        COMMAND ${WAYLAND_SCANNER} private-code
+                ${CMAKE_SOURCE_DIR}/protocols/${proto}.xml ${code}
+        DEPENDS ${CMAKE_SOURCE_DIR}/protocols/${proto}.xml
+        COMMENT "Generating ${proto} protocol code")
+    list(APPEND PROTOCOL_HEADERS ${header} ${code})
 endforeach()
 
 add_executable(fwm ${SOURCES} ${PROTOCOL_HEADERS})

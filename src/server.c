@@ -152,12 +152,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
     if (view) {
         if (view->scene_tree) wlr_scene_node_raise_to_top(&view->scene_tree->node);
         
-        struct wlr_keyboard *kbd = wlr_seat_get_keyboard(server->seat);
-        struct wlr_surface *surface = view_surface(view);
-        if (kbd && surface) {
-            wlr_seat_keyboard_notify_enter(server->seat, surface,
-                kbd->keycodes, kbd->num_keycodes, &kbd->modifiers);
-        }
+        server_keyboard_enter(server, view_surface(view));
         view_set_activated(view, true);
         foreign_view_set_activated(view, true);
         
@@ -265,28 +260,22 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
          * "The output" is the monitor the window is standing on, not the
          * world: on two monitors a fullscreen video must not straddle the
          * bezel. A single-output setup gets the box it always did. */
-        /* A desktop is one screen, so fullscreen is that screen. The monitor
-         * showing this window's desktop is the one whose work area applies;
-         * with nobody showing it, the desktop's own size is the answer. */
-        FwmOutput *mon = server_output_showing(server, d);
-        struct wlr_box screen = { 0, 0, server->screen_width, server->screen_height };
-        struct wlr_box work = screen;
-        if (mon && mon->usable_area.width > 0 && mon->usable_area.height > 0) {
-            /* usable_area is in layout coordinates; the desktop's own frame
-             * starts at 0,0. */
-            work = (struct wlr_box){
-                mon->usable_area.x - mon->box.x, mon->usable_area.y - mon->box.y,
-                mon->usable_area.width, mon->usable_area.height,
-            };
-            if (!wlr_box_intersection(&work, &work, &screen)) work = screen;
+        /* A desktop is one screen, so fullscreen is that screen. */
+        if (real) {
+            view->x = d * server->screen_width;
+            view->y = 0;
+            view->width = server->screen_width;
+            view->height = server->screen_height;
+        } else {
+            /* Fake fullscreen is "as large as a window is allowed to be", which
+             * is the same question the tiling layout answers — so it is the same
+             * function, gaps and all. A window filling the screen this way sits
+             * where a single tile would, rather than butting against the edges
+             * while every tiled window keeps its margin. */
+            server_work_area(server, d, &view->x, &view->y, &view->width, &view->height);
         }
-        int reserve = server->tray_hidden ? 0 : TRAY_BOTTOM + 12;
-        int top = real ? 0 : (work.y > reserve ? work.y : reserve);
-        view->x = d * server->screen_width + (real ? 0 : work.x);
-        view->y = top;
-        view->width = real ? screen.width : work.width;
-        view->height = screen.height - top;
-        
+
+
         // Keep the physics body in sync with the fullscreen geometry, otherwise
         // physics_tick_cb re-syncs the scene node back to the body's stale
         // position every tick and the window snaps out of fullscreen.
@@ -344,6 +333,10 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
         }
     }
     
+    /* External panels track this window's size state; it just changed by a
+     * bind, a client request or their own button. */
+    foreign_view_sync_fullscreen(view);
+
     server_request_tray_redraw(server);
 }
 

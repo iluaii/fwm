@@ -53,6 +53,7 @@ static const ConfigOption config_option_table[] = {
     { "decor.fade_in_ms",               CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.fade_in_ms),                0.0, 10000.0,    "window open animation, ms" },
     { "decor.wallpaper_fade_ms",        CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.wallpaper_fade_ms),         0.0, 10000.0,    "wallpaper cross-fade, ms" },
     { "decor.tray_opacity",             CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.tray_opacity),              0.0,     1.0,    "tray island fill alpha" },
+    { "decor.tray_yield",               CFG_OPT_INT,    offsetof(FwmConfig, decor.tray_yield),                0.0,     1.0,    "hide the strip on a screen where a bar reserved the top" },
     { "decor.launcher_opacity",         CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.launcher_opacity),          0.0,     1.0,    "launcher island fill alpha" },
     { "decor.tint_strength",            CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.tint_strength),             0.0,     1.0,    "island tint toward the wallpaper hue" },
 

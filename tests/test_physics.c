@@ -220,8 +220,52 @@ static void test_hp_freeze_pins_and_releases(void) {
     physics_destroy(&w);
 }
 
+/* A bar that reserved space is a floor: a window dropped onto it comes to rest
+ * ON TOP, not in the strip the bar occupies. The height is a plain 300, so the
+ * bottom of a settled window is its y plus that. */
+static void test_solid_bars_raise_the_floor(void) {
+    CASE("solid bars");
+    PhysicsWorld w;
+    physics_init(&w);
+    w.gravity_scale = 1.0;
+    w.inset_bottom = 64;              /* a dock along the bottom of the screen */
+
+    PhysicsBody *b = spawn(&w, 400, 100);
+    CHECK_NOT_NULL(b);
+    run(&w, 240);                     /* four seconds: long enough to settle */
+
+    b = physics_find_body(&w, 1);
+    CHECK_NOT_NULL(b);
+    /* Resting on the dock, not standing in it and not through the screen. */
+    CHECK(b->y + 300 <= SH - 64 + 2.0);
+    CHECK(b->y + 300 >= SH - 64 - 8.0);
+    physics_destroy(&w);
+}
+
+/* And a bar along the TOP is a ceiling: a window thrown up bounces off the
+ * underside of it rather than passing behind it. */
+static void test_solid_bars_lower_the_ceiling(void) {
+    CASE("solid bars, ceiling");
+    PhysicsWorld w;
+    physics_init(&w);
+    w.gravity_scale = 0.0;
+    w.inset_top = 48;
+
+    PhysicsBody *b = spawn(&w, 400, 600);
+    CHECK_NOT_NULL(b);
+    physics_throw_body(&w, 1, 0.0, -4000.0);
+    run(&w, 60);
+
+    b = physics_find_body(&w, 1);
+    CHECK_NOT_NULL(b);
+    CHECK(b->y >= 48 - 2.0);          /* never got above the bar */
+    physics_destroy(&w);
+}
+
 int main(void) {
     test_wall_holds_a_line();
+    test_solid_bars_raise_the_floor();
+    test_solid_bars_lower_the_ceiling();
     test_ring_carries_a_throw_round();
     test_ring_carries_a_throw_the_other_way();
     test_ring_crosses_only_when_clear();

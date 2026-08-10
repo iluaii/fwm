@@ -21,7 +21,7 @@ unusable, so they work on a machine with no config at all.
 | `Super+Return` | `terminal` | `$TERMINAL`, else the first emulator installed |
 | `Super+Space` | `launcher` | the application launcher |
 | `Super+Q` | `killclient` | close the focused window |
-| `Super+D` | `fake_fullscreen` | fill the work area, keep the tray |
+| `Super+D` | `fake_fullscreen` | fill the work area, keep the tray and the gaps |
 | `Super+F` | `real_fullscreen` | true fullscreen, tray hidden |
 | `Super+P` | `pin_window` | freeze it: physics stops moving it |
 | `Super+N` | `toggle_nocollide` | other windows pass through it |
@@ -46,6 +46,7 @@ unusable, so they work on a machine with no config at all.
 |---|---|---|
 | `Super+1`…`0` | `view:0`…`view:9` | jump to a desktop |
 | `Super+Shift+1`…`0` | `move_to:0`…`move_to:9` | send the focused window there |
+| `Super+Ctrl+←` / `Super+Ctrl+→` | `view:prev` / `view:next` | one desktop over; wraps round the ring at either end |
 | `Super+H` / `Super+L` | `move_camera:-50` / `move_camera:50` | pan the camera (hold to repeat) |
 | `Super+A` | `expo` | the desktop strip |
 
@@ -80,7 +81,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `spin_window` | give the focused window a spin (experimental) |
 | `spin_all` | ...every window |
 | `calm_all` | zero every velocity |
-| `fake_fullscreen` | fill the work area, keep the tray |
+| `fake_fullscreen` | fill the work area, keep the tray. Sits exactly where a single tile would: same monitor work area, same `[tiling] gaps_out`. |
 | `real_fullscreen` | true fullscreen |
 | `group_toggle`, `group_next`, `group_prev`, `group_add` | tab groups |
 
@@ -137,7 +138,32 @@ action is reported when the config loads rather than doing nothing when pressed.
 |---|---|
 | `spawn:<command>` | run it through a shell, so `spawn:$BROWSER --new-window` works |
 | `mode:<name>` | switch keymaps; `mode:default` returns to the root map |
+| `global:<app_id>:<name>` | hand the key to an external shell — see below |
 | `EXIT` | end the session |
+
+### Giving a key to an external shell
+
+A Wayland client cannot see a key it is not focused for, so an outside launcher
+can never answer `Super+Space` by itself: the compositor has to hand the press
+over. `global:` is that handover, over
+[hyprland-global-shortcuts-v1](https://github.com/hyprwm/hyprland-protocols),
+which Quickshell exposes as its `GlobalShortcut` type.
+
+The client registers a *named* action and says nothing about keys — which keys
+reach it stays fwm's decision:
+
+```qml
+GlobalShortcut { appid: "quickshell"; name: "launcher"; onPressed: /* ... */ }
+```
+
+```toml
+[binds]
+"super+space" = "global:quickshell:launcher"   # instead of "launcher"
+```
+
+Binding the key away from `launcher` is what makes this *replace* fwm's own
+launcher rather than sit beside it. Nothing has registered the name yet — the
+shell is not running — and the key does nothing but say so in the log.
 
 ## Modes (submaps)
 
@@ -174,9 +200,9 @@ depends on the desktop's mode:
 
 | Verb | Physics / floating | Tiling |
 |---|---|---|
-| `move` | drag, and let go while moving to throw | pull the tile out of the layout |
+| `move` | drag, and let go while moving to throw | pull the tile out of the layout and put it down anywhere, including on another desktop |
 | `move_nocollide` | drag it through everything | swap two tiles |
-| `resize` | resize from the nearest corner | drag the BSP border under the cursor |
+| `resize` | resize from the nearest corner | resize the tile from its nearest corner, moving the layout dividers |
 | `swap` | — | swap two tiles |
 | `twist` | turn it about its centre; let go spinning and it keeps spinning | — |
 

@@ -36,6 +36,16 @@ static void handle_request_activate(struct wl_listener *listener, void *data) {
     server_focus_view(view->server, view);
 }
 
+/* fwm has no separate maximised state: FAKE fullscreen already is one — the
+ * window fills the work area, keeps its frame of reference and leaves the tray
+ * and any bar visible. So that is what a panel's maximise button means here,
+ * and real fullscreen is what its fullscreen button means. */
+static void handle_request_maximize(struct wl_listener *listener, void *data) {
+    FwmView *view = wl_container_of(listener, view, ftl_request_maximize);
+    struct wlr_foreign_toplevel_handle_v1_maximized_event *event = data;
+    server_set_fullscreen(view->server, view, event->maximized, false);
+}
+
 static void handle_request_close(struct wl_listener *listener, void *data) {
     FwmView *view = wl_container_of(listener, view, ftl_request_close);
     (void)data;
@@ -70,6 +80,10 @@ void foreign_view_map(FwmView *view) {
     wl_signal_add(&view->ftl->events.request_close, &view->ftl_request_close);
     view->ftl_request_fullscreen.notify = handle_request_fullscreen;
     wl_signal_add(&view->ftl->events.request_fullscreen, &view->ftl_request_fullscreen);
+    view->ftl_request_maximize.notify = handle_request_maximize;
+    wl_signal_add(&view->ftl->events.request_maximize, &view->ftl_request_maximize);
+
+    foreign_view_sync_output(view);
 }
 
 void foreign_view_unmap(FwmView *view) {
@@ -77,8 +91,10 @@ void foreign_view_unmap(FwmView *view) {
     wl_list_remove(&view->ftl_request_activate.link);
     wl_list_remove(&view->ftl_request_close.link);
     wl_list_remove(&view->ftl_request_fullscreen.link);
+    wl_list_remove(&view->ftl_request_maximize.link);
     wlr_foreign_toplevel_handle_v1_destroy(view->ftl);
     view->ftl = NULL;
+    view->ftl_output = NULL;
 }
 
 void foreign_view_title_changed(FwmView *view) {
@@ -97,4 +113,46 @@ void foreign_view_set_activated(FwmView *view, bool activated) {
 void foreign_view_set_fullscreen(FwmView *view, bool fullscreen) {
     if (!view->ftl) return;
     wlr_foreign_toplevel_handle_v1_set_fullscreen(view->ftl, fullscreen);
+}
+
+void foreign_view_sync_fullscreen(FwmView *view) {
+    if (!view->ftl) return;
+    PhysicsBody *b = physics_find_body(&view->server->physics, view->id);
+    bool big = b && b->fullscreen;
+    /* The two are exclusive here: one flag with two meanings, split by which
+     * kind of fullscreen it is (see handle_request_maximize). */
+    wlr_foreign_toplevel_handle_v1_set_fullscreen(view->ftl, big && view->fs_real);
+    wlr_foreign_toplevel_handle_v1_set_maximized(view->ftl, big && !view->fs_real);
+}
+
+/* A window lives on a DESKTOP, and a desktop is shown by at most one monitor —
+ * so the screen a panel should file this window under is whichever monitor is
+ * showing its desktop, and a window on a desktop nobody is showing is on no
+ * screen at all. That last case is the one that matters: without it a taskbar
+ * filtered to its own monitor shows every window in the world. */
+void foreign_view_sync_output(FwmView *view) {
+    if (!view->ftl) return;
+
+    struct wlr_output *want = NULL;
+    PhysicsBody *b = physics_find_body(&view->server->physics, view->id);
+    if (b) {
+        FwmOutput *mon = server_output_showing(view->server, b->desktop_id);
+        if (mon && mon->enabled) want = mon->wlr_output;
+    }
+
+    if (want == view->ftl_output) return;
+    if (view->ftl_output)
+        wlr_foreign_toplevel_handle_v1_output_leave(view->ftl, view->ftl_output);
+    if (want)
+        wlr_foreign_toplevel_handle_v1_output_enter(view->ftl, want);
+    view->ftl_output = want;
+}
+
+void foreign_output_gone(FwmServer *server, struct wlr_output *output) {
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        if (view->ftl_output != output) continue;
+        if (view->ftl) wlr_foreign_toplevel_handle_v1_output_leave(view->ftl, output);
+        view->ftl_output = NULL;
+    }
 }

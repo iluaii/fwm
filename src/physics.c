@@ -69,6 +69,7 @@ struct Engine {
     bool walls_built;
     int wall_w, wall_h;      /* screen dims the walls were built for */
     int wall_wrap;           /* and whether the world was a ring at the time */
+    int wall_top, wall_bottom; /* and the insets bars had reserved */
 
     /* Visualiser bars (physics_set_bars). Shapes are built once at a fixed
      * size and then only ever slid vertically, so a bar changing height costs
@@ -272,6 +273,8 @@ void physics_init(PhysicsWorld *world) {
      * which decides whether the world HAS end walls at all — and a world with no
      * end walls quietly lets windows sail off it. */
     world->wrap = 0;
+    /* And the screen is the whole of it until a bar reserves part of it. */
+    world->inset_top = world->inset_bottom = 0;
     world->impact_count = 0;
 
     // Set system defaults just in case config doesn't overwrite them.
@@ -603,8 +606,12 @@ static b2Filter filter_for_wall(void) {
 }
 
 static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w, int screen_h) {
+    /* The floor and ceiling stand at the edges of the space bars left free,
+     * which is the whole screen unless [physics] solid_bars says otherwise. */
+    int top = world->inset_top, bottom = world->inset_bottom;
     if (eng->walls_built && eng->wall_w == screen_w && eng->wall_h == screen_h
-        && eng->wall_wrap == world->wrap) {
+        && eng->wall_wrap == world->wrap
+        && eng->wall_top == top && eng->wall_bottom == bottom) {
         return;
     }
     if (eng->walls_built) {
@@ -614,15 +621,16 @@ static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w,
     }
 
     double W = 10.0 * screen_w; // full virtual-desktop span
-    double H = screen_h;
+    double T = top;             // ceiling y: 0, or below a bar anchored up there
+    double H = screen_h - bottom; // floor y: the screen, or on top of a bar
     double t = WALL_THICK_PX;
 
-    // {center_x, center_y, half_w, half_h} in px; inner faces flush with [0,W]x[0,H]
+    // {center_x, center_y, half_w, half_h} in px; inner faces flush with [0,W]x[T,H]
     double specs[4][4] = {
-        {-t / 2.0,     H / 2.0,     t / 2.0, H / 2.0 + t}, // left
-        {W + t / 2.0,  H / 2.0,     t / 2.0, H / 2.0 + t}, // right
-        {W / 2.0,     -t / 2.0,     W / 2.0 + t, t / 2.0}, // top
-        {W / 2.0,      H + t / 2.0, W / 2.0 + t, t / 2.0}, // bottom
+        {-t / 2.0,     (T + H) / 2.0, t / 2.0, (H - T) / 2.0 + t}, // left
+        {W + t / 2.0,  (T + H) / 2.0, t / 2.0, (H - T) / 2.0 + t}, // right
+        {W / 2.0,      T - t / 2.0,   W / 2.0 + t, t / 2.0},       // top
+        {W / 2.0,      H + t / 2.0,   W / 2.0 + t, t / 2.0},       // bottom
     };
 
     for (int i = 0; i < 4; i++) {
@@ -654,6 +662,8 @@ static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w,
     eng->wall_w = screen_w;
     eng->wall_h = screen_h;
     eng->wall_wrap = world->wrap;
+    eng->wall_top = top;
+    eng->wall_bottom = bottom;
 }
 
 /* ── visualiser bars ─────────────────────────────────────────────────── */

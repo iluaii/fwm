@@ -33,11 +33,25 @@ typedef struct BspNode {
     int ax, ay, aw, ah;
 } BspNode;
 
-/* The size a window really committed, which need not be the size of its slot. */
+/* The size a window really committed, which need not be the size of its slot,
+ * and the smallest it has been observed to accept. A client with a minimum size
+ * — Discord will not go under about 940px wide — answers a smaller configure by
+ * committing its minimum anyway, and the layout has to give it that room rather
+ * than lay the next window out over the top of it. Zero means "no floor known",
+ * which is every window until one refuses. */
 typedef struct {
     uint32_t id;
     int w, h;
+    int min_w, min_h;
 } BspActual;
+
+/* Which side of an existing window a new one is put down on. */
+typedef enum {
+    BSP_SIDE_LEFT,
+    BSP_SIDE_RIGHT,
+    BSP_SIDE_UP,
+    BSP_SIDE_DOWN,
+} BspSide;
 
 typedef struct {
     BspNode *node;
@@ -52,7 +66,28 @@ void bsp_recalc(BspNode *node, int x, int y, int w, int h, int gap);
 /* Collects at most `max` leaves into `out`; excess leaves are dropped. */
 void bsp_collect_leaves(BspNode *node, BspNode **out, int *count, int max);
 void bsp_swap(BspNode *root, uint32_t a, uint32_t b);
-BspNode *bsp_find_border(BspNode *root, int x, int y, int threshold);
+/* Put `new_id` down beside `target`, on the named side, splitting that window's
+ * slot in two. Unlike bsp_insert — which splits the focused window along
+ * whichever axis is longer — the caller chooses both the axis and the order,
+ * which is what lets a window be dropped onto a particular edge of another.
+ * Falls back to bsp_insert when `target` is not in the tree. */
+void bsp_insert_at(BspNode **root, uint32_t target, uint32_t new_id, BspSide side);
+/* The window at a point, hit-tested against where the windows actually ARE
+ * (ax/ay/aw/ah) rather than against the slot grid. NULL in the gaps between
+ * them and outside the layout. */
+BspNode *bsp_leaf_at(BspNode *root, int x, int y);
+/* The split that owns one edge of a leaf's slot: the nearest ancestor dividing
+ * along `split_h` (0 vertical line, 1 horizontal line) that has this subtree on
+ * its `left` side when `want_left` is set, on its right when it is not. Which
+ * means: the divider along the leaf's right edge is (0, 1) and the one along its
+ * left edge is (0, 0), bottom is (1, 1) and top is (1, 0). NULL when that edge
+ * of the window is the edge of the screen. */
+BspNode *bsp_edge_node(BspNode *leaf, int split_h, int want_left);
+/* How far a split's ratio may travel before one side is squeezed under the
+ * minimum size of the windows in it. Always returns a usable range: when the
+ * two sides together cannot fit, the floors are ignored rather than crossed. */
+void bsp_ratio_limits(const BspNode *n, int gap, const BspActual *actual,
+                      int n_actual, float *lo, float *hi);
 /* Whether `node` is still part of `root`'s tree — for anything holding a node
  * pointer across events, which the tree does not promise to keep alive. */
 bool bsp_contains(const BspNode *root, const BspNode *node);

@@ -396,8 +396,13 @@ void expo_layout(FwmExpo *e) {
  *
  * The windows are parked off the layout rather than disabled — the enabled flag
  * on a window's tree already belongs to the open animation, and two owners of
- * one flag is how a window ends up invisible forever. The bars have no such
- * second owner, so those are simply disabled. */
+ * one flag is how a window ends up invisible forever. The wallpaper layers have
+ * no such second owner, so those are simply disabled.
+ *
+ * Only the layers UNDER the windows go: background and bottom are the desktop,
+ * and the desktop is what the strip is replacing. A bar on top or overlay is
+ * chrome — it stays, exactly as fwm's own status strip does, because a shell
+ * that vanishes whenever you look at your desktops is not much of a shell. */
 void expo_set_world_visible(FwmServer *server, FwmOutput *out, bool visible) {
     if (!out) return;
     out->hide_world = !visible;
@@ -406,6 +411,9 @@ void expo_set_world_visible(FwmServer *server, FwmOutput *out, bool visible) {
     FwmLayerSurface *ls;
     wl_list_for_each(ls, &server->layer_surfaces, link) {
         if (ls->layer_surface->output != out->wlr_output || !ls->scene) continue;
+        enum zwlr_layer_shell_v1_layer layer = ls->layer_surface->current.layer;
+        if (layer != ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND
+            && layer != ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM) continue;
         wlr_scene_node_set_enabled(&ls->scene->tree->node, visible);
     }
 }

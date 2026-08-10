@@ -126,16 +126,37 @@ void launcher_grab_sync(FwmServer *server, bool was_open) {
     if (open) {
         wlr_seat_keyboard_notify_clear_focus(server->seat);
     } else if (server->focused_view) {
-        struct wlr_keyboard *kbd = wlr_seat_get_keyboard(server->seat);
-        struct wlr_surface *surface = view_surface(server->focused_view);
-        if (!surface) return;
-        if (kbd) {
-            wlr_seat_keyboard_notify_enter(server->seat, surface,
-                kbd->keycodes, kbd->num_keycodes, &kbd->modifiers);
-        } else {
-            wlr_seat_keyboard_notify_enter(server->seat, surface, NULL, 0, NULL);
-        }
+        server_keyboard_enter(server, view_surface(server->focused_view));
     }
+}
+
+/* Hand the keyboard to a surface, minus the keys the compositor is keeping.
+ *
+ * An enter event carries the keys that are down at the time, and a client is
+ * entitled to hold them until it sees them released. But the key that caused
+ * the focus to move is usually the bind's own letter — its press was swallowed
+ * here and its release will be too, so a client told that it is down waits for
+ * a release that never comes and repeats the letter for as long as it has the
+ * keyboard. That is the key that "sticks" after a bind: killclient moving focus
+ * to the next window, `view:` handing it to another desktop's window, a layer
+ * surface taking it. Every path that hands the keyboard over goes through here
+ * for that reason. */
+void server_keyboard_enter(FwmServer *server, struct wlr_surface *surface) {
+    if (!surface) return;
+    struct wlr_keyboard *kbd = wlr_seat_get_keyboard(server->seat);
+    if (!kbd) {
+        wlr_seat_keyboard_notify_enter(server->seat, surface, NULL, 0, NULL);
+        return;
+    }
+
+    uint32_t keys[WLR_KEYBOARD_KEYS_CAP];
+    size_t n = 0;
+    for (size_t i = 0; i < kbd->num_keycodes && n < WLR_KEYBOARD_KEYS_CAP; i++) {
+        uint32_t kc = kbd->keycodes[i];
+        if (kc < sizeof(server->key_consumed) && server->key_consumed[kc]) continue;
+        keys[n++] = kc;
+    }
+    wlr_seat_keyboard_notify_enter(server->seat, surface, keys, n, &kbd->modifiers);
 }
 
 static void key_repeat_stop(FwmServer *server) {
@@ -393,9 +414,12 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
      * every other key as well: the windows a key would reach are hidden
      * behind the strip, so a client must not receive it. */
     if (expo_active(server)) {
-        for (int i = 0; i < num_syms; i++) expo_handle_key(server, syms[i]);
+        /* Marked before the key is acted on, not after: leaving the strip on
+         * Return hands the keyboard to a window, and that window must not be
+         * told about a key whose release is about to be swallowed here. */
         if (event->keycode < sizeof(server->key_consumed))
             server->key_consumed[event->keycode] = 1;
+        for (int i = 0; i < num_syms; i++) expo_handle_key(server, syms[i]);
         return;
     }
 

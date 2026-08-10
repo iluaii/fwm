@@ -67,6 +67,17 @@ typedef struct FwmView {
      * commit, cursor blink included. */
     int aligned_w, aligned_h;
 
+    /* The smallest this window has been seen to accept, learned from the sizes
+     * it commits against the sizes it is offered (see tile_actuals). The tiling
+     * layout keeps this much room for it; 0 until it refuses something.
+     *
+     * The `over` pair is the oversized commit currently being timed, and when
+     * it was first seen: a client is always a frame or two behind the size it
+     * was asked for, so being too big has to LAST before it means anything. */
+    int tile_floor_w, tile_floor_h;
+    int tile_over_w, tile_over_h;
+    double tile_over_tw, tile_over_th;
+
     /* Last size an X client asked for and was refused (fullscreen owns its
      * geometry). Refusing means answering with the geometry it already has, and
      * a client that asks again for the same thing must be met with silence
@@ -214,6 +225,10 @@ typedef struct FwmView {
     struct wl_listener ftl_request_activate;
     struct wl_listener ftl_request_close;
     struct wl_listener ftl_request_fullscreen;
+    struct wl_listener ftl_request_maximize;
+    /* The monitor the handle currently says this window is on, so enter/leave
+     * are only sent when the answer changes. NULL while it is on none. */
+    struct wlr_output *ftl_output;
 
     /* Tab-stack membership; NULL when not grouped (see group.h). */
     struct FwmGroup *group;
@@ -255,6 +270,7 @@ void view_sync_position(FwmView *view);
  * asked for — see server_align_tiles(). Falls back to the requested size
  * before the first commit. */
 void view_committed_size(FwmView *view, int *w, int *h);
+void view_min_size(FwmView *view, int *w, int *h);
 
 void view_update_border_geometry(FwmView *view);
 

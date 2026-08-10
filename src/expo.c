@@ -164,8 +164,12 @@ static void expo_open(FwmServer *server) {
     if (!e->tree) { free(e); return; }
     /* The whole strip lives on its monitor. */
     wlr_scene_node_set_position(&e->tree->node, e->out->box.x, e->out->box.y);
-    /* Above the windows it is replacing, below the tray it is not. */
-    wlr_scene_node_place_below(&e->tree->node, &server->layer_overlay->node);
+    /* Above the windows it is replacing, below the chrome it is not — and an
+     * external bar is chrome exactly as our own strip is. ls_top is the lowest
+     * of the layers a panel actually sits on, so going under it leaves the bar,
+     * the tray and a layer-shell overlay all above the strip, and puts only the
+     * windows and the wallpaper underneath. */
+    wlr_scene_node_place_below(&e->tree->node, &server->ls_top->node);
 
     e->backdrop = wlr_scene_rect_create(e->tree, server->screen_width,
                                         server->screen_height,

@@ -249,6 +249,25 @@ void view_committed_size(FwmView *view, int *w, int *h) {
     view_border_box(view, w, h);
 }
 
+/* The smallest size the client says it will accept, in the same units as
+ * view_committed_size. Zero when it has not said — which is most windows, and
+ * why the tiling layout also learns a floor from what a window does when it is
+ * offered less (see tile_actuals). */
+void view_min_size(FwmView *view, int *w, int *h) {
+    *w = 0; *h = 0;
+    if (view->type == FWM_VIEW_XDG) {
+        if (!view->xdg_toplevel) return;
+        *w = view->xdg_toplevel->current.min_width;
+        *h = view->xdg_toplevel->current.min_height;
+    } else {
+        if (!view->xwl_surface || !view->xwl_surface->size_hints) return;
+        *w = view->xwl_surface->size_hints->min_width;
+        *h = view->xwl_surface->size_hints->min_height;
+    }
+    if (*w < 0) *w = 0;
+    if (*h < 0) *h = 0;
+}
+
 void view_update_border_geometry(FwmView *view) {
     if (!view->border[0]) return;
     if (view->squash_buf) return; /* the squash owns the border box meanwhile */

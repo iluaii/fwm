@@ -38,6 +38,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <math.h>
+#include <limits.h>
 #include <wayland-server.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_subcompositor.h>
@@ -76,25 +77,62 @@
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
-/* The area tiles live in: the space layer-shell clients left us, minus our own
- * tray and the outer gap. Shared by the layout and the alignment pass so the
- * two cannot drift apart. */
-static void tile_area(FwmServer *server, int desktop, int *x, int *y, int *w, int *h) {
+/* The room a window has on `desktop`: the space layer-shell clients left us,
+ * minus our own status strip, minus the outer gap. In world coordinates, so the
+ * desktop's own column offset is already in x.
+ *
+ * The tiling layout, the alignment pass and FAKE FULLSCREEN all come through
+ * here. That last one is the point of the function being shared rather than
+ * copied: "fake fullscreen" means "as large as a window is allowed to be", and
+ * the moment that answer is written down twice the two drift — which is exactly
+ * what had happened. The old copy in server_set_fullscreen reserved a hardcoded
+ * band under the tray instead of the gap, and measured its height from the
+ * screen rather than the work area, so a dock along the bottom was covered
+ * over. */
+void server_work_area(FwmServer *server, int desktop, int *x, int *y, int *w, int *h) {
     int gout = server->config.tiling.gaps_out;
-    struct wlr_box work = server->usable_area;
-    if (work.width <= 0 || work.height <= 0) {
-        work = (struct wlr_box){ 0, 0, server->screen_width, server->screen_height };
+
+    struct wlr_box screen = { 0, 0, server->screen_width, server->screen_height };
+    struct wlr_box work = screen;
+
+    /* The monitor showing this desktop is the one whose bars apply; with nobody
+     * showing it, the desktop's own size is the answer. Per monitor, so a bar
+     * on the second screen does not shrink the first. */
+    FwmOutput *mon = server_output_showing(server, desktop);
+    if (mon && mon->usable_area.width > 0 && mon->usable_area.height > 0) {
+        /* usable_area is in layout coordinates; a desktop's frame starts at 0,0. */
+        work = (struct wlr_box){
+            mon->usable_area.x - mon->box.x, mon->usable_area.y - mon->box.y,
+            mon->usable_area.width, mon->usable_area.height,
+        };
+        if (!wlr_box_intersection(&work, &work, &screen)) work = screen;
     }
+
     /* A hidden tray reserves nothing — that is what makes it *gone* rather than
-     * merely invisible. Layer-shell exclusive zones still apply. */
-    if (!server->tray_hidden && work.y < TRAY_BOTTOM) {
+     * merely invisible. Layer-shell exclusive zones still apply. A strip that
+     * stood down for an external bar ([decor] tray_yield) is hidden in exactly
+     * the same sense: the bar's own zone is already in `work`, and reserving on
+     * top of that would leave a second empty band under it. */
+    int tray_gone = server->tray_hidden
+                  || (mon && mon->top_reserved && server->config.decor.tray_yield);
+    if (!tray_gone && work.y < TRAY_BOTTOM) {
         work.height -= TRAY_BOTTOM - work.y;
         work.y = TRAY_BOTTOM;
     }
+
     *x = desktop * server->screen_width + work.x + gout;
     *y = work.y + gout;
     *w = work.width  - gout * 2;
     *h = work.height - gout * 2;
+
+    /* Gaps wider than the screen they are cut from would ask for a window of
+     * negative size, and every caller would hand that to a client. */
+    if (*w < 1) *w = 1;
+    if (*h < 1) *h = 1;
+}
+
+static void tile_area(FwmServer *server, int desktop, int *x, int *y, int *w, int *h) {
+    server_work_area(server, desktop, x, y, w, h);
 }
 
 /* Move one tile to where the alignment pass decided it goes. */
@@ -138,6 +176,106 @@ static void tile_move_to(FwmServer *server, FwmView *view, PhysicsBody *pb, int 
  * and moves the windows to what it decided. No size is touched, so this cannot
  * provoke the commits that would call it again.
  */
+/* What every window on this desktop is, and what it will not go below.
+ *
+ * Two sources for the floor, and the second is the one that needs care. A
+ * client may declare a minimum (xdg-shell set_min_size, ICCCM WM_NORMAL_HINTS)
+ * and then that is simply the answer — but plenty of the windows that HAVE a
+ * minimum never declare it and just commit it instead, so the layout also
+ * learns from what a window does when it is offered less.
+ *
+ * Being too big has to LAST to count. This runs on every layout pass — many
+ * times a second while a divider is being dragged — and a client is always a
+ * frame or two behind the size it has been asked for. Reading that lag as a
+ * refusal makes the window's CURRENT size its floor, and the divider is pinned
+ * where it stands: one small resize, then nothing moves. A client that has
+ * simply not answered yet answers well inside TILE_FLOOR_SETTLE; one that is
+ * never going to answer is still too big when the timer runs out. */
+#define TILE_FLOOR_SETTLE 0.2   /* s an oversize must stand before it is a floor */
+
+static double tile_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+static int tile_actuals(FwmServer *server, BspNode **leaves, int count,
+                        BspActual *actual, int *bar) {
+    for (int i = 0; i < count; i++) {
+        BspNode *n = leaves[i];
+        FwmView *view = server_find_view(server, n->id);
+        int w = n->aw, h = n->ah;
+        if (view) view_committed_size(view, &w, &h);
+        /* A tab-stack's bar sits above the client but inside the slot, so it
+         * counts toward the space this leaf occupies. */
+        bar[i] = (view && view->group && n->ah > GROUP_TAB_H * 2) ? GROUP_TAB_H : 0;
+
+        int min_w = 0, min_h = 0;
+        if (view) {
+            view_min_size(view, &min_w, &min_h);
+            if (n->aw > 0 && n->ah > 0) {
+                double now = tile_now();
+                if (w > n->aw) {
+                    if (view->tile_over_w != w) {
+                        view->tile_over_w = w;
+                        view->tile_over_tw = now;
+                    } else if (now - view->tile_over_tw > TILE_FLOOR_SETTLE) {
+                        view->tile_floor_w = w;
+                    }
+                } else {
+                    view->tile_over_w = 0;
+                    /* Fitting inside what it was offered proves the floor is no
+                     * higher than that — which is how a window that has grown a
+                     * minimum, or was measured wrong, loses it again. */
+                    if (w < view->tile_floor_w) view->tile_floor_w = w;
+                }
+                if (h > n->ah) {
+                    if (view->tile_over_h != h) {
+                        view->tile_over_h = h;
+                        view->tile_over_th = now;
+                    } else if (now - view->tile_over_th > TILE_FLOOR_SETTLE) {
+                        view->tile_floor_h = h;
+                    }
+                } else {
+                    view->tile_over_h = 0;
+                    if (h < view->tile_floor_h) view->tile_floor_h = h;
+                }
+            }
+            if (view->tile_floor_w > min_w) min_w = view->tile_floor_w;
+            if (view->tile_floor_h > min_h) min_h = view->tile_floor_h;
+        }
+
+        actual[i] = (BspActual){
+            .id = n->id, .w = w, .h = h + bar[i],
+            .min_w = min_w,
+            .min_h = min_h ? min_h + bar[i] : 0,
+        };
+    }
+    return count;
+}
+
+/* How far one split may be dragged before it starts squeezing a window under
+ * its floor. The border drag asks, so that it stops where the layout stops
+ * rather than running on into travel that changes nothing — and so that pulling
+ * back moves the divider at once instead of first spending that dead travel. */
+void server_tile_ratio_limits(FwmServer *server, int desktop, BspNode *node,
+                              float *lo, float *hi) {
+    *lo = 0.05f;
+    *hi = 0.95f;
+    if (desktop < 0 || desktop >= 10) return;
+    BspNode *root = server->bsp_roots[desktop];
+    if (!root || !node) return;
+
+    BspNode *leaves[MAX_WINDOWS];
+    int count = 0;
+    bsp_collect_leaves(root, leaves, &count, MAX_WINDOWS);
+    if (count == 0) return;
+
+    BspActual actual[MAX_WINDOWS];
+    int bar[MAX_WINDOWS];
+    tile_actuals(server, leaves, count, actual, bar);
+    bsp_ratio_limits(node, server->config.tiling.gaps_in, actual, count, lo, hi);
+}
+
 void server_align_tiles(FwmServer *server, int desktop) {
     if (desktop < 0 || desktop >= 10) return;
     BspNode *root = server->bsp_roots[desktop];
@@ -150,15 +288,28 @@ void server_align_tiles(FwmServer *server, int desktop) {
 
     BspActual actual[MAX_WINDOWS];
     int bar[MAX_WINDOWS];
-    for (int i = 0; i < count; i++) {
-        BspNode *n = leaves[i];
-        FwmView *view = server_find_view(server, n->id);
-        int w = n->aw, h = n->ah;
-        if (view) view_committed_size(view, &w, &h);
-        /* A tab-stack's bar sits above the client but inside the slot, so it
-         * counts toward the space this leaf occupies. */
-        bar[i] = (view && view->group && n->ah > GROUP_TAB_H * 2) ? GROUP_TAB_H : 0;
-        actual[i] = (BspActual){ .id = n->id, .w = w, .h = h + bar[i] };
+    tile_actuals(server, leaves, count, actual, bar);
+
+    /* While a divider is being dragged, place from the SLOTS instead — each
+     * window gets exactly the space the ratio gives it, whatever it has
+     * committed so far.
+     *
+     * Laying out against committed sizes is what makes the interior gaps come
+     * out exactly gaps_in at rest, but it also hands the client's own size
+     * quantisation to its neighbour: a terminal rounds to whole character
+     * cells, so the window beside it could only move when the terminal jumped a
+     * cell, and the whole drag advanced in steps of 8-10px however smoothly the
+     * hand moved. The floors stay in force — they are what a window will not go
+     * below, not what it happens to be — so nothing may still be squeezed under
+     * one. The exact gaps come back at the release, which lays the desktop out
+     * again the ordinary way. */
+    bool live = server->interactive.action == FWM_ACTION_BSP_RESIZE
+             && server->interactive.bsp_desktop == desktop;
+    if (live) {
+        for (int i = 0; i < count; i++) {
+            actual[i].w = INT_MAX;   /* "took all it was offered" — see bsp.h */
+            actual[i].h = INT_MAX;
+        }
     }
 
     int x, y, w, h;

@@ -15,6 +15,15 @@ under `/usr/local` — `PREFIX=…` moves that. `./install.sh update` pulls and
 rebuilds; `./install.sh uninstall` removes the installed files and keeps your
 config.
 
+Your `config.toml` is never overwritten by an install or an update, which does
+mean it stops mentioning options added since you wrote it. `./install.sh update
+config` merges: you get the current example — its comments, its ordering, every
+option that is new — with your values put back into it, your own binds kept at
+the end of the section they were in, and anything the example has never heard of
+(a `[mode.*]` of yours, a `[[rule]]`) kept at the end of the file. It offers to
+back the old one up first, in the `config.toml.bak`, `.bak2`, `.bak3` convention,
+and never replaces an existing backup without being told to.
+
 To build by hand:
 
 ```sh

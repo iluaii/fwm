@@ -21,6 +21,8 @@
 #include "physics.h"
 #include "layer.h"
 #include "lock.h"
+#include "foreign.h"
+#include "workspace.h"
 #include "ipc.h"
 #include <signal.h>
 #ifdef __GLIBC__
@@ -1233,6 +1235,24 @@ static int physics_tick_cb(void *data) {
      * tick, so toggling it catches a throw already in the air. */
     server->physics.wrap = server->config.camera.wrap;
 
+    /* And so does the space bars have reserved, when [physics] solid_bars asks
+     * for it. The primary monitor's, because the world is a strip of columns
+     * the size of that monitor and the floor is one line across all ten — a
+     * bar on the second screen has no column of its own to stand in. */
+    server->physics.inset_top = server->physics.inset_bottom = 0;
+    if (server->config.physics.solid_bars) {
+        struct wlr_box u = server->usable_area;
+        if (u.width > 0 && u.height > 0) {
+            int top = u.y, bottom = server->screen_height - (u.y + u.height);
+            /* A bar taller than the screen would leave the floor above the
+             * ceiling and Box2D solving an impossible world. */
+            if (top >= 0 && bottom >= 0 && top + bottom < server->screen_height) {
+                server->physics.inset_top = top;
+                server->physics.inset_bottom = bottom;
+            }
+        }
+    }
+
     if (expo_active(server)) steps = 0;
 
     /* Physics steps: as many whole 1/60 steps as the real time since the last
@@ -1251,7 +1271,11 @@ static int physics_tick_cb(void *data) {
                              (double)bar_desk * server->screen_width,
                              (double)server->screen_width,
                              server->config.cava.height * server->config.cava.push,
-                             server->screen_height,
+                             /* The row rises out of the FLOOR, wherever that
+                              * currently is: with solid_bars on and a dock at
+                              * the bottom, the floor is the top of the dock and
+                              * a visualiser sunk below it would never show. */
+                             server->screen_height - server->physics.inset_bottom,
                              BAR_MAX_RISE_SPEED * server->config.cava.push, dt);
         }
 
@@ -1285,7 +1309,16 @@ static int physics_tick_cb(void *data) {
                 server_place_node(server, &view->scene_tree->node, body->x, body->y);
             }
         }
+        /* Which screen a panel sees this window on. Here because a window
+         * changes desktop by crossing the seam under its own momentum — there
+         * is no event to hang it off, only the position it ended up at. The
+         * call returns immediately unless the answer changed. */
+        foreign_view_sync_output(view);
     }
+
+    /* And which monitor is showing which desktop, for the same reason and by
+     * the same rule: only what changed goes out. */
+    workspace_sync(server);
 
     // Hide the tray while a real-fullscreen window occupies the active desktop
     // (overlays outrank windows in the scene, so the surface can't cover it).
@@ -1306,10 +1339,12 @@ static int physics_tick_cb(void *data) {
             if (fsv->fs_real) { real_fs = true; break; } /* also hides the tray */
         }
         /* Real fullscreen hides the tray; fake fullscreen deliberately keeps
-         * it. A user-hidden tray stays hidden through both. */
+         * it. A user-hidden tray stays hidden through both, and so does one
+         * that stood down for an external bar on this screen. */
+        bool yielded = server->config.decor.tray_yield && fo->top_reserved;
         if (fo->tray_buffer)
             wlr_scene_node_set_enabled(&fo->tray_buffer->node,
-                                       !real_fs && !server->tray_hidden);
+                                       !real_fs && !server->tray_hidden && !yielded);
         /* Either kind fully hides the wallpaper (fake fills the work area and
          * the tray covers the strip above it), so pause a video behind it: the
          * decode thread then blocks on its full queue and stops burning CPU. */

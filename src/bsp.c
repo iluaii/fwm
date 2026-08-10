@@ -139,24 +139,114 @@ bool bsp_contains(const BspNode *root, const BspNode *node) {
     return bsp_contains(root->left, node) || bsp_contains(root->right, node);
 }
 
-BspNode *bsp_find_border(BspNode *root, int x, int y, int threshold) {
-    if (!root || root->id != 0) return NULL;
+void bsp_insert_at(BspNode **root, uint32_t target, uint32_t new_id, BspSide side) {
+    if (!*root) { *root = bsp_new_leaf(new_id); return; }
 
-    if (!root->split_h) {
-        int border_x = root->left->x + root->left->w;
-        if (abs(x - border_x) <= threshold &&
-            y >= root->y && y <= root->y + root->h)
-            return root;
-    } else {
-        int border_y = root->left->y + root->left->h;
-        if (abs(y - border_y) <= threshold &&
-            x >= root->x && x <= root->x + root->w)
-            return root;
+    BspNode *leaf = bsp_find(*root, target);
+    if (!leaf) { bsp_insert(root, 0, new_id); return; }
+
+    /* The same surgery bsp_insert does — the target leaf becomes a split and
+     * gains two children — but the axis comes from the side the window was put
+     * down on rather than from which way round the slot happens to be, and the
+     * new window may be the FIRST child, which is what "dropped on the left"
+     * means and what bsp_insert has no way to say. */
+    BspNode *old_leaf = bsp_new_leaf(leaf->id);
+    BspNode *new_leaf = bsp_new_leaf(new_id);
+    old_leaf->parent = leaf;
+    new_leaf->parent = leaf;
+
+    int before = (side == BSP_SIDE_LEFT || side == BSP_SIDE_UP);
+    leaf->id = 0;
+    leaf->ratio = 0.5f;
+    leaf->split_h = (side == BSP_SIDE_UP || side == BSP_SIDE_DOWN);
+    leaf->left  = before ? new_leaf : old_leaf;
+    leaf->right = before ? old_leaf : new_leaf;
+}
+
+BspNode *bsp_leaf_at(BspNode *root, int x, int y) {
+    if (!root) return NULL;
+    if (root->id != 0) {
+        return (x >= root->ax && x < root->ax + root->aw &&
+                y >= root->ay && y < root->ay + root->ah) ? root : NULL;
+    }
+    BspNode *l = bsp_leaf_at(root->left, x, y);
+    return l ? l : bsp_leaf_at(root->right, x, y);
+}
+
+BspNode *bsp_edge_node(BspNode *leaf, int split_h, int want_left) {
+    for (BspNode *n = leaf; n && n->parent; n = n->parent) {
+        BspNode *p = n->parent;
+        if (!p->split_h != !split_h) continue;
+        if ((p->left == n) == (want_left != 0)) return p;
+    }
+    return NULL;
+}
+
+/* The smallest a subtree can be made: a split needs both its children plus the
+ * gap between them along the axis it divides, and the larger of the two across
+ * it. Windows that have never refused a size contribute nothing. */
+static void subtree_min(const BspNode *n, int gap, const BspActual *act,
+                        int n_act, int *mw, int *mh) {
+    *mw = 0; *mh = 0;
+    if (!n) return;
+
+    if (n->id != 0 || !n->left || !n->right) {
+        for (int i = 0; i < n_act; i++) {
+            if (act[i].id != n->id) continue;
+            *mw = act[i].min_w;
+            *mh = act[i].min_h;
+            return;
+        }
+        return;
     }
 
-    BspNode *l = bsp_find_border(root->left, x, y, threshold);
-    if (l) return l;
-    return bsp_find_border(root->right, x, y, threshold);
+    int aw, ah, bw, bh;
+    subtree_min(n->left,  gap, act, n_act, &aw, &ah);
+    subtree_min(n->right, gap, act, n_act, &bw, &bh);
+    if (!n->split_h) { *mw = aw + gap + bw;     *mh = ah > bh ? ah : bh; }
+    else             { *mw = aw > bw ? aw : bw; *mh = ah + gap + bh; }
+}
+
+/* Where the divider stands inside `span`, held clear of both floors.
+ *
+ * When the two floors together do not fit there is nothing to hold to, and the
+ * proportional cut is used unchanged: a layout smaller than the windows in it
+ * is going to overlap wherever the split goes, and choosing which pair overlaps
+ * helps nobody. */
+static int clamp_split(int cut, int span, int gap, int lo_min, int hi_min) {
+    int room = span - gap;
+    if (room < 2) return 1;
+    if (lo_min + hi_min <= room) {
+        if (cut < lo_min) cut = lo_min;
+        if (cut > room - hi_min) cut = room - hi_min;
+    }
+    if (cut < 1) cut = 1;
+    if (cut > room - 1) cut = room - 1;
+    return cut;
+}
+
+void bsp_ratio_limits(const BspNode *n, int gap, const BspActual *actual,
+                      int n_actual, float *lo, float *hi) {
+    *lo = 0.05f;
+    *hi = 0.95f;
+    if (!n || n->id != 0 || !n->left || !n->right) return;
+
+    int span = n->split_h ? n->ah : n->aw;
+    int room = span - gap;
+    if (room < 2) return;
+
+    int lmw, lmh, rmw, rmh;
+    subtree_min(n->left,  gap, actual, n_actual, &lmw, &lmh);
+    subtree_min(n->right, gap, actual, n_actual, &rmw, &rmh);
+    int lmin = n->split_h ? lmh : lmw;
+    int rmin = n->split_h ? rmh : rmw;
+    if (lmin + rmin > room) return;
+
+    float l = (float)lmin / (float)room;
+    float h = (float)(room - rmin) / (float)room;
+    if (l > *lo) *lo = l;
+    if (h < *hi) *hi = h;
+    if (*hi < *lo) *hi = *lo;
 }
 
 /* `max` is not paranoia: windows past MAX_WINDOWS get no physics body, but
@@ -199,13 +289,21 @@ static void place_rec(BspNode *n, int x, int y, int w, int h, int gap,
         return;
     }
 
+    /* What neither side may be squeezed below. Without this a window that
+     * refuses to shrink — Discord stops at about 940px wide — is still only
+     * counted as the size it was OFFERED, so the layout puts its neighbour
+     * where the refused pixels are and the two overlap: the neighbour appears
+     * to slide underneath the window that hit its limit. */
+    int lmw, lmh, rmw, rmh;
+    subtree_min(n->left,  gap, act, n_act, &lmw, &lmh);
+    subtree_min(n->right, gap, act, n_act, &rmw, &rmh);
+
     int aw, ah, bw, bh;
     if (!n->split_h) {
         /* The first child is offered its share of the split, the second is
          * offered the rest — which is more than its share whenever the first
          * came up short. */
-        int lw = (int)((w - gap) * n->ratio);
-        if (lw < 1) lw = 1;
+        int lw = clamp_split((int)((w - gap) * n->ratio), w, gap, lmw, rmw);
         place_rec(n->left, x, y, lw, h, gap, act, n_act, &aw, &ah);
         int rw = w - aw - gap;
         if (rw < 1) rw = 1;
@@ -213,8 +311,7 @@ static void place_rec(BspNode *n, int x, int y, int w, int h, int gap,
         *out_w = aw + gap + bw;
         *out_h = ah > bh ? ah : bh;
     } else {
-        int th = (int)((h - gap) * n->ratio);
-        if (th < 1) th = 1;
+        int th = clamp_split((int)((h - gap) * n->ratio), h, gap, lmh, rmh);
         place_rec(n->left, x, y, w, th, gap, act, n_act, &aw, &ah);
         int rh = h - ah - gap;
         if (rh < 1) rh = 1;

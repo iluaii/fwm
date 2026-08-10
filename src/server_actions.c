@@ -23,6 +23,7 @@
 #include "layer.h"
 #include "lock.h"
 #include "foreign.h"
+#include "shortcuts.h"
 #include "ipc.h"
 #include "session.h"
 #include <signal.h>
@@ -618,6 +619,31 @@ void server_dispatch_action(FwmServer *server, const char *action) {
     } else if (strncmp(action, "spawn:", 6) == 0) {
         const char *cmd = action + 6;
         server_spawn(cmd);
+    } else if (strncmp(action, "global:", 7) == 0) {
+        /* Hand the key to an external shell — "global:<app_id>:<name>", the
+         * shortcut it registered over hyprland-global-shortcuts (shortcuts.h).
+         * This is how a Quickshell launcher takes super+space off the built-in
+         * one: bind the key to the client's action instead of to `launcher`. */
+        const char *spec = action + 7;
+        const char *colon = strchr(spec, ':');
+        if (!colon || colon == spec || !colon[1]) {
+            wlr_log(WLR_ERROR, "global: expects app_id:name, got \"%s\"", spec);
+            return;
+        }
+        char app_id[128];
+        size_t n = (size_t)(colon - spec);
+        if (n >= sizeof(app_id)) {
+            wlr_log(WLR_ERROR, "global: app_id too long in \"%s\"", spec);
+            return;
+        }
+        memcpy(app_id, spec, n);
+        app_id[n] = '\0';
+        /* Nothing registered it: say so rather than swallow the key. A shell
+         * that is not running yet is the usual reason, and a bind that does
+         * nothing at all looks like a broken keyboard. */
+        if (!shortcuts_trigger(server, app_id, colon + 1)) {
+            wlr_log(WLR_ERROR, "no client has registered the shortcut %s", spec);
+        }
     } else if (strncmp(action, "move_camera:", 12) == 0) {
         int amt = atoi(action + 12);
         FwmOutput *out = server_active_output(server);

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # fwm — install / update script.
 #
-#   ./install.sh            install dependencies, build, install
-#   ./install.sh update     git pull, rebuild, reinstall
-#   ./install.sh uninstall  remove installed files (config is kept)
+#   ./install.sh                install dependencies, build, install
+#   ./install.sh update         git pull, rebuild, reinstall
+#   ./install.sh update config  merge new options into your config.toml
+#   ./install.sh uninstall      remove installed files (config is kept)
 #
 # Supported package managers: pacman (Arch), apt (Debian/Ubuntu),
 # dnf (Fedora), xbps (Void). Box2D v3 is built from source when the
@@ -164,14 +165,110 @@ install_files() {
     $SUDO install -Dm644 "$REPO_DIR/session/fwm-portals.conf" \
         /usr/share/xdg-desktop-portal/fwm-portals.conf
 
-    # User config: never overwrite an existing one.
-    local cfg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fwm"
+    # User config: never overwrite an existing one. `update config` is what
+    # brings an existing one up to date.
+    local cfg_dir
+    cfg_dir="$(config_dir)"
     if [ ! -e "$cfg_dir/config.toml" ]; then
         mkdir -p "$cfg_dir"
         cp "$REPO_DIR/config.toml.example" "$cfg_dir/config.toml"
         msg "Default config written to $cfg_dir/config.toml"
     fi
     msg "Done. Log in via your display manager (fwm session) or run: fwm"
+}
+
+# ── the config ─────────────────────────────────────────────────────────
+# fwm reads $HOME/.config/fwm/config.toml — HOME, not XDG_CONFIG_HOME; see
+# server_config_path() in src/server_config.c. Everything here follows it, so
+# the file this script writes is the file the compositor opens.
+config_dir() { printf '%s/.config/fwm' "$HOME"; }
+
+# A yes/no question, default in $2. Read from the terminal rather than stdin:
+# this script is often piped into a shell, and then stdin is the script itself.
+# With no terminal at all the default stands and says so.
+ask() {
+    local q="$1" def="${2:-y}" hint ans
+    if [ "$def" = y ]; then hint="[Y/n]"; else hint="[y/N]"; fi
+    # Opened, not stat'd: /dev/tty exists in every container and cron job, and
+    # only opening it says whether anyone is there.
+    if ! { : < /dev/tty; } 2>/dev/null; then
+        msg "$q $hint -> $def (nothing to ask on)"
+        [ "$def" = y ]
+        return
+    fi
+    printf '\033[1;33m==>\033[0m %s %s ' "$q" "$hint" > /dev/tty
+    read -r ans < /dev/tty || ans=""
+    [ -n "$ans" ] || ans="$def"
+    case "$ans" in [Yy]*) return 0 ;; *) return 1 ;; esac
+}
+
+# Copy the config aside, in the .bak / .bak2 / .bak3 convention the directory
+# already uses. An existing backup is never quietly replaced: it may be the one
+# good copy of a config someone spent an evening on.
+backup_config() {
+    local cfg="$1" newest="" target="" n=2 f
+    for f in "$cfg".bak*; do [ -e "$f" ] && newest="$f"; done
+
+    if [ -n "$newest" ]; then
+        if ask "A backup exists ($(basename "$newest")). Overwrite it? No keeps it and makes another." n; then
+            target="$newest"
+        else
+            while [ -e "$cfg.bak$n" ]; do n=$((n + 1)); done
+            if [ -e "$cfg.bak" ]; then target="$cfg.bak$n"; else target="$cfg.bak"; fi
+        fi
+    else
+        target="$cfg.bak"
+    fi
+
+    cp -- "$cfg" "$target"
+    msg "Backed up to $target"
+}
+
+# Bring a config written against an older fwm up to the current example: the
+# example's comments, ordering and new options, your values and your own binds.
+# See tools/config-merge.awk for what exactly survives.
+merge_config() {
+    local dir cfg example merged stats mine kept extra sections fresh
+    dir="$(config_dir)"
+    cfg="$dir/config.toml"
+    example="$REPO_DIR/config.toml.example"
+
+    [ -r "$example" ] || { warn "no config.toml.example in $REPO_DIR"; return 1; }
+
+    if [ ! -e "$cfg" ]; then
+        mkdir -p "$dir"
+        cp "$example" "$cfg"
+        msg "No config here yet — wrote the default to $cfg"
+        return 0
+    fi
+
+    if ask "Back up $cfg before merging?" y; then
+        backup_config "$cfg"
+    else
+        warn "No backup taken."
+    fi
+
+    merged="$(mktemp)"
+    stats="$(mktemp)"
+    awk -f "$REPO_DIR/tools/config-merge.awk" -v stats="$stats" "$cfg" "$example" > "$merged"
+
+    # A merge that came out empty, or lost the section every config has, is a
+    # merge that goes in the bin rather than over the only copy of your config.
+    if [ ! -s "$merged" ] || ! grep -q '^\[binds\]' "$merged"; then
+        warn "merge produced nothing usable — $cfg left untouched"
+        rm -f "$merged" "$stats"
+        return 1
+    fi
+
+    cat "$merged" > "$cfg"      # keeps the file's own permissions
+    read -r mine kept extra sections fresh < "$stats" || true
+    rm -f "$merged" "$stats"
+
+    msg "Merged into $cfg"
+    msg "  $kept of your $mine settings kept in place, $extra kept aside, $sections whole sections kept"
+    msg "  $fresh option(s) here that your config did not have yet"
+    msg "Read it over before the next login: a value written across several"
+    msg "lines is the one thing the merge cannot see."
 }
 
 # ── commands ───────────────────────────────────────────────────────────
@@ -183,11 +280,22 @@ install)
     install_files
     ;;
 update)
-    msg "Updating from git"
-    git -C "$REPO_DIR" pull --ff-only
-    ensure_box2d
-    build
-    install_files
+    case "${2:-}" in
+    "")
+        msg "Updating from git"
+        git -C "$REPO_DIR" pull --ff-only
+        ensure_box2d
+        build
+        install_files
+        ;;
+    config)
+        merge_config
+        ;;
+    *)
+        echo "usage: $0 update [config]" >&2
+        exit 1
+        ;;
+    esac
     ;;
 uninstall)
     msg "Uninstalling"
@@ -197,7 +305,7 @@ uninstall)
     msg "Removed (user config in ~/.config/fwm kept)"
     ;;
 *)
-    echo "usage: $0 [install|update|uninstall]" >&2
+    echo "usage: $0 [install|update [config]|uninstall]" >&2
     exit 1
     ;;
 esac

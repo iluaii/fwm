@@ -27,7 +27,7 @@ at it explicitly or you will be talking to the outer session.
 | `fwmctl set <name> <value>` | change one option, this session only |
 | `fwmctl dispatch <action>` | run any keybind action |
 | `fwmctl reload` | reload `config.toml`, discarding every `set` |
-| `fwmctl version` | IPC protocol version |
+| `fwmctl version` | the running fwm's release, which binary is answering (path, mtime, pid) and the IPC version |
 | `fwmctl subscribe [events]` | stream events as JSON lines until killed |
 
 `fwmctl -h` prints the same list with the `output` keys.

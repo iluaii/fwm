@@ -216,8 +216,15 @@ void expo_live_pass(FwmExpo *e, double now) {
         if (now - it->snapped < EXPO_LIVE_S) continue;
         it->snapped = now;
         if (!expo_resnap_item(e, it)) {
-            expo_forget_view(server, it->view);
-            expo_add_item(e, it->view);
+            /* Hold the window in a local FIRST: expo_forget_view compacts the
+             * slots, so `it` no longer describes this window afterwards — it
+             * holds whatever moved into the hole, or nothing at all when this
+             * was the last slot. Reading it->view back out of it re-added a
+             * stranger, and at the end of the array handed expo_add_item a NULL
+             * view to dereference. */
+            FwmView *view = it->view;
+            expo_forget_view(server, view);
+            expo_add_item(e, view);
             i = -1;                       /* the array moved under us */
             continue;
         }

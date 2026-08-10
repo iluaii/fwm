@@ -2,11 +2,30 @@
 #include <malloc.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <wlr/util/log.h>
 
 int main(int argc, char *argv[]) {
-    (void)argc;
-    (void)argv;
+    /* The only arguments fwm takes. Everything else it is told comes from the
+     * config file or the control socket, so there is no option parser here and
+     * an unknown flag is not worth inventing one for — it is ignored, and the
+     * compositor starts, which is what somebody who typed it wanted. */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+            printf("fwm %s\n", FWM_VERSION);
+            return 0;
+        }
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            printf("fwm %s — a Wayland compositor where windows are physical objects\n"
+                   "\n"
+                   "  fwm                start the compositor\n"
+                   "  fwm --version      print the version\n"
+                   "\n"
+                   "Everything else is configured in ~/.config/fwm/config.toml or\n"
+                   "changed at runtime with fwmctl.\n", FWM_VERSION);
+            return 0;
+        }
+    }
 
     /* Pin the mmap threshold before anything allocates.
      *

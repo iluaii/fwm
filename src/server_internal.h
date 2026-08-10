@@ -92,6 +92,11 @@ void server_wrap_slide_stop(FwmServer *server, FwmOutput *out);
  * join, which is jumped rather than slid. Also the one place that hands the
  * move to the desktop strip when it is open. */
 void server_goto_desktop(FwmServer *server, int d, int seam);
+/* How much room a window has on `desktop`, in world coordinates: the monitor's
+ * usable area minus our status strip minus [tiling] gaps_out. The tiling layout
+ * and fake fullscreen share it, so "as large as a window may be" has one
+ * answer. See the definition in server_tiling.c. */
+void server_work_area(FwmServer *server, int desktop, int *x, int *y, int *w, int *h);
 /* Place a spinning window that is being dragged under its grab point. Called
  * once per frame as well as from the physics tick — see the definition. */
 void server_drag_swing_place(FwmServer *server);
