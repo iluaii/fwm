@@ -85,6 +85,7 @@ find_package(box2d REQUIRED)
 # The video decode runs on its own pthread; the compositor stays single-threaded.
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+pkg_check_modules(DRM REQUIRED libdrm)
 
 # List of source files
 set(SOURCES
@@ -187,6 +188,7 @@ target_include_directories(fwm PRIVATE
         ${EGL_INCLUDE_DIRS}
         ${GLESV2_INCLUDE_DIRS}
         ${LIBAV_INCLUDE_DIRS}
+        ${DRM_INCLUDE_DIRS}
         src
         ${CMAKE_BINARY_DIR}
         src/ui
