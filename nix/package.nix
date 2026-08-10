@@ -49,7 +49,7 @@
 
         stdenv.mkDerivation {
           pname = "fwm";
-          version = "0.3.0"; # There doesn't seem to be any version specified in the project so I'm going latest release tag from github. I would consider specifying current version in some VERSION file. Otherwise this will need to be updated every new release
+          version = lib.strings.trim (builtins.readFile ../VERSION);
 
           nativeBuildInputs = [
             cmake
