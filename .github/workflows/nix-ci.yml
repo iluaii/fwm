@@ -1,0 +1,26 @@
+name: Build on Nix
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+# A newer push makes an in-flight run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: cachix/install-nix-action@v31
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+
+    - name: Build fwm on nix
+      run: nix build .#default
