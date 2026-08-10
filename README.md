@@ -360,6 +360,31 @@ WLR_BACKENDS=x11 ./build/fwm      # nested X11 window
 WLR_BACKENDS=wayland ./build/fwm  # nested Wayland window
 ```
 
+## NixOS
+This project comes with flake.nix file that exposes a package and module. To use it:
+
+- Add this to your system `flake.nix`:
+
+```nix
+inputs = {
+    fwm.url = "github:iluaii/fwm";
+};
+```
+
+- Import the module:
+
+```nix
+modules = [
+    inputs.fwm.nixosModules.default
+];
+```
+
+- And enable it somewhere in your configuration
+
+```nix
+programs.fwm.enable = true;
+```
+
 ---
 
 ## Development
