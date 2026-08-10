@@ -345,7 +345,7 @@ Known gaps: output scale is applied to the monitor and to client surfaces, but f
 | PipeWire and/or PulseAudio — *optional*, `[cava]` visualiser and `[sound]` knocks | `libpipewire`, `libpulse` |
 | CMake + pkg-config | `cmake`, `pkgconf` |
 | Xwayland (runtime) | `xorg-xwayland` |
-| Libdrm | `libdrm` |
+| libdrm — DRM format headers | `libdrm` |
 
 The sound libraries are the only optional ones: build without them and
 everything else works, minus the audio visualiser and the collision knocks
