@@ -118,6 +118,17 @@
           passthru = {
             providedSessions = [ "fwm" ];
           };
+
+          meta = {
+            description = "Wayland compositor written in C where windows are physical objects";
+            longDescription = ''
+              A Wayland compositor written in C (wlroots) where windows behave as physical objects with mass, momentum, inertia, and velocity — simulated by a real rigid-body engine (Box2D v3). Drag a window and throw it — it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
+            '';
+            homepage = "https://fwm-website.vercel.app/";
+            license = lib.licenses.gpl2;
+            mainProgram = "fwm";
+            platforms = lib.platforms.linux;
+          };
         };
     in
     {
