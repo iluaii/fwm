@@ -33,7 +33,6 @@
 
         security = {
           polkit.enable = true;
-          pam.services.swaylock = { };
         };
 
         programs = {
@@ -42,10 +41,16 @@
 
         services.graphical-desktop.enable = true;
 
-        xdg.portal.wlr.enable = true;
-        xdg.portal.extraPortals = [
-          pkgs.xdg-desktop-portal-gtk
-        ];
+        xdg.portal = {
+          wlr.enable = true;
+          extraPortals = [
+            pkgs.xdg-desktop-portal-gtk
+          ];
+
+          configPackages = lib.mkDefault [
+            cfg.package
+          ];
+        };
 
         # Window manager only sessions (unlike DEs) don't handle XDG
         # autostart files, so force them to run the service
