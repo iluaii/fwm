@@ -38,7 +38,7 @@ is the tour. The manual is in [`docs/`](docs/):
 
 ## 🎬 Demonstration
 
-Six clips of about fifteen seconds each, one per idea. They play here on GitHub; everywhere else the caption below each one is a link to the same file in [`assets/demo/`](assets/demo), which is where they live in the repository.
+Eight clips of about fifteen seconds each, one per idea. They play here on GitHub; everywhere else the caption below each one is a link to the same file in [`assets/demo/`](assets/demo), which is where they live in the repository.
 
 <table>
 <tr>
@@ -51,9 +51,9 @@ https://github.com/user-attachments/assets/1b9550eb-0b91-417c-811c-852cc5f01381
 </td>
 <td width="50%">
 
-https://github.com/user-attachments/assets/73b2be14-1169-4078-b731-9c24321b275e
+https://github.com/user-attachments/assets/e7921713-8b8e-4d47-baed-73d5c3c0f891
 
-**[Tiling](assets/demo/tiling.mp4)** — the BSP layout, splits, and windows springing into place: tiling here is a property of the desktop, so the same windows go back to being physical objects when it is switched off.
+**[Tiling](assets/demo/tiling.mp4)** — the BSP layout, splits, and windows springing into place, then a tile carried out of it: it rounds off into a drop on the way out and spreads back to the edges of a slot when it is put down. Tiling here is a property of the desktop, so the same windows go back to being physical objects when it is switched off.
 
 </td>
 </tr>
@@ -83,9 +83,25 @@ https://github.com/user-attachments/assets/7480adff-5140-47df-93c5-f48452a3690f
 </td>
 <td width="50%">
 
-https://github.com/user-attachments/assets/f9c94f4f-5215-4980-91d6-7c0bcc764d65
+https://github.com/user-attachments/assets/110f6607-13c5-41a7-aaf3-b653759b326c
 
-**[Status strip, desktops and modes](assets/demo/tray-desktops-modes.mp4)** — the strip each monitor gets, the desktop dots, and the modes menu: tiling, floating, gravity, the visualiser and the desktop ring, toggled from one place.
+**[Status strip, desktops and modes](assets/demo/tray-desktops-modes.mp4)** — the strip each monitor gets, the desktop dots, and the two menus behind it: the stats pill, where each readout is switched on or off, and the modes menu, where tiling, floating, gravity, sound, the visualiser, the grass and the rest are toggled from one place.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+https://github.com/user-attachments/assets/5a890fa4-67c8-488d-bc63-9555375ed031
+
+**[Breakable windows](assets/demo/breakable.mp4)** — switched on in the modes menu, never from the config: one window thrown hard enough into another destroys it. Damage is a single hit rather than a tally, so what survives a collision is unharmed by it, and every session starts with this off again.
+
+</td>
+<td width="50%">
+
+https://github.com/user-attachments/assets/11c329e5-b3ff-4c3a-a595-ebc31ae2a2d4
+
+**[Grass and wind](assets/demo/grass.mp4)** — a lawn along the bottom edge of the monitor, standing where that monitor's floor is, with gusts travelling across it. Grass and wind are separate switches, so the lawn can stand still without being turned off.
 
 </td>
 </tr>
@@ -101,7 +117,9 @@ https://github.com/user-attachments/assets/f9c94f4f-5215-4980-91d6-7c0bcc764d65
 - **One speed limit, and walls that hold** — nothing dynamic outruns `max_throw_speed`, so a shove can never outrun the hardest deliberate throw and no window covers more than a fraction of its own width per step. Walls are swept against (continuous collision) and measured to contain a throw at 96 000 px/s — fifty times the default cap. What that bound buys, and where a very fast *drag* still outruns the windows it is pushing, is in [docs/physics.md](docs/physics.md#speed).
 - **Free rotation** (`Super+R`, experimental) — hands a window's rotation to the simulation: the collision box turns with the picture, so it tumbles off the walls and shoves its neighbours corner-first. See below for how it is spun.
 - **Per-window toggles** — pin (`Super+P`), collision off (`Super+N`), calm everything (`Super+Shift+C`).
-- **What a window is made of** — `[[rule]]` sets `mass`, `bounce`, `friction` and `gravity` per window, so a video player can be eight times as heavy as a terminal and a terminal can be a balloon that drifts upward. The properties travel with the window, not with where it happens to be.
+- **What a window is made of** — `[[rule]]` sets `mass`, `bounce`, `friction`, `gravity`, `hardness` and `toughness` per window, so a video player can be eight times as heavy as a terminal and a terminal can be a balloon that drifts upward. The properties travel with the window, not with where it happens to be.
+- **Breakable windows** — a single hard enough collision destroys a window: `damage(A→B) = mass(A) · (speed / hp_break_speed)² · hardness(A)` against `hp(B) = mass(B) · toughness(B)`. Damage is never accumulated, so anything that survives a hit is unharmed by it, and walls never deal it — otherwise everything dropped on the floor would shatter. There is deliberately **no config key to switch it on**: it is the one mode that can lose unsaved work, so it lives in the modes menu ("Breakable"), applies to the session you turned it on in, and is never written to disk. Windows are *asked* to close, so a client with something to save still gets to put up its dialog.
+- **Bars can be solid** — `solid_bars` makes the space a layer-shell bar reserved into floor and ceiling, so a window cannot be thrown behind waybar. fwm's own strip floats above the windows either way.
 - **Physics per desktop** — a `[physics.<name>]` profile writes gravity, friction, restitution or density and names the desktops it applies to. Desktop 4 on the moon, desktop 8 underwater; drag a window across the edge and it changes as it goes. `Super+G` remains the master switch, and what it cycles through is `gravity_steps` in the config.
 
 ### Free rotation (experimental)
@@ -148,7 +166,8 @@ rate your hand was turning it.
 - **Smooth tile animations** — windows glide into their slots (~250 ms, configurable) instead of teleporting.
 - **Configurable gaps** — inner (`gaps_in`) and outer (`gaps_out`).
 - **Keyboard control** — directional focus (`Super+Arrows`), move window (`Super+Shift+Arrows`), flip split orientation (`Super+S`).
-- **Pick a tile up** — `Super+Drag` takes the window out of the layout the moment the hand moves; the slot closes behind it and the window is free. Drop it beside another one — the side of that window your cursor is nearest is the side it lands on — or carry it into the edge of the screen and onto another desktop, or onto a physics desktop, where it just stays free.
+- **Pick a tile up** — `Super+Drag` takes the window out of the layout the moment the hand moves; the slot closes behind it and the window is free. It comes off at one size whatever column it sat in (`[tiling] pickup`), rather than handing you a full-height tile to carry. Drop it beside another one — the side of that window your cursor is nearest is the side it lands on — or carry it into the edge of the screen and onto another desktop, or onto a physics desktop, where it just stays free.
+- **Carried as a drop** — with `effects.droplet` the window rounds off at the corners on its way out of the layout and is carried as a drop, wobbling on the drag springs it already has; put down, it lands where the cursor let go and spreads out to the edges of its new slot, near corners first. `0` disables the shape without touching the resize.
 - **Resize from anywhere in the window** — `Super+RightDrag` moves the dividers along the two edges nearest your hand (instant, no animation lag), so there is no seam to aim at. A window that refuses to shrink past its own minimum stops the divider there instead of letting its neighbour slide underneath it.
 - **Swap two tiles** — `Super+Shift+Drag`. All of these are `[mouse]` binds like any other; see below.
 
@@ -183,12 +202,13 @@ rate your hand was turning it.
 - **Unfocused windows fall back** — `inactive_opacity` dims everything that is not the window you are working in, so focus reads without the border having to shout. Off with `1.0`.
 - **Window fade-in** — new windows ease in over ~260 ms (configurable, 0 disables).
 - **Impact effects** — windows squash and stretch where they hit; optional camera shake on hard landings.
-- **Wobbly windows** — a dragged window goes soft and bends, the way KDE's do. See below.
+- **Wobbly windows** — a dragged window goes soft and bends, the way KDE's do. Its shadow goes out while it bends, since a rectangle cannot bend with it. See below.
+- **Grass along the bottom** — an optional lawn on the bottom edge of every monitor, standing where that monitor's floor is, drawn as tapering blades shaded by how near the front they are. `wind` sets gusts travelling across it — `0` is a still lawn drawn once and left alone, `0.35` a breeze, past `1` a storm — and `fps` (24 by default) is the cost dial, since the whole strip is repainted while it sways. Grass and wind are separate switches in the modes menu, so the lawn can stand still without being turned off. See [`[grass]`](docs/configuration.md).
 - **Rotated and bent windows** — a spinning window is drawn at any angle, not in quarter turns, and a dragged one is drawn through a deforming mesh. wlroots' scene graph is axis-aligned to its bones, so these two draw their own geometry on the renderer's GL context (`src/rotate.c`); everything else stays on the public API.
 - **Wallpaper-derived palette** — optionally tint the whole UI toward the wallpaper's dominant hue (`color_source = "wallpaper"`).
 - **Minimal tray** — flat chevron-ended islands: focused window + physics readout, desktop indicators, a stats pill, a modes pill, clock. No titlebars anywhere (server-side decorations).
 - **Stats pill** — what the machine is doing, in the tray: `CPU 12% • RAM 7.4G • GPU 41%`. Click it (or bind `stats_menu`) for a switch per readout. See below.
-- **Modes pill** — four icons between the desktop indicators and the clock (tiling, floating, gravity, cava), lit when the mode is on. Click it for a menu of switches; two rows are segmented controls rather than switches, because they are not on-off things — cava (off / visual / physical) and mass (size / ram: what decides how heavy a window is, its size or how much memory the application is using). The mass and sound choices are remembered in `~/.local/state/fwm/modes` and survive a restart. Fixed width, and dropped rather than squeezed on a screen too narrow to hold it — the clock grows with the locale's date and the desktop island is centred, so something has to give, and losing a pill that is also a keybind beats overlapping the clock.
+- **Modes pill** — four icons between the desktop indicators and the clock (tiling, floating, gravity, cava), lit when the mode is on. Click it for a menu of ten rows: tiling, floating, gravity, mass, sound, cava, grass, wind, ring (the desktop strip closed into a loop) and breakable. Two of them are segmented controls rather than switches, because they are not on-off things — cava (off / visual / physical) and mass (size / ram: what decides how heavy a window is, its size or how much memory the application is using). The mass and sound choices are remembered in `~/.local/state/fwm/modes` and survive a restart; breakable deliberately is not, and every session starts with windows unbreakable. Fixed width, and dropped rather than squeezed on a screen too narrow to hold it — the clock grows with the locale's date and the desktop island is centred, so something has to give, and losing a pill that is also a keybind beats overlapping the clock.
 - **Transparency** — client alpha (e.g. kitty `background_opacity`) is rendered as-is.
 - **Fake fullscreen** (`Super+D`) keeps the tray visible; **real fullscreen** (`Super+F`) hides it and covers the whole output.
 
@@ -327,7 +347,7 @@ fwmctl output eDP-1 enabled=off                   # put one out
 
 Everything in one command is applied together or not at all: the whole change is tested against the hardware first, so a mode a monitor cannot do leaves it running the one it had rather than going black. `mode=` picks from what `fwmctl outputs` lists, and a size that is not on that list is tried as a custom mode. Like `set`, none of it is written to `config.toml` — a reload puts the file's arrangement back.
 
-The desktop's size is the primary monitor's, so a second monitor of a different size shows that same desktop letterboxed or clipped rather than a differently-shaped one.
+The desktop's size is the primary monitor's, so a second monitor of a different size shows that same desktop letterboxed or clipped rather than a differently-shaped one. The **floor** is the exception, because a floor you can see under is worse than a clipped edge: each desktop gets the floor of whichever monitor is showing it, so windows land on the bottom of the screen you are looking at, and the visualiser bars and the grass stand at that same height.
 
 Known gaps: output scale is applied to the monitor and to client surfaces, but fwm's own chrome (status strip, launcher, expo) is still drawn at logical size and scaled up, so it is soft rather than crisp on a HiDPI screen. No IME (xkb layouts do work).
 
@@ -714,6 +734,11 @@ max_throw_speed       = 1800.0   # the world's ONE speed limit: nothing dynamic
                                  # goes faster, however it was set moving
 stop_speed_threshold  = 1.0     # below this a window is considered at rest
 tick_rate             = 60.0    # physics steps per second
+#solid_bars           = true    # a bar's reserved strip becomes floor/ceiling
+#hp_break_speed       = 0.0     # breakable windows: how fast a window must hit
+                                # one of its OWN mass to destroy it. 0 follows
+                                # max_throw_speed. Switched on in the modes
+                                # menu only — never from the config
 
 [input]
 # Several layouts + a grp:* option gives you layout switching for free.
@@ -760,6 +785,7 @@ natural        = true  # the desktop strip follows your fingers, as on a phone
 gaps_in    = 6       # px between tiles
 gaps_out   = 14      # px between tiles and screen edges
 anim_speed = 12.0    # tile glide speed (1/s); 0 = instant
+pickup     = 0.28    # the size a tile comes off the layout at, x the screen
 
 [camera]
 anim_ms    = 350.0   # desktop-switch slide (ease-in-out); 0 = instant snap
@@ -772,8 +798,22 @@ wrap       = false   # a ring: past the last desktop is the first (next/prev,
 camera_shake = 0.0   # jolt the view on hard impacts; off by default, 1.0 to enable
 squash       = 1.0   # windows deform on impact, scaled by speed; 0 disables
 jelly        = 1.0   # how far a dragged window bends (wobbly windows); 0 disables
+droplet      = 1.0   # a tile rounds into a drop as it leaves the layout; 0 = off
 spin         = 1.0   # strength of the spin_window kick (experimental); 0 disables
 shot_fly     = 1.0   # region screenshot peels off and flies away; 0 disables
+live         = 1.0   # keep the client drawing while an effect hides it;
+                     # 0 = a still frame, cheaper on tired hardware
+
+[grass]
+enabled    = false
+height     = 100     # the size knob: everything else scales against it
+density    = 42      # blades per 100px of screen width
+width      = 5       # px across the base of a front-row blade
+opacity    = 1.0
+color      = "#4f7a34"
+wind       = 0.35    # 0 = a still lawn drawn once; past 1 is a storm
+wind_speed = 260     # px/s the gusts travel across the screen
+fps        = 24      # repaint ceiling while it sways — the main cost dial
 
 [focus]
 # When an app asks to be raised (xdg-activation): "never" ignores it,
