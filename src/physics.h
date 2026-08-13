@@ -131,6 +131,18 @@ typedef struct {
      * on it and the window is pushed up rather than left buried. */
     int inset_top, inset_bottom;
 
+    /* How tall the monitor showing each desktop is, in px, or 0 for "nobody is
+     * showing it" — which is the same answer as "as tall as the screen", since
+     * a desktop nobody looks at may as well keep the default floor.
+     *
+     * A desktop column is screen_height tall for LAYOUT purposes on every
+     * monitor, because the world is one strip and the strip has one shape. But
+     * the floor a window lands on belongs to the glass it lands on: with a
+     * 1080p monitor next to a 1440p one, a floor at 1440 is 360px below the
+     * bottom of the smaller screen and windows settle where nobody can see
+     * them. Set on every step like wrap, so a mode change or a hotplug moves
+     * the floor under a window already resting on it. */
+    int desktop_h[FWM_DESKTOPS];
 
     /* Configurable physics parameters */
     double friction;

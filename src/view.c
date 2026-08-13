@@ -748,10 +748,17 @@ void view_map(FwmView *view) {
     int restored = session_claim_desktop(view->server, view);
     if (restored >= 0 && !(have_rule && rule.desktop >= 0)) current_desktop = restored;
     /* Centred on its desktop — which IS one screen now, so this lands in the
-     * middle of whichever monitor is showing it. */
+     * middle of whichever monitor is showing it. Centred on that monitor's
+     * size rather than the column's: a column is the primary monitor's shape,
+     * and centring a window in it puts it below the middle of a shorter screen
+     * and above the middle of a taller one. Nobody showing this desktop leaves
+     * the column as the only size there is. */
+    FwmOutput *mon = server_output_showing(view->server, current_desktop);
+    int mon_w = mon ? mon->box.width  : view->server->screen_width;
+    int mon_h = mon ? mon->box.height : view->server->screen_height;
     int cx = current_desktop * view->server->screen_width
-           + (view->server->screen_width - initial_w) / 2;
-    int cy = (view->server->screen_height - initial_h) / 2;
+           + (mon_w - initial_w) / 2;
+    int cy = (mon_h - initial_h) / 2;
     
     view->x = cx;
     view->y = cy;

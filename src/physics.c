@@ -34,6 +34,19 @@
  * ~1..20 m range the solver is tuned for. */
 #define PX_PER_METER 100.0
 #define WALL_THICK_PX 60.0
+/* The floor is one box per desktop (they sit at different heights), and two
+ * boxes butted exactly edge to edge give Box2D a vertex to catch on: a window
+ * sliding across the join between two desktops snags on the seam. Overlapping
+ * them welds the seam shut. Small on purpose — where the two floors are at
+ * DIFFERENT heights the overlap is a ledge sticking out over the lower one,
+ * and a ledge nobody can feel is the whole point. */
+#define FLOOR_SEAM_PX 2.0
+/* A bar can reserve more space than a short monitor has, which would leave the
+ * floor above the ceiling and Box2D solving a world with negative room in it.
+ * The compositor guards this against the primary monitor's height (see
+ * physics_tick_cb) but cannot for a monitor shorter than that one, so the last
+ * word is here: whatever else happens, a desktop keeps this much play. */
+#define MIN_PLAY_H_PX 64.0
 #define POS_EPS 0.05  /* px: threshold to treat a mirror write as "external" */
 #define VEL_EPS 0.05  /* px/s */
 
@@ -65,11 +78,15 @@ struct BodySlot {
 struct Engine {
     b2WorldId world;
     struct BodySlot slots[MAX_WINDOWS];
-    b2BodyId walls[4];
+    /* 0 left, 1 right, 2 ceiling, then one floor per desktop: the ceiling is
+     * the same line on every screen (an inset from the top is an inset from
+     * the top), but the floor is wherever that desktop's monitor ends. */
+    b2BodyId walls[3 + FWM_DESKTOPS];
     bool walls_built;
     int wall_w, wall_h;      /* screen dims the walls were built for */
     int wall_wrap;           /* and whether the world was a ring at the time */
     int wall_top, wall_bottom; /* and the insets bars had reserved */
+    int wall_desk_h[FWM_DESKTOPS]; /* and how tall each desktop's monitor was */
 
     /* Visualiser bars (physics_set_bars). Shapes are built once at a fixed
      * size and then only ever slid vertically, so a bar changing height costs
@@ -275,6 +292,11 @@ void physics_init(PhysicsWorld *world) {
     world->wrap = 0;
     /* And the screen is the whole of it until a bar reserves part of it. */
     world->inset_top = world->inset_bottom = 0;
+    /* And every desktop is as tall as the screen until a monitor says how tall
+     * IT is. Spelled out for the same reason `wrap` is: a caller with a
+     * stack-allocated world would otherwise get garbage heights and floors at
+     * arbitrary depths. */
+    for (int i = 0; i < FWM_DESKTOPS; i++) world->desktop_h[i] = 0;
     world->impact_count = 0;
 
     // Set system defaults just in case config doesn't overwrite them.
@@ -605,57 +627,90 @@ static b2Filter filter_for_wall(void) {
     return f;
 }
 
+/* One static box, centre and half-extents in px. Every wall in the world is
+ * this shape with different numbers. */
+static b2BodyId make_wall(struct Engine *eng, PhysicsWorld *world,
+                          double cx, double cy, double hw, double hh) {
+    b2BodyDef bd = b2DefaultBodyDef();
+    bd.type = b2_staticBody;
+    bd.position = (b2Vec2){px2m(cx), px2m(cy)};
+    b2BodyId id = b2CreateBody(eng->world, &bd);
+
+    b2ShapeDef sd = b2DefaultShapeDef();
+    sd.material.restitution = (float)world->restitution;
+    // Real-world feel: some Coulomb friction so a window sliding along the
+    // floor/wall actually grinds to a stop instead of gliding like on ice.
+    // (The old "sticking" bug was the pull-back clamp, not this friction.)
+    sd.material.friction = 0.35f;
+    sd.enableHitEvents = true;           // hitting the floor counts as an impact
+    sd.filter = filter_for_wall();
+    b2Polygon box = b2MakeBox(px2m(hw), px2m(hh));
+    b2CreatePolygonShape(id, &sd, &box);
+    return id;
+}
+
+/* Where the floor of desktop `d` sits: the bottom of the monitor showing it,
+ * less whatever a bar along that bottom reserved. */
+static double floor_y_for(const PhysicsWorld *world, int d, int screen_h) {
+    double h = world->desktop_h[d] > 0 ? world->desktop_h[d] : screen_h;
+    double y = h - world->inset_bottom;
+    if (y < world->inset_top + MIN_PLAY_H_PX) y = world->inset_top + MIN_PLAY_H_PX;
+    return y;
+}
+
 static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w, int screen_h) {
     /* The floor and ceiling stand at the edges of the space bars left free,
      * which is the whole screen unless [physics] solid_bars says otherwise. */
     int top = world->inset_top, bottom = world->inset_bottom;
-    if (eng->walls_built && eng->wall_w == screen_w && eng->wall_h == screen_h
+    bool same = eng->walls_built && eng->wall_w == screen_w && eng->wall_h == screen_h
         && eng->wall_wrap == world->wrap
-        && eng->wall_top == top && eng->wall_bottom == bottom) {
-        return;
-    }
+        && eng->wall_top == top && eng->wall_bottom == bottom;
+    for (int i = 0; same && i < FWM_DESKTOPS; i++)
+        same = eng->wall_desk_h[i] == world->desktop_h[i];
+    if (same) return;
+
     if (eng->walls_built) {
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 3 + FWM_DESKTOPS; i++) {
             if (B2_IS_NON_NULL(eng->walls[i])) b2DestroyBody(eng->walls[i]);
+            eng->walls[i] = b2_nullBodyId;
         }
     }
 
     double W = 10.0 * screen_w; // full virtual-desktop span
     double T = top;             // ceiling y: 0, or below a bar anchored up there
-    double H = screen_h - bottom; // floor y: the screen, or on top of a bar
     double t = WALL_THICK_PX;
 
-    // {center_x, center_y, half_w, half_h} in px; inner faces flush with [0,W]x[T,H]
-    double specs[4][4] = {
-        {-t / 2.0,     (T + H) / 2.0, t / 2.0, (H - T) / 2.0 + t}, // left
-        {W + t / 2.0,  (T + H) / 2.0, t / 2.0, (H - T) / 2.0 + t}, // right
-        {W / 2.0,      T - t / 2.0,   W / 2.0 + t, t / 2.0},       // top
-        {W / 2.0,      H + t / 2.0,   W / 2.0 + t, t / 2.0},       // bottom
-    };
+    /* The end walls have to reach past the DEEPEST floor in the world, not
+     * past this desktop's — they are one pair for the whole strip, and a
+     * window sitting on the low floor of a tall monitor at the far end must
+     * still find something there. */
+    double deepest = T;
+    for (int i = 0; i < FWM_DESKTOPS; i++) {
+        double y = floor_y_for(world, i, screen_h);
+        if (y > deepest) deepest = y;
+    }
 
-    for (int i = 0; i < 4; i++) {
-        /* A ring has no ends, so it has no end walls: a window thrown off the
-         * left of the first desktop must fly on and arrive at the right of the
-         * last, not bounce. The floor and ceiling stay whatever happens. */
-        if (world->wrap && i < 2) {
-            eng->walls[i] = b2_nullBodyId;
-            continue;
-        }
-        b2BodyDef bd = b2DefaultBodyDef();
-        bd.type = b2_staticBody;
-        bd.position = (b2Vec2){px2m(specs[i][0]), px2m(specs[i][1])};
-        eng->walls[i] = b2CreateBody(eng->world, &bd);
+    /* A ring has no ends, so it has no end walls: a window thrown off the left
+     * of the first desktop must fly on and arrive at the right of the last, not
+     * bounce. The floor and ceiling stay whatever happens. */
+    if (world->wrap) {
+        eng->walls[0] = eng->walls[1] = b2_nullBodyId;
+    } else {
+        double cy = (T + deepest) / 2.0, hh = (deepest - T) / 2.0 + t;
+        eng->walls[0] = make_wall(eng, world, -t / 2.0,    cy, t / 2.0, hh);
+        eng->walls[1] = make_wall(eng, world, W + t / 2.0, cy, t / 2.0, hh);
+    }
 
-        b2ShapeDef sd = b2DefaultShapeDef();
-        sd.material.restitution = (float)world->restitution;
-        // Real-world feel: some Coulomb friction so a window sliding along the
-        // floor/wall actually grinds to a stop instead of gliding like on ice.
-        // (The old "sticking" bug was the pull-back clamp, not this friction.)
-        sd.material.friction = 0.35f;
-        sd.enableHitEvents = true;       // hitting the floor counts as an impact
-        sd.filter = filter_for_wall();
-        b2Polygon box = b2MakeBox(px2m(specs[i][2]), px2m(specs[i][3]));
-        b2CreatePolygonShape(eng->walls[i], &sd, &box);
+    eng->walls[2] = make_wall(eng, world, W / 2.0, T - t / 2.0, W / 2.0 + t, t / 2.0);
+
+    /* One floor per desktop, each at its own monitor's bottom, each overlapping
+     * its neighbours so the strip reads as a single surface (FLOOR_SEAM_PX). */
+    for (int d = 0; d < FWM_DESKTOPS; d++) {
+        double y = floor_y_for(world, d, screen_h);
+        eng->walls[3 + d] = make_wall(eng, world,
+                                      (d + 0.5) * screen_w, y + t / 2.0,
+                                      screen_w / 2.0 + FLOOR_SEAM_PX, t / 2.0);
+        eng->wall_desk_h[d] = world->desktop_h[d];
     }
 
     eng->walls_built = true;
@@ -1190,7 +1245,15 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
             // to Box2D so restitution can bounce them; clamping/zeroing here would
             // kill the bounce and make windows slide along the wall. On a real
             // escape, reflect (don't zero) so the window springs back into view.
-            double W = 10.0 * screen_width, H = (double)screen_height;
+            /* The net has to sit at the same depth as the floor the window is
+             * standing over, or on a monitor shorter than the screen it would
+             * catch windows below the glass instead of before it. Guarded like
+             * material_for() does: desktop_id is set from a position, and a
+             * position can be anywhere. */
+            int d = m->desktop_id;
+            if (d < 0 || d >= FWM_DESKTOPS) d = 0;
+            double W = 10.0 * screen_width;
+            double H = world->desktop_h[d] > 0 ? world->desktop_h[d] : (double)screen_height;
             double max_x = W - m->width;  if (max_x < 0) max_x = 0;
             double max_y = H - m->height; if (max_y < 0) max_y = 0;
             double r = world->restitution;

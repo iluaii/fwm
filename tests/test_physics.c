@@ -242,6 +242,56 @@ static void test_solid_bars_raise_the_floor(void) {
     physics_destroy(&w);
 }
 
+/* A desktop shown on a monitor shorter than the strip gets a floor at the
+ * bottom of THAT monitor, and its neighbours keep theirs. This is #20: with a
+ * 1080p screen beside a 1440p one the strip is 1440 tall, and a window on the
+ * small screen used to settle 360px below the bottom of the glass. */
+static void test_short_monitor_raises_the_floor(void) {
+    CASE("per-desktop floor");
+    PhysicsWorld w;
+    physics_init(&w);
+    w.gravity_scale = 1.0;
+    w.desktop_h[0] = 800;             /* a short monitor on desktop 0 */
+                                      /* and nothing said about desktop 1 */
+
+    PhysicsBody *a = physics_sync_body(&w, 1, 400, 100, 400, 300, SW);
+    PhysicsBody *b = physics_sync_body(&w, 2, SW + 400, 100, 400, 300, SW);
+    CHECK_NOT_NULL(a);
+    CHECK_NOT_NULL(b);
+    run(&w, 240);                     /* four seconds: long enough to settle */
+
+    a = physics_find_body(&w, 1);
+    b = physics_find_body(&w, 2);
+    CHECK_NOT_NULL(a);
+    CHECK_NOT_NULL(b);
+    /* On its own monitor's bottom, not the strip's. */
+    CHECK_DBL(a->y + 300, 800.0, 8.0);
+    /* The desktop nobody described still gets the screen. */
+    CHECK_DBL(b->y + 300, (double)SH, 8.0);
+    physics_destroy(&w);
+}
+
+/* The floor a window is standing over is also the one the escape net uses:
+ * shoved below a short monitor, it is caught at that monitor's bottom rather
+ * than at the strip's. */
+static void test_escape_net_follows_the_short_floor(void) {
+    CASE("per-desktop escape net");
+    PhysicsWorld w;
+    physics_init(&w);
+    w.gravity_scale = 0.0;
+    w.desktop_h[0] = 800;
+
+    PhysicsBody *b = physics_sync_body(&w, 1, 400, 100, 400, 300, SW);
+    CHECK_NOT_NULL(b);
+    physics_throw_body(&w, 1, 0.0, 6000.0);   /* straight down, hard */
+    run(&w, 120);
+
+    b = physics_find_body(&w, 1);
+    CHECK_NOT_NULL(b);
+    CHECK(b->y + 300 <= 800.0 + 8.0);         /* never got below the glass */
+    physics_destroy(&w);
+}
+
 /* And a bar along the TOP is a ceiling: a window thrown up bounces off the
  * underside of it rather than passing behind it. */
 static void test_solid_bars_lower_the_ceiling(void) {
@@ -266,6 +316,8 @@ int main(void) {
     test_wall_holds_a_line();
     test_solid_bars_raise_the_floor();
     test_solid_bars_lower_the_ceiling();
+    test_short_monitor_raises_the_floor();
+    test_escape_net_follows_the_short_floor();
     test_ring_carries_a_throw_round();
     test_ring_carries_a_throw_the_other_way();
     test_ring_crosses_only_when_clear();

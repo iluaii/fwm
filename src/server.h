@@ -577,7 +577,13 @@ typedef struct FwmServer {
 
     /* The size of ONE desktop, taken from the primary monitor. The world is a
      * strip of FWM_DESKTOPS columns this wide, and each monitor shows one of
-     * them through its own camera — see FwmOutput and server_output.c. */
+     * them through its own camera — see FwmOutput and server_output.c.
+     *
+     * This is the strip's shape, not any particular screen's. Anything that
+     * has to line up with the GLASS — where a window comes to rest, where a
+     * fullscreen video ends — asks the monitor showing that desktop instead
+     * (server_output_showing), because on a mixed-resolution setup the two
+     * answers differ. PhysicsWorld.desktop_h is that rule for the floor. */
     int screen_width;
     int screen_height;
 

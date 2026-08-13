@@ -285,12 +285,19 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
          * "The output" is the monitor the window is standing on, not the
          * world: on two monitors a fullscreen video must not straddle the
          * bezel. A single-output setup gets the box it always did. */
-        /* A desktop is one screen, so fullscreen is that screen. */
+        /* A desktop is one screen, so fullscreen is that screen — the physical
+         * one, not the strip's idea of one. A column is the size of the primary
+         * monitor, so on any other monitor "the whole column" is the wrong box:
+         * too tall on a shorter screen (the bottom of the video falls off the
+         * bottom of the glass) and too short on a taller one (a black band
+         * where the desktop ran out). The monitor showing this desktop knows
+         * its own size; with nobody showing it, the column is all there is. */
         if (real) {
+            FwmOutput *mon = server_output_showing(server, d);
             view->x = d * server->screen_width;
             view->y = 0;
-            view->width = server->screen_width;
-            view->height = server->screen_height;
+            view->width  = mon ? mon->box.width  : server->screen_width;
+            view->height = mon ? mon->box.height : server->screen_height;
         } else {
             /* Fake fullscreen is "as large as a window is allowed to be", which
              * is the same question the tiling layout answers — so it is the same

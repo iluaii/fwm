@@ -23,12 +23,15 @@ BUILD="$REPO/build-asan"
 KEEP=0
 LIST=0
 
-SCENARIOS="bare clients churn tiling groups desktops overlays physics reload ipc settings outputs xwayland threads kill"
+SCENARIOS="bare clients churn tiling groups desktops overlays physics reload ipc settings outputs monitors xwayland threads kill"
 
 # A scenario whose compositor has to be started differently says so here, in a
 # variable named after it. `outputs` needs a second monitor, and the headless
 # backend is the only place we can be sure of getting one.
 outputs_env="WLR_HEADLESS_OUTPUTS=2"
+# `monitors` needs two as well, of different sizes, and things to fall: fwm
+# boots in zero-g, and a window that never falls never finds a floor.
+monitors_env="WLR_HEADLESS_OUTPUTS=2 FWM_TEST_GRAVITY=1"
 
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
@@ -113,6 +116,8 @@ trap cleanup EXIT INT TERM
 
 start() {
     log="$LOGDIR/$1.log"
+    claims="$LOGDIR/$1.claims"
+    : >"$claims"
     shift
     # detect_leaks stays off: wlroots and the GL stack leak on exit by design,
     # and the noise would bury a real report. Use-after-free and overflow are
@@ -167,6 +172,47 @@ client() {
     sleep "${2:-1.2}"
 }
 
+# Wait for the world to stop moving. How long a window takes to come to rest
+# depends on how far it has to fall, which depends on the screen it is falling
+# down — so this polls for two identical readings rather than sleeping a
+# guessed amount, which on the tall screen guessed wrong.
+settle() {
+    _prev=""
+    i=0
+    while [ $i -lt 40 ]; do
+        _now="$(timeout 5 "$FWMCTL" windows 2>/dev/null | grep -o '"y":-\?[0-9]*' || true)"
+        [ -n "$_now" ] && [ "$_now" = "$_prev" ] && return 0
+        _prev="$_now"
+        i=$((i + 1))
+        sleep 0.5
+    done
+    return 0
+}
+
+# Most scenarios only have to survive. A few have an answer that can be wrong
+# without anything crashing — a window resting below the bottom of its screen
+# is invisible, not fatal — so those state what they expect and claim() checks
+# it.
+#
+# Its own file, NOT the compositor's log. The compositor holds that one open on
+# a plain descriptor and writes at its own offset, so lines appended to the end
+# by anyone else are overwritten by the next thing wlroots has to say — which
+# is how the first version of this passed against a compositor that had the bug.
+claim() {   # claim <what> <got> <want> [tolerance]
+    _tol="${4:-0}"
+    if [ -z "$2" ] || [ -z "$3" ]; then
+        echo "CLAIM FAILED: $1 — nothing to compare (got '$2', wanted '$3')" >>"$claims"
+        return 0
+    fi
+    _d=$(( $2 - $3 ))
+    [ "$_d" -lt 0 ] && _d=$(( - _d ))
+    if [ "$_d" -le "$_tol" ]; then
+        echo "CLAIM ok: $1 = $2" >>"$claims"
+    else
+        echo "CLAIM FAILED: $1 = $2, expected $3 (+/- $_tol)" >>"$claims"
+    fi
+}
+
 stop() {
     [ -n "$FWM_PID" ] || return 0
     for p in $KIDS; do kill "$p" 2>/dev/null || true; done
@@ -184,15 +230,21 @@ stop() {
 verdict() {
     name="$1"
     log="$LOGDIR/$name.log"
+    claims="$LOGDIR/$name.claims"
     bad=""
+    # A scenario that states no claims is not thereby correct — but it is also
+    # not making a claim, so only a FAILED one counts against it.
+    [ -f "$claims" ] || : >"$claims"
     grep -q "ERROR: AddressSanitizer" "$log" 2>/dev/null && bad="$bad AddressSanitizer"
     grep -q "ERROR: LeakSanitizer"    "$log" 2>/dev/null && bad="$bad LeakSanitizer"
     grep -q "runtime error:"          "$log" 2>/dev/null && bad="$bad UBSan"
     grep -q "WARNING: ThreadSanitizer" "$log" 2>/dev/null && bad="$bad ThreadSanitizer"
     grep -qE "Segmentation fault|Assertion .* failed" "$log" 2>/dev/null && bad="$bad crash"
+    grep -q "CLAIM FAILED"            "$claims" 2>/dev/null && bad="$bad claim"
 
     if [ -n "$bad" ]; then
         echo "  FAIL$bad"
+        grep "CLAIM FAILED" "$claims" 2>/dev/null | sed 's/^/    /'
         sed -n '/ERROR: \|runtime error:\|WARNING: ThreadSanitizer/,+12p' "$log" | head -30 | sed 's/^/    /'
         FAILED="$FAILED $name"
         KEEP=1   # a failing run's log is worth more than a tidy temp dir
@@ -435,6 +487,88 @@ sc_outputs() {
     act reload_config 0.6
     act expo 0.5
     act expo 0.5
+}
+
+# Monitors of DIFFERENT sizes, which is the one arrangement a single screen
+# cannot stand in for. The world is a strip of columns the size of the primary
+# monitor, but the floor a window lands on belongs to the glass it lands on: a
+# short screen beside a tall one used to get the tall one's floor, and windows
+# on it settled below the bottom of the screen where nobody could see them —
+# #20, and the reason PhysicsWorld.desktop_h exists.
+#
+# The only scenario that checks a number. It has to: when this is wrong nothing
+# crashes and no sanitizer says a word, the window is just gone from view. The
+# claim is the same on both screens — a window comes to rest on the bottom of
+# the monitor showing its desktop — which is what makes it a claim about the
+# rule rather than about two magic numbers.
+sc_monitors() {
+    [ -n "$TERM_CMD" ] || { echo "  (no client — skipped)"; return 0; }
+
+    names="$("$FWMCTL" outputs 2>/dev/null | grep -o '"name":"[^"]*"' | cut -d'"' -f4)"
+    tall_mon="$(echo "$names" | head -1)"
+    short_mon="$(echo "$names" | tail -1)"
+    [ -n "$tall_mon" ] && [ "$short_mon" != "$tall_mon" ] || {
+        echo "  (one monitor — skipped)"; return 0
+    }
+
+    # Which of the two is the primary is deliberately not decided here: the
+    # rule under test holds either way round, and the headless backend is free
+    # to hand them over in whatever order it likes.
+    ctl output "$tall_mon"  mode=1280x1024
+    ctl output "$short_mon" mode=1280x600
+    sleep 1
+
+    # Read the arrangement back rather than assuming it: a mode can be refused,
+    # and a scenario that then measured against the size it ASKED for would
+    # report a failure of the floor when what failed was the mode set.
+    outs="$("$FWMCTL" outputs 2>/dev/null | tr '{' '\n')"
+    desk_of()   { echo "$outs" | grep "\"name\":\"$1\"" | grep -o '"desktop":-\?[0-9]*' | cut -d: -f2; }
+    height_of() { echo "$outs" | grep "\"name\":\"$1\"" | grep -o '"height":[0-9]*'     | cut -d: -f2; }
+
+    tall_d="$(desk_of "$tall_mon")";   tall_h="$(height_of "$tall_mon")"
+    short_d="$(desk_of "$short_mon")"; short_h="$(height_of "$short_mon")"
+    [ "$tall_h" != "$short_h" ] || {
+        echo "  (both screens the same size — mode set refused, skipped)"; return 0
+    }
+
+    # One window per screen, and never two on one at once: a window that lands
+    # on top of another and stops there would be measured against a floor it
+    # was never resting on.
+    #
+    # The window to move is the one that was not there a moment ago, found by
+    # difference. Taking the first or the last id instead would be a guess
+    # about the order `windows` reports in, and guessing wrong moves the SAME
+    # window twice — which leaves both of them on one screen and every claim
+    # below measuring the same floor.
+    ids_now() { "$FWMCTL" windows 2>/dev/null | grep -o '"id":[0-9]*' | cut -d: -f2 | sort; }
+    for d in "$tall_d" "$short_d"; do
+        before="$(ids_now)"
+        client 35
+        id="$(ids_now | grep -vxF "${before:-!}" | head -1)"
+        [ -n "$id" ] || { echo "  (client never mapped — skipped)"; return 0; }
+        ctl window "$id" "desktop=$d"
+    done
+    settle
+
+    # Both on one screen means the moves did not take, and every claim below
+    # would be measuring one floor twice and passing while the other is broken.
+    wins="$("$FWMCTL" windows 2>/dev/null | tr '{' '\n' | grep '"id"' || true)"
+    on_short="$(echo "$wins" | grep -c "\"desktop\":$short_d," || true)"
+    on_tall="$(echo  "$wins" | grep -c "\"desktop\":$tall_d,"  || true)"
+    claim "windows sitting on the short screen" "$on_short" 1 0
+    claim "windows sitting on the tall screen"  "$on_tall"  1 0
+
+    # Every window, against the bottom of the screen showing the desktop it is
+    # on. A couple of pixels of tolerance: where a window comes to rest is the
+    # solver's answer, not arithmetic.
+    echo "$wins" | while read -r w; do
+        wd="$(echo "$w" | grep -o '"desktop":[0-9]*' | cut -d: -f2)"
+        wy="$(echo "$w" | grep -o '"y":-\?[0-9]*'    | cut -d: -f2)"
+        wh="$(echo "$w" | grep -o '"height":[0-9]*'  | cut -d: -f2)"
+        [ -n "$wd" ] && [ -n "$wy" ] && [ -n "$wh" ] || continue
+        if [ "$wd" = "$short_d" ]; then glass="$short_h"; else glass="$tall_h"; fi
+        claim "bottom of the window on desktop $wd" "$((wy + wh))" "$glass" 4
+    done
 }
 
 # The threaded half of the compositor, which every other scenario leaves
