@@ -455,6 +455,10 @@ void view_jelly_stop(FwmView *view) {
     view_set_content_enabled(view, true);
     if (border) view_set_border_enabled(view, 1);
     view_update_border_geometry(view);
+    /* The window is itself again and casts again — and this is the only place
+     * that says so on the live path, since view->jelly is what was keeping the
+     * shadow out. */
+    view_shadow_update(view);
 }
 
 /* Build (or rebuild) the snapshot, the two warp targets and the scene node.
@@ -626,6 +630,14 @@ void view_jelly_begin(FwmView *view, double strength, double grab_lx, double gra
     view->jelly_settling = 0;
     view->jelly_px = view->x;
     view->jelly_py = view->y;
+    /* Put the shadow out, now that there is a bent picture where the window
+     * used to be. The spin and the squash get this for free — they take a
+     * snapshot, and the snapshot hides the shadow for the length of the pass
+     * (see view_snapshot_into) — but the wobble's normal path bends the
+     * client's own texture and photographs nothing, so nothing was asking. A
+     * window shaken with its shadow left behind stands there wobbling over a
+     * rectangle that does not move with it. */
+    view_shadow_update(view);
     wobble_reset(&view->jelly_wob, view->jelly_w, view->jelly_h);
     wobble_grab(&view->jelly_wob, grab_lx, grab_ly);
 
