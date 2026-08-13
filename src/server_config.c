@@ -36,6 +36,7 @@
 #include "ui/launcher.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
+#include "grass.h"
 #include "group.h"
 
 #include <stdlib.h>
@@ -161,6 +162,10 @@ void server_state_save_modes(FwmServer *server) {
     fprintf(f, "mass = %s\n",
             server->config.physics.mass_mode == PHYSICS_MASS_RAM ? "ram" : "size");
     fprintf(f, "sound = %s\n", server->config.sound.collisions ? "on" : "off");
+    fprintf(f, "grass = %s\n", server->config.grass.enabled ? "on" : "off");
+    /* The strength, not just on/off: switching the wind off and restarting must
+     * not quietly forget a gale someone had tuned. */
+    fprintf(f, "wind = %.3f\n", server->config.grass.wind);
     /* hp is deliberately NOT written. It is the one mode that can destroy
      * unsaved work, and a setting that survives a restart is one you can be
      * living under without having chosen it today. Every session starts with
@@ -201,6 +206,13 @@ void server_state_apply_modes(FwmServer *server) {
         } else if (strcmp(key, "sound") == 0) {
             if      (strcmp(val, "on")  == 0) server->config.sound.collisions = 1;
             else if (strcmp(val, "off") == 0) server->config.sound.collisions = 0;
+        } else if (strcmp(key, "grass") == 0) {
+            if      (strcmp(val, "on")  == 0) server->config.grass.enabled = 1;
+            else if (strcmp(val, "off") == 0) server->config.grass.enabled = 0;
+        } else if (strcmp(key, "wind") == 0) {
+            char *end;
+            double w = strtod(val, &end);
+            if (end != val && w >= 0.0 && w <= 2.0) server->config.grass.wind = w;
         }
         /* No "hp" key: see server_state_save_modes. A file left over from a
          * build that did write one is simply skipped, like any unknown key. */
@@ -538,6 +550,9 @@ void server_set_wallpaper(FwmServer *server, const char *path) {
                 server_reclaim_memory();
             }
         }
+        /* The new set went in above everything already in the background layer,
+         * grass included. */
+        if (out->grass) grass_raise(out->grass);
     }
 
     /* Start (or stop) driving video frames for whatever was just built. */
@@ -639,6 +654,7 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
                     wallpaper_update(out->wallpaper, out->camera_x);
                 }
             }
+            if (out->grass) grass_raise(out->grass);
         }
         /* A reload that drops a video wallpaper releases the same hundreds of
          * MB as picking a new one, and takes the same cut-not-fade path. */

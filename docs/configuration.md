@@ -23,7 +23,7 @@ Contents: [physics](#physics) · [per-desktop physics](#per-desktop-physics) ·
 [decor](#decor) · [input](#input) · [focus](#focus) · [effects](#effects) ·
 [session](#session) · [binds](#binds) · [modes](#modes) · [mouse](#mouse) ·
 [gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_picker](#wallpaper_picker) ·
-[cava](#cava) · [sound](#sound) · [output](#output)
+[cava](#cava) · [grass](#grass) · [sound](#sound) · [output](#output)
 
 ---
 
@@ -613,6 +613,60 @@ the floor of the desktop you are looking at.
 
 Every knob is live: `fwmctl set cava.push 2` while the music plays. `bars` is the
 exception — it rebuilds every bar body, so it takes a reload.
+
+## grass
+
+A strip of grass along the bottom of every monitor, standing on the line a
+window comes to rest on. Decoration only — it does not touch the windows.
+
+```toml
+[grass]
+enabled    = true
+height     = 100.0     # px the tallest blades reach — the size knob
+density    = 42.0      # blades per 100px of width, 1..200
+width      = 5.0       # px across the base of a front-row blade
+opacity    = 1.0
+color      = "#4f7a34"
+wind       = 0.35      # 0..2; 0 is a still lawn
+wind_speed = 260.0     # px/s the gusts travel
+fps        = 24.0      # repaint ceiling while it sways
+```
+
+Every monitor grows its own patch, sized to its own width and rooted on its own
+bottom edge, which is where the floor of the desktop it shows is — on a
+mixed-resolution setup the shorter screen's grass is not left floating.
+
+Windows standing in the strip bend it. A blade under a window's lower edge is
+held down far enough for its tip to fit under it — so a window coming down lays
+the blades over further and further, and lifting it lets them stand straight back
+up. A window moving sideways combs them the way it is going, and one sitting
+still pushes the blades under it out toward its nearer edge. It is switchable
+from the modes menu, which remembers the choice.
+
+Each blade is a spring: the wind is two travelling waves and a slow swell, and
+every blade meets it with its own stiffness and its own phase, so the patch
+bends in gusts rather than as one sheet. Blades at the back are sheltered by the
+ones in front, and a blade bent over gets lower rather than longer.
+
+Wind costs what any animation costs, and the cost is the repaint: the whole
+strip is redrawn, and cairo charges by the blade — about 3.3ms for 540 blades,
+5ms for the 800 a 1920-wide screen carries. At `fps = 24` that is roughly a
+tenth of a core, continuously.
+
+Three dials if that is too much, in the order worth trying: `fps` (15 is still
+smooth for something this slow, and costs about half of 24), `density` (the cost
+is per blade, so it is linear), and `wind = 0`, which is free — the strip goes back
+to a still picture drawn once and the compositor idles again.
+
+The wind never keeps the compositor at the full tick rate: it drives the tick at
+`fps` instead, so nothing else in the simulation is woken 60 times a second to
+feed it. A repaint is also skipped whenever no blade has moved half a pixel
+since the last one, and the whole thing stops under a fullscreen window — the
+same condition that pauses a video wallpaper.
+
+Everything but `color` is live: `fwmctl set grass.wind 0.9`. The knobs that
+decide the blades themselves — `height`, `density`, `width` — re-grow the patch,
+so the lawn is reshuffled; the rest are applied to the patch already there.
 
 ## sound
 

@@ -602,6 +602,49 @@ typedef struct {
     double min_hz, max_hz; /* band edges of the log-spaced spectrum */
 } CavaConfig;
 
+/* ── grass ───────────────────────────────────────────────────────────── */
+
+/*
+ * A strip of grass along the bottom of every monitor, standing on the same line
+ * a window comes to rest on (see src/grass.c):
+ *
+ *   [grass]
+ *   enabled = true
+ *   height  = 100     # px the tallest blades reach
+ *   density = 42      # blades per 100px of screen width
+ *   width   = 5       # px at the base of a front-row blade
+ *   wind    = 0.35    # how hard it blows; 0 = a still lawn
+ *   color   = "#4f7a34"
+ *
+ * Off by default: it is a decoration, and a compositor should not start
+ * painting one because it was installed.
+ *
+ * `height` is the size knob — everything else is scaled against it, so raising
+ * it grows the whole patch rather than stretching thin blades.
+ *
+ * Wind costs: a swaying patch is repainted, so it keeps the frame loop running
+ * exactly as a playing visualiser does. `fps` is the ceiling on that — grass
+ * moves slowly enough that 30 is generous, and 60 buys nothing anyone can see.
+ * `wind = 0` puts the whole thing back to a still picture that is drawn once.
+ */
+/* What the modes menu switches the wind ON to, when nothing better is
+ * remembered. The same number [grass] wind defaults to — a switch flicked on
+ * should give what the config would have. */
+#define GRASS_WIND_DEFAULT 0.35
+
+typedef struct {
+    int    enabled;
+    double height;   /* px the tallest blades reach */
+    double density;  /* blades per 100px of screen width */
+    double width;    /* px across the base of a front-row blade */
+    double opacity;  /* 0..1 over the wallpaper */
+    double wind;     /* 0 = still; how far the gusts bend a blade over */
+    double wind_speed; /* px/s the gusts travel across the screen */
+    double fps;      /* ceiling on repaints while anything is moving */
+    /* RGBA as parse_hex_color leaves it: premultiplied. */
+    float  color[4];
+} GrassConfig;
+
 /* ── collision sound ─────────────────────────────────────────────────── */
 
 /*
@@ -894,6 +937,7 @@ typedef struct {
     MouseConfig     mouse;
     GesturesConfig  gestures;
     CavaConfig      cava;
+    GrassConfig     grass;
     SoundConfig     sound;
     StatsConfig     stats;
     KeyBind        *keys;

@@ -103,6 +103,19 @@ static const ConfigOption config_option_table[] = {
     { "cava.push",                      CFG_OPT_DOUBLE, offsetof(FwmConfig, cava.push),                       0.0,     4.0,    "physical bar height vs. drawn" },
     { "cava.opacity",                   CFG_OPT_DOUBLE, offsetof(FwmConfig, cava.opacity),                    0.0,     1.0,    "drawn bar alpha" },
 
+    /* The whole patch is regrown when any of these moves — the strip is a
+     * picture, not a row of nodes, so there is nothing cheaper to do and
+     * nothing that has to stay put. `color` is absent only because the table
+     * carries numbers; it is a reload away. */
+    { "grass.enabled",                  CFG_OPT_INT,    offsetof(FwmConfig, grass.enabled),                   0.0,     1.0,    "1 = grass along the bottom of the screen" },
+    { "grass.height",                   CFG_OPT_DOUBLE, offsetof(FwmConfig, grass.height),                    4.0,  2000.0,    "px the tallest blades reach" },
+    { "grass.density",                  CFG_OPT_DOUBLE, offsetof(FwmConfig, grass.density),                   1.0,   200.0,    "blades per 100px of width" },
+    { "grass.width",                    CFG_OPT_DOUBLE, offsetof(FwmConfig, grass.width),                     0.5,    40.0,    "px across the base of a blade" },
+    { "grass.opacity",                  CFG_OPT_DOUBLE, offsetof(FwmConfig, grass.opacity),                   0.0,     1.0,    "blade alpha over the wallpaper" },
+    { "grass.wind",                     CFG_OPT_DOUBLE, offsetof(FwmConfig, grass.wind),                      0.0,     2.0,    "how far a gust bends a blade; 0 = still" },
+    { "grass.wind_speed",               CFG_OPT_DOUBLE, offsetof(FwmConfig, grass.wind_speed),                0.0,  4000.0,    "px/s the gusts travel" },
+    { "grass.fps",                      CFG_OPT_DOUBLE, offsetof(FwmConfig, grass.fps),                       5.0,   144.0,    "repaint ceiling while it sways" },
+
     /* `path` is absent for the same reason cava.bars is: a new sample means
      * reloading it, which is a config-reload job. Everything else here is felt
      * on the next collision. */

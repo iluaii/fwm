@@ -112,6 +112,10 @@ typedef struct FwmOutput {
      * camera. */
     struct FwmWallpaper *wallpaper;
     struct FwmWallpaper *wallpaper_prev;  /* outgoing set, alive during a fade */
+    /* The grass along the bottom of THIS monitor: its own width, and rooted on
+     * its own bottom edge, which is where the floor of the desktop it shows
+     * is. NULL whenever [grass] is off. */
+    struct FwmGrass *grass;
     /* Its own status strip, at the top of this monitor, and where that strip's
      * islands landed — hit-testing and the modes menu's anchor both read the
      * geometry of the strip they were aimed at, never another monitor's. */
@@ -302,6 +306,11 @@ typedef struct FwmServer {
      * being abandoned — see server_cava_sync. */
     double cava_retry_at;
     int cava_reported;   /* the "no sound server" line has been logged once */
+
+    /* The wind strength the modes menu last switched OFF, so switching it back
+     * on restores what was there instead of the built-in default. Zero until
+     * the switch has been used at all. */
+    double grass_wind_saved;
 
     /* The knock windows make when they collide ([sound] collisions). NULL
      * whenever the feature is off or the mixer thread could not be started, and

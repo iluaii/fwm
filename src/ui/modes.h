@@ -40,6 +40,8 @@ enum {
     MODE_ICON_MASS,
     MODE_ICON_SOUND,
     MODE_ICON_CAVA,
+    MODE_ICON_GRASS,
+    MODE_ICON_WIND,
     MODE_ICON_RING,
     MODE_ICON_HP,
     MODE_ICON_COUNT,
@@ -76,6 +78,8 @@ typedef struct ModesState {
     int mass;      /* PHYSICS_MASS_*: what decides how heavy a window is */
     int sound;     /* sound.collisions: windows knock when they hit something */
     int cava;      /* CAVA_MODE_* */
+    int grass;     /* grass.enabled: a strip of grass along the bottom */
+    int wind;      /* grass.wind > 0: the gusts that bend it */
     int ring;      /* camera.wrap: the desktops are a ring */
     int hp;        /* physics.hp: a hard enough hit destroys a window */
     double opacity;
@@ -103,6 +107,13 @@ enum {
     MODES_ROW_MASS,
     MODES_ROW_SOUND,
     MODES_ROW_CAVA,
+    /* Next to cava because it is the same kind of thing: something drawn along
+     * the bottom of the screen that the compositor keeps animating. */
+    MODES_ROW_GRASS,
+    /* Under grass because it is the grass's own knob: switching it on switches
+     * the grass on with it, since wind through a lawn nobody is drawing is a
+     * thing the user cannot see. */
+    MODES_ROW_WIND,
     MODES_ROW_RING,
     /* Last on purpose: it is the only row that can destroy someone's unsaved
      * work, so it is not the one the hand lands on by accident. */

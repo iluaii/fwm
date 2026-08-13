@@ -800,6 +800,8 @@ void server_modes_state(FwmServer *server, ModesState *out) {
     out->mass     = server->config.physics.mass_mode;
     out->sound    = server->config.sound.collisions;
     out->cava     = server->config.cava.mode;
+    out->grass    = server->config.grass.enabled;
+    out->wind     = server->config.grass.wind > 0.0;
     out->ring     = server->config.camera.wrap;
     out->hp       = server->config.physics.hp;
     out->opacity  = server->config.decor.tray_opacity;
@@ -911,6 +913,32 @@ int server_modes_menu_click(FwmServer *server, int row, int seg) {
         /* server_sound_sync starts or stops the mixer on the next tick; nothing
          * here has to know that a thread and an audio device are involved. */
         server->config.sound.collisions = !server->config.sound.collisions;
+        server_state_save_modes(server);
+        changed = 1;
+        break;
+    case MODES_ROW_GRASS:
+        /* server_grass_sync grows or tears out the strip on the next tick, on
+         * every monitor — nothing here has to know how many screens there are
+         * or how tall each one's patch is. */
+        server->config.grass.enabled = !server->config.grass.enabled;
+        server_state_save_modes(server);
+        changed = 1;
+        break;
+    case MODES_ROW_WIND:
+        if (server->config.grass.wind > 0.0) {
+            /* Remembered rather than reset, so a strength found by turning the
+             * knob (or written in the config) survives being switched off and
+             * back on — the row is a switch, not a way to lose the setting. */
+            server->grass_wind_saved = server->config.grass.wind;
+            server->config.grass.wind = 0.0;
+        } else {
+            server->config.grass.wind = server->grass_wind_saved > 0.0
+                                      ? server->grass_wind_saved : GRASS_WIND_DEFAULT;
+            /* Wind through a lawn nobody is drawing is a thing the user cannot
+             * see, and a switch that appears to do nothing is worse than one
+             * that does two things. */
+            server->config.grass.enabled = 1;
+        }
         server_state_save_modes(server);
         changed = 1;
         break;

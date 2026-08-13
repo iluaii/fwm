@@ -129,6 +129,62 @@ static void icon_cava(cairo_t *cr, double x, double y, double s) {
     cairo_fill(cr);
 }
 
+/* Three blades from one root. Drawn as tapered fills rather than strokes for
+ * the same reason the real thing is (see src/grass.c): an even-width line at
+ * 16px is wire, and the taper is the whole of what says "grass". The outer two
+ * lean away from the middle one, so the shape reads as a tuft and not as a
+ * fork. */
+static void icon_grass(cairo_t *cr, double x, double y, double s) {
+    /* Base x, tip x, tip y. The bases are kept a clear gap apart and the outer
+     * tips are dropped well below the middle one: with the bases touching and
+     * the tips level the shape is a crown, which is what the first version of
+     * this icon looked like. */
+    static const double base[3] = { 0.26, 0.52, 0.78 };
+    static const double tipx[3] = { 0.02, 0.44, 0.98 };
+    static const double tipy[3] = { 0.42, 0.02, 0.34 };
+    double hw = s * 0.075;
+    for (int i = 0; i < 3; i++) {
+        double bx = x + s * base[i], tx = x + s * tipx[i], ty = y + s * tipy[i];
+        double bend = (tx - bx) * 0.55;   /* the curve leans the way the tip does */
+        cairo_move_to(cr, bx - hw, y + s);
+        cairo_curve_to(cr, bx - hw, y + s * 0.62,
+                           bx + bend - hw * 0.6, ty + s * 0.16,
+                           tx, ty);
+        cairo_curve_to(cr, bx + bend + hw * 0.8, ty + s * 0.20,
+                           bx + hw, y + s * 0.62,
+                           bx + hw, y + s);
+        cairo_close_path(cr);
+    }
+    cairo_fill(cr);
+}
+
+/* Wind: three streaks travelling right, the top one curling back on itself.
+ * Streaks alone are speed lines and would read as "fast"; the curl is what says
+ * moving air. Different lengths, because three of a length is a stack of
+ * dashes. */
+static void icon_wind(cairo_t *cr, double x, double y, double s) {
+    double lw = fmax(1.6, s * 0.11);
+    cairo_set_line_width(cr, lw);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+
+    /* The curl: a streak that comes back over itself, like the head of a gust. */
+    cairo_move_to(cr, x + s * 0.06, y + s * 0.24);
+    cairo_line_to(cr, x + s * 0.62, y + s * 0.24);
+    cairo_curve_to(cr, x + s * 0.94, y + s * 0.24,
+                       x + s * 0.94, y - s * 0.06,
+                       x + s * 0.70, y + s * 0.08);
+    cairo_stroke(cr);
+
+    cairo_move_to(cr, x + s * 0.02, y + s * 0.54);
+    cairo_line_to(cr, x + s * 0.80, y + s * 0.54);
+    cairo_stroke(cr);
+
+    cairo_move_to(cr, x + s * 0.14, y + s * 0.84);
+    cairo_line_to(cr, x + s * 0.56, y + s * 0.84);
+    cairo_stroke(cr);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
+}
+
 /* A ring with a break in it: the desktops laid round, and the seam that closing
  * them shuts. Drawn open because the icon has to mean the THING, and the switch
  * beside it says whether it is on.
@@ -181,6 +237,8 @@ void modes_icon(cairo_t *cr, int icon, double x, double y, double size) {
     case MODE_ICON_MASS:     icon_mass(cr, x, y, size);     break;
     case MODE_ICON_SOUND:    icon_sound(cr, x, y, size);    break;
     case MODE_ICON_CAVA:     icon_cava(cr, x, y, size);     break;
+    case MODE_ICON_GRASS:    icon_grass(cr, x, y, size);    break;
+    case MODE_ICON_WIND:     icon_wind(cr, x, y, size);     break;
     case MODE_ICON_RING:     icon_ring(cr, x, y, size);     break;
     case MODE_ICON_HP:       icon_hp(cr, x, y, size);       break;
     default: break;
@@ -279,6 +337,8 @@ static void anim_reset(const ModesState *st) {
     g_anim.sw[MODES_ROW_FLOATING] = st->floating ? 1.0 : 0.0;
     g_anim.sw[MODES_ROW_GRAVITY]  = st->gravity  ? 1.0 : 0.0;
     g_anim.sw[MODES_ROW_SOUND]    = st->sound    ? 1.0 : 0.0;
+    g_anim.sw[MODES_ROW_GRASS]    = st->grass    ? 1.0 : 0.0;
+    g_anim.sw[MODES_ROW_WIND]     = st->wind     ? 1.0 : 0.0;
     g_anim.sw[MODES_ROW_HP]       = st->hp       ? 1.0 : 0.0;
     g_anim.open   = 0.0;
     g_anim.moving = 1;
@@ -468,18 +528,20 @@ static void draw_menu(cairo_t *cr, int w, int h, void *user) {
     pango_font_description_free(desc);
 
     static const char *name[MODES_ROW_COUNT] = {
-        "Tiling", "Floating", "Gravity", "Mass", "Sound", "Cava", "Ring", "Breakable",
+        "Tiling", "Floating", "Gravity", "Mass", "Sound", "Cava", "Grass", "Wind",
+        "Ring", "Breakable",
     };
     static const int   icon[MODES_ROW_COUNT] = {
         MODE_ICON_TILING, MODE_ICON_FLOATING, MODE_ICON_GRAVITY, MODE_ICON_MASS,
-        MODE_ICON_SOUND, MODE_ICON_CAVA, MODE_ICON_RING, MODE_ICON_HP,
+        MODE_ICON_SOUND, MODE_ICON_CAVA, MODE_ICON_GRASS, MODE_ICON_WIND,
+        MODE_ICON_RING, MODE_ICON_HP,
     };
     /* Lights the icon. Mass is never off, so what lights it is the position
      * that is doing something beyond the default — the same reading the cava
      * row gets from `cava != 0`. */
     const int on[MODES_ROW_COUNT] = {
         st->tiling, st->floating, st->gravity, st->mass == MODES_MASS_RAM,
-        st->sound, st->cava != 0, st->ring, st->hp,
+        st->sound, st->cava != 0, st->grass, st->wind, st->ring, st->hp,
     };
     /* Segment labels, per row; NULL for the rows that carry a switch. */
     static const char *const cava_labels[MODES_CAVA_SEGS] = { "off", "visual", "physical" };
@@ -586,6 +648,8 @@ bool modes_menu_tick(struct wlr_scene_buffer *buf, const ModesState *st, double 
         0.0, /* mass: segmented, eased below */
         st->sound ? 1.0 : 0.0,
         0.0, /* cava: segmented, eased below */
+        st->grass ? 1.0 : 0.0,
+        st->wind ? 1.0 : 0.0,
         st->ring ? 1.0 : 0.0,
         st->hp ? 1.0 : 0.0,
     };

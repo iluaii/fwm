@@ -741,6 +741,69 @@ static void load_cava(toml_table_t *root, FwmConfig *cfg) {
     }
 }
 
+/* ── grass section ───────────────────────────────────────────────────── */
+
+static void load_grass(toml_table_t *root, FwmConfig *cfg) {
+    GrassConfig *g = &cfg->grass;
+
+    g->enabled = 0;      /* a decoration, off until asked for */
+    g->height  = 100.0;
+    /* Found by looking: at 28 blades per 100px the strip reads as wire rather
+     * than as grass, and past ~70 the blades merge into a green bar. */
+    g->density = 42.0;
+    g->width   = 5.0;
+    g->opacity = 1.0;
+    g->wind       = GRASS_WIND_DEFAULT;
+    g->wind_speed = 260.0;
+    /* 24, not 30: the strip is repainted whole, and that repaint is what the
+     * feature costs (see grass.c). Nobody can tell grass swaying at 24 from
+     * grass swaying at 30, and the difference is a fifth of the cost. */
+    g->fps        = 24.0;
+    parse_hex_color("#4f7a34", g->color);   /* meadow green */
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "grass");
+    if (!tbl) return;
+
+    toml_datum_t e = toml_bool_in(tbl, "enabled");
+    if (e.ok) g->enabled = e.u.b ? 1 : 0;
+
+    LOAD_DOUBLE(tbl, "height",  g->height);
+    LOAD_DOUBLE(tbl, "density", g->density);
+    LOAD_DOUBLE(tbl, "width",   g->width);
+    LOAD_DOUBLE(tbl, "opacity", g->opacity);
+    LOAD_DOUBLE(tbl, "wind",       g->wind);
+    LOAD_DOUBLE(tbl, "wind_speed", g->wind_speed);
+    LOAD_DOUBLE(tbl, "fps",        g->fps);
+
+    toml_datum_t c = toml_string_in(tbl, "color");
+    if (c.ok) {
+        if (!parse_hex_color(c.u.s, g->color))
+            config_report_error(cfg, "[grass] color: \"%s\" is not #RRGGBB[AA]", c.u.s);
+        free(c.u.s);
+    }
+
+    if (g->height < 4.0)     g->height = 4.0;
+    if (g->height > 2000.0)  g->height = 2000.0;
+    /* Under one blade per 100px there is nothing to look at, and the cap is
+     * where the strip stops reading as blades and starts reading as a bar
+     * (grass.c caps the count too, for a wide screen at a legal density). */
+    if (g->density < 1.0)    g->density = 1.0;
+    if (g->density > 200.0)  g->density = 200.0;
+    if (g->width < 0.5)      g->width = 0.5;
+    if (g->width > 40.0)     g->width = 40.0;
+    if (g->opacity < 0.0)    g->opacity = 0.0;
+    if (g->opacity > 1.0)    g->opacity = 1.0;
+    if (g->wind < 0.0)       g->wind = 0.0;
+    /* Past 1 the blades are laid flat on their faces, which is a storm rather
+     * than a lawn, but it is a look and it costs nothing to allow. */
+    if (g->wind > 2.0)       g->wind = 2.0;
+    if (g->wind_speed < 0.0) g->wind_speed = 0.0;
+    if (g->wind_speed > 4000.0) g->wind_speed = 4000.0;
+    if (g->fps < 5.0)        g->fps = 5.0;
+    if (g->fps > 144.0)      g->fps = 144.0;
+}
+
 static void load_session(toml_table_t *root, SessionConfig *s, FwmConfig *cfg) {
     s->restore = SESSION_RESTORE_CRASH;
     if (!root) return;
@@ -1378,6 +1441,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_session(NULL, &cfg->session, cfg);
     load_gestures(NULL, cfg);
     load_cava(NULL, cfg);
+    load_grass(NULL, cfg);
     load_sound(NULL, cfg);
     load_stats(NULL, cfg);
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
@@ -1420,6 +1484,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_mouse(root, cfg);
     load_gestures(root, cfg);
     load_cava(root, cfg);
+    load_grass(root, cfg);
     load_sound(root, cfg);
     load_stats(root, cfg);
     load_wallpaper(root, cfg);

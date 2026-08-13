@@ -223,6 +223,10 @@ void server_output_register(FwmServer *server);
 /* Re-place every monitor from the current [[output]] entries. Called on reload;
  * a monitor arriving applies its own entry as it joins. */
 void server_outputs_apply_config(FwmServer *server);
+/* Bring every monitor's grass in line with [grass]: grow it, tear it out, or
+ * regrow it for knobs that changed. Called from the tick, like the cava sync,
+ * so `fwmctl set grass.*` and a config reload both land through one path. */
+void server_grass_sync(FwmServer *server);
 
 /* ── server_pointer.c ─────────────────────────────────────────────────── */
 void server_pointer_register(FwmServer *server);

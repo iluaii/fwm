@@ -113,6 +113,7 @@ set(SOURCES
     src/video.c
     src/audio.c
     src/cava.c
+    src/grass.c
     src/sound.c
     src/wav.c
     src/ram.c

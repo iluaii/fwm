@@ -36,6 +36,7 @@
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "cava.h"
+#include "grass.h"
 #include "sound.h"
 #include "ram.h"
 #include "group.h"
@@ -372,6 +373,39 @@ void server_shake_tick(FwmServer *server, double dt) {
  * refresh rate: client redraws and scene node moves damage the scene and
  * wlr_scene schedules a frame off that damage, so this is only a heartbeat. */
 #define TICK_IDLE_MS 200
+
+/* Hand one monitor's grass the windows standing in it.
+ *
+ * Strip-local pixels: the camera, the monitor's own offset and the shake are
+ * all resolved here, so grass.c never has to learn what a desktop is or which
+ * screen it is drawn on. `bottom` is measured up from the line the blades are
+ * rooted on, which is the bottom of this monitor — the same line the floor of
+ * the desktop it shows stands at. */
+static void server_grass_windows(FwmServer *server, FwmOutput *out) {
+    GrassWindow win[32];
+    int n = 0;
+    double tallest = server->config.grass.height;
+
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        if (n >= (int)(sizeof(win) / sizeof(win[0]))) break;
+        PhysicsBody *b = physics_find_body(&server->physics, v->id);
+        if (!b || !b->active || b->desktop_id != out->desktop) continue;
+        /* A fullscreen window has the grass paused behind it anyway, and its
+         * edges are the screen's — every blade would be pinned by it. */
+        if (b->fullscreen) continue;
+
+        double bottom = out->box.height - (v->y + out->render_dy) - v->height;
+        if (bottom >= tallest) continue;   /* clear of even the tallest blade */
+
+        double x0 = v->x - out->camera_x + out->render_dx;
+        win[n++] = (GrassWindow){
+            .x0 = (float)x0, .x1 = (float)(x0 + v->width),
+            .bottom = (float)bottom, .vx = (float)b->vx,
+        };
+    }
+    grass_set_windows(out->grass, win, n);
+}
 
 /* Is anything actually moving? Everything listed here is driven by our timers
  * rather than by client damage, so the frame loop must keep running for it.
@@ -1272,6 +1306,17 @@ static int physics_tick_cb(void *data) {
     server_cava_sync(server);
     if (server->cava) cava_tick(server->cava, &server->config.cava, elapsed);
 
+    /* The grass: the wind, and the path by which a config change reaches the
+     * strip. Sync first — a patch regrown this tick should feel the same gust
+     * as the rest. */
+    server_grass_sync(server);
+    FwmOutput *go;
+    wl_list_for_each(go, &server->outputs, link) {
+        if (!go->grass) continue;
+        server_grass_windows(server, go);
+        grass_tick(go->grass, &server->config.grass, elapsed);
+    }
+
     /* The collision mixer: started, stopped, or left alone. No device is open
      * unless something is actually being played. */
     server_sound_sync(server);
@@ -1443,6 +1488,9 @@ static int physics_tick_cb(void *data) {
          * the tray covers the strip above it), so pause a video behind it: the
          * decode thread then blocks on its full queue and stops burning CPU. */
         wallpaper_set_paused(fo->wallpaper, wp_covered);
+        /* The grass is behind the same window, and swaying where nobody can see
+         * it is the one cost of the feature worth refusing to pay. */
+        grass_set_paused(fo->grass, wp_covered);
         any_real_fs |= real_fs;
     }
     bool real_fs = any_real_fs;
@@ -1480,12 +1528,33 @@ static int physics_tick_cb(void *data) {
     int busy = server_is_busy(server);
     server_schedule_frames(server);
 
+    /* Grass in the wind is repainted by us rather than by a client, so the loop
+     * must keep running for it — but NOT at the full tick rate. It is the one
+     * animation in the compositor with a rate of its own ([grass] fps, which is
+     * half the tick or less), and counting it as ordinary busy work spun
+     * physics, the impact scan and everything else at 60Hz to feed a strip that
+     * repaints 24 times a second. A still lawn drops out of this entirely. */
+    int grass_ms = 0;
+    if (!busy) {
+        FwmOutput *go;
+        wl_list_for_each(go, &server->outputs, link) {
+            if (!grass_moving(go->grass)) continue;
+            double fps = server->config.grass.fps;
+            grass_ms = fps > 0.0 ? (int)(1000.0 / fps) : (int)(1000.0 / PHYSICS_TICK_RATE);
+            if (grass_ms < 1) grass_ms = 1;
+            if (grass_ms > TICK_IDLE_MS) grass_ms = TICK_IDLE_MS;
+            break;
+        }
+    }
+
     /* physics_step always advances a FIXED 1/60 regardless of when we are
      * called, so slowing the timer cannot hand Box2D an enormous dt — idle
      * simply means nothing is moving for it to integrate. */
     server->tick_idle = !busy;
     wl_event_source_timer_update(server->physics_timer,
-                                 busy ? (int)(1000.0 / PHYSICS_TICK_RATE) : TICK_IDLE_MS);
+                                 busy      ? (int)(1000.0 / PHYSICS_TICK_RATE)
+                                 : grass_ms ? grass_ms
+                                            : TICK_IDLE_MS);
     return 0;
 }
 

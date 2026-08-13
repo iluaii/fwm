@@ -58,7 +58,7 @@ anything, and the strip stays. `Super+J` (`toggle_tray`) still hides it by hand.
 
 ## The modes menu
 
-Click the modes pill (or bind `modes_menu`). Eight rows:
+Click the modes pill (or bind `modes_menu`). Nine rows:
 
 | Row | Control | What it is |
 |---|---|---|
@@ -68,6 +68,7 @@ Click the modes pill (or bind `modes_menu`). Eight rows:
 | Mass | `size` / `ram` | what decides how heavy a window is — see [Physics](physics.md#mass) |
 | Sound | switch | the collision knock |
 | Cava | `off` / `visual` / `physical` | the audio visualiser |
+| Grass | switch | the [grass](configuration.md#grass) along the bottom of every screen |
 | Ring | switch | close the desktop strip into a ring (`[camera] wrap`) |
 | Breakable | switch | a hard enough collision destroys a window ([`[physics] hp`](configuration.md#breakable-windows)) |
 
@@ -81,7 +82,7 @@ unsaved work, so it is not the one the hand lands on by accident. For the same
 reason it is the one row that is **never remembered** — every session starts with
 windows unbreakable, and no config key can start one otherwise.
 
-**The Mass and Sound choices are remembered** across restarts, in
+**The Mass, Sound and Grass choices are remembered** across restarts, in
 `~/.local/state/fwm/modes`. They are written the moment you click and applied over
 the config on every load, so your `config.toml` is never rewritten to record a
 click. Delete that file to go back to whatever the config says.

@@ -35,6 +35,7 @@
 #include "ui/launcher.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
+#include "grass.h"
 #include "expo.h"
 #include "group.h"
 
@@ -402,6 +403,7 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
     }
     if (output->wallpaper_prev) wallpaper_destroy(output->wallpaper_prev);
     if (output->wallpaper) wallpaper_destroy(output->wallpaper);
+    if (output->grass) grass_destroy(output->grass);
     if (output->tray_buffer) cairo_overlay_destroy(output->tray_buffer);
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->destroy.link);
@@ -691,6 +693,39 @@ static void output_build_wallpaper(FwmOutput *out) {
      * out from 0,0 like every other screen-sized thing. */
     wallpaper_set_origin(out->wallpaper, out->box.x, out->box.y);
     wallpaper_update(out->wallpaper, out->camera_x);
+    /* Grass stands in the same tree and must stay above the wallpaper, which
+     * has just been added on top of it. */
+    if (out->grass) grass_raise(out->grass);
+}
+
+/* This monitor's grass, along the bottom of it. */
+static void output_build_grass(FwmOutput *out) {
+    FwmServer *server = out->server;
+    if (out->grass) {
+        grass_destroy(out->grass);
+        out->grass = NULL;
+    }
+    if (out->box.width <= 0 || out->box.height <= 0) return;
+    out->grass = grass_create(server->layer_background, &server->config.grass,
+                              out->box.width, out->box.height);
+    if (!out->grass) return;
+    /* Rooted on the bottom edge of this monitor, which is where the floor of
+     * the desktop it shows is (physics.c, floor_y_for). */
+    grass_set_origin(out->grass, out->box.x, out->box.y + out->box.height);
+}
+
+void server_grass_sync(FwmServer *server) {
+    FwmOutput *o;
+    wl_list_for_each(o, &server->outputs, link) {
+        if (!o->enabled) continue;
+        bool want = server->config.grass.enabled != 0;
+        /* Three cases, one rebuild: nothing there and wanted, something there
+         * and not, and something there that no longer matches the config. The
+         * strip is a picture with no state worth preserving, so regrowing it is
+         * the whole of "apply the change". */
+        if (want != (o->grass != NULL) || grass_stale(o->grass, &server->config.grass))
+            output_build_grass(o);
+    }
 }
 
 /* This monitor's status strip, at the top of it. */
@@ -782,6 +817,7 @@ static void server_output_layout_update(FwmServer *server) {
         o->camera_x = o->target_camera_x = o->desktop * server->screen_width;
         o->cam_anim = 0;
         output_build_wallpaper(o);
+        output_build_grass(o);
         output_build_tray(o);
     }
 
@@ -852,6 +888,10 @@ static void output_leave_layout(FwmServer *server, FwmOutput *out) {
     if (out->wallpaper) {
         wallpaper_destroy(out->wallpaper);
         out->wallpaper = NULL;
+    }
+    if (out->grass) {
+        grass_destroy(out->grass);
+        out->grass = NULL;
     }
     if (out->tray_buffer) {
         cairo_overlay_destroy(out->tray_buffer);

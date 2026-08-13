@@ -418,6 +418,47 @@ opacity     = 0.85
 min_hz      = 40
 max_hz      = 12000
 
+# A strip of grass along the bottom of every monitor, standing on the same line
+# a window comes to rest on. Off by default; also switchable from the modes menu,
+# which remembers the choice.
+#
+# Windows bend it: a blade under a window's lower edge is held down far enough
+# for its tip to fit under it, a window moving sideways combs the blades it
+# passes through, and lifting one lets them stand back up.
+#
+# Each monitor grows its own patch, rooted on ITS bottom edge — on a
+# mixed-resolution setup the shorter screen's grass is not left floating.
+[grass]
+enabled = false
+# The size knob. Everything else scales against it, so raising this grows the
+# whole patch instead of stretching thin blades.
+height  = 100
+# Blades per 100px of screen width. Under ~30 the strip reads as wire; past ~70
+# the blades merge into a green bar.
+density = 42
+# Px across the base of a front-row blade. Blades taper to a point, and the ones
+# at the back are thinner and darker — that is the whole sense of depth here.
+width   = 5
+# Alpha over the wallpaper.
+opacity = 1.0
+# #RRGGBB[AA]. Every blade is shaded from this by how near the front it is.
+color   = "#4f7a34"
+# The wind. 0 is a still lawn drawn once and then left alone; 0.35 is a breeze;
+# past 1 the blades are laid flat, which is a storm and not a lawn.
+#
+# Wind costs what any animation costs, and the cost is the repaint: the whole
+# strip is redrawn and cairo charges by the blade, roughly a tenth of a core at
+# fps = 24 on a 1920-wide screen. Too much? Lower `fps` first (15 still looks
+# smooth for something this slow), then `density`. wind = 0 is free.
+wind       = 0.35
+# Px/s the gusts travel across the screen. Low is a heavy, slow swell; high is a
+# nervous flutter.
+wind_speed = 260
+# Ceiling on repaints while it sways, and the main cost dial. Grass is slow: 24
+# is already generous, 15 is hard to tell apart, and 60 buys nothing visible
+# while costing more than twice as much.
+fps        = 24
+
 # When a restarted fwm should put your applications back. fwm records what is
 # running and on which desktop, and relaunches it — the applications restart,
 # they do not resume, so anything unsaved inside them is still lost.
