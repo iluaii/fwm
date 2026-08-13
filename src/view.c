@@ -356,9 +356,21 @@ void view_dim_apply(FwmView *view) {
 void view_dim_set(FwmView *view, double target, bool immediate) {
     if (target < 0.0) target = 0.0;
     if (target > 1.0) target = 1.0;
-    view->dim_target = target;
+    /* Called every tick with whatever focus currently says, so only an actual
+     * CHANGE may restart the fade — restarting it every tick would leave the
+     * window frozen one frame into the ease forever. */
+    if (target != view->dim_target) {
+        view->dim_target = target;
+        /* From wherever it is NOW, not from where the last fade began: clicking
+         * back to a window mid-fade turns the fade around rather than snapping
+         * it to one end first. */
+        view->dim_from = view->dim;
+        view->dim_t    = 0.0;
+    }
     if (immediate) {
         view->dim = target;
+        view->dim_from = target;
+        view->dim_t = 1.0;
         view_dim_apply(view);
     }
 }
@@ -370,12 +382,30 @@ bool view_dim_tick(FwmView *view, double dt) {
     if (ms <= 0.0) {
         view->dim = view->dim_target;
     } else {
-        /* Framerate-independent exponential chase, the same form the tile
-         * glide and the camera use. `ms` reads as the time to cover most of
-         * the distance, not all of it, so the tail is cut off below. */
-        double k = 1.0 - exp(-dt * 3000.0 / ms);
-        view->dim += (view->dim_target - view->dim) * k;
-        if (fabs(view->dim_target - view->dim) < 0.004) view->dim = view->dim_target;
+        /* A timed ease over dim_ms, not the exponential chase this used to be.
+         * A chase spends its speed immediately — most of the distance in the
+         * first frame or two, then a long crawl through the last few percent —
+         * so it reads as a flick with a tail rather than as a fade. This starts
+         * from a standstill, does the travelling in the middle and settles, and
+         * takes exactly as long as the config says.
+         *
+         * The step is capped at one 60Hz frame, exactly as the modes menu caps
+         * its switch knob and for the same reason: the tick that STARTS a fade
+         * is often the first one after the idle heartbeat, and it carries the
+         * whole 200ms gap since the last one — a fifth of a second of a 140ms
+         * fade, which is the entire thing in one frame. */
+        if (dt > 1.0 / 60.0) dt = 1.0 / 60.0;
+        view->dim_t += dt * 1000.0 / ms;
+        if (view->dim_t >= 1.0) {
+            view->dim_t = 1.0;
+            view->dim = view->dim_target;
+        } else {
+            /* Smoothstep: zero slope at both ends, so neither the leaving nor
+             * the arriving is a corner. */
+            double p = view->dim_t;
+            p = p * p * (3.0 - 2.0 * p);
+            view->dim = view->dim_from + (view->dim_target - view->dim_from) * p;
+        }
     }
     view_dim_apply(view);
     return true;
@@ -703,7 +733,8 @@ void view_map(FwmView *view) {
 
     /* Full strength until focus says otherwise — which server_focus_view does
      * a few lines after the window is mapped, through view_dim_set. */
-    view->dim = view->dim_target = 1.0;
+    view->dim = view->dim_target = view->dim_from = 1.0;
+    view->dim_t = 1.0;   /* nothing in flight */
 
     // Open animation: hide the window outright until the client has painted
     // something real. Disabling the node is absolute — unlike opacity 0 it

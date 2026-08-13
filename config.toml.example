@@ -168,7 +168,8 @@ tint_strength    = 0.4
 # How much of itself an unfocused window keeps, and how long it takes to get
 # there. The window you are working in comes forward without the border having
 # to shout about it. 1.0 is the old behaviour — every window at full strength —
-# and dim_ms 0 makes the change a cut instead of a fade.
+# and dim_ms 0 makes the change a cut instead of a fade. dim_ms is a real
+# duration: the fade eases in and out over exactly that long.
 inactive_opacity = 0.92
 dim_ms           = 140.0
 

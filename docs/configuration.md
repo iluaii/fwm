@@ -281,6 +281,24 @@ and it is taken off again for anything that photographs a window — a spinning
 window and an expo card show the window, not which one had the keyboard when
 the picture was taken. Set it to `1.0` for the old behaviour.
 
+`dim_ms` is how long the fade takes, and it is a real duration: the dim eases
+from where it is to where focus says it should be over exactly that long, with
+zero slope at both ends. It used to be an exponential chase, which spends most
+of its travel in the first frame or two and then crawls through the last few
+percent — a flick with a tail rather than a fade. A fade still in flight also
+counts as motion, so the compositor keeps drawing frames for it: without that
+the loop dropped to its idle heartbeat with the fade owed, and one 200ms step
+of a 140ms fade is the whole of it. `dim_ms = 0` makes the change a cut.
+
+`dim_ms` is how long the fade takes, and it is a real duration: the dim eases
+from where it is to where focus says it should be over exactly that long, with
+zero slope at both ends. It used to be an exponential chase, which spends most
+of its travel in the first frame or two and then crawls through the last few
+percent — a flick with a tail rather than a fade. A fade in flight is also
+enough to keep the compositor drawing frames; without that the loop dropped to
+its idle heartbeat with the fade still owed, and one 200ms step of a 140ms fade
+is the whole of it. `dim_ms = 0` makes the change a cut.
+
 ## sun
 
 ```toml

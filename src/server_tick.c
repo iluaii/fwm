@@ -433,6 +433,14 @@ static int server_is_busy(FwmServer *server) {
      * be shoved by a bar that teleported rather than rose. Silence lets it go
      * idle again, so a configured visualiser costs nothing while nothing plays. */
     if (cava_busy(server->cava)) return 1;
+    /* A dim on its way in or out. Nothing else on this list covers it: clicking
+     * from one window to another moves no window and damages nothing the scene
+     * would schedule a frame for, so the loop dropped to the 200ms heartbeat
+     * with the fade still owed — and one 200ms step of a 140ms chase is 99% of
+     * the travel. The fade existed and was never once drawn. */
+    FwmView *dv;
+    wl_list_for_each(dv, &server->views, link)
+        if (dv->dim != dv->dim_target) return 1;
 
     for (int i = 0; i < server->physics.body_count; i++) {
         const PhysicsBody *b = &server->physics.bodies[i];

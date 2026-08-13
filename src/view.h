@@ -102,8 +102,15 @@ typedef struct FwmView {
      * rather than a flick.
      *
      * Zero-initialised to 0, which is not a valid opacity — view_map sets both
-     * to the right value once the window knows whether it has the focus. */
+     * to the right value once the window knows whether it has the focus.
+     *
+     * `dim_from` and `dim_t` are the fade itself: where it started and how far
+     * through [decor] dim_ms it is, 0..1. A timed ease rather than a chase
+     * toward the target, because a chase is front-loaded — it covered most of
+     * the distance in the first frame or two and then crawled, which is a flick
+     * followed by a tail and not a fade. */
     double dim, dim_target;
+    double dim_from, dim_t;
 
     /* Open animation.
      *
