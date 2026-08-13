@@ -640,8 +640,9 @@ Windows standing in the strip bend it. A blade under a window's lower edge is
 held down far enough for its tip to fit under it — so a window coming down lays
 the blades over further and further, and lifting it lets them stand straight back
 up. A window moving sideways combs them the way it is going, and one sitting
-still pushes the blades under it out toward its nearer edge. It is switchable
-from the modes menu, which remembers the choice.
+still pushes the blades under it out toward its nearer edge. Both the grass and
+the wind are switchable from the [modes menu](interface.md#modes), which
+remembers the choice and wires the two rows together.
 
 Each blade is a spring: the wind is two travelling waves and a slow swell, and
 every blade meets it with its own stiffness and its own phase, so the patch

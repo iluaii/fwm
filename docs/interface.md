@@ -58,7 +58,7 @@ anything, and the strip stays. `Super+J` (`toggle_tray`) still hides it by hand.
 
 ## The modes menu
 
-Click the modes pill (or bind `modes_menu`). Nine rows:
+Click the modes pill (or bind `modes_menu`). Ten rows:
 
 | Row | Control | What it is |
 |---|---|---|
@@ -69,8 +69,17 @@ Click the modes pill (or bind `modes_menu`). Nine rows:
 | Sound | switch | the collision knock |
 | Cava | `off` / `visual` / `physical` | the audio visualiser |
 | Grass | switch | the [grass](configuration.md#grass) along the bottom of every screen |
+| Wind | switch | the gusts that bend it (`[grass] wind`) |
 | Ring | switch | close the desktop strip into a ring (`[camera] wrap`) |
 | Breakable | switch | a hard enough collision destroys a window ([`[physics] hp`](configuration.md#breakable-windows)) |
+
+Grass and Wind are one subject and are wired accordingly: switching **Wind on
+switches Grass on with it**, because wind through a lawn nobody is drawing
+cannot be seen, and switching **Grass off switches Wind off with it**, because a
+Wind row reading "on" over a lawn that is not there describes nothing. Switching
+Grass *on* leaves Wind alone — that is what makes a still lawn something the
+menu can express. The wind strength is remembered across all of this, so the
+next click on Wind brings back the gust that was blowing and not the default.
 
 Two rows are segmented controls rather than switches because they are not on-off
 things. The config's fourth cava mode (`both`, bars that are drawn *and* push) is
@@ -82,7 +91,7 @@ unsaved work, so it is not the one the hand lands on by accident. For the same
 reason it is the one row that is **never remembered** — every session starts with
 windows unbreakable, and no config key can start one otherwise.
 
-**The Mass, Sound and Grass choices are remembered** across restarts, in
+**The Mass, Sound, Grass and Wind choices are remembered** across restarts, in
 `~/.local/state/fwm/modes`. They are written the moment you click and applied over
 the config on every load, so your `config.toml` is never rewritten to record a
 click. Delete that file to go back to whatever the config says.

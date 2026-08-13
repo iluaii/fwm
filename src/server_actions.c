@@ -921,6 +921,18 @@ int server_modes_menu_click(FwmServer *server, int row, int seg) {
          * every monitor — nothing here has to know how many screens there are
          * or how tall each one's patch is. */
         server->config.grass.enabled = !server->config.grass.enabled;
+        /* Switched off, the wind goes with it: it is the grass's own knob, and
+         * a Wind row left reading "on" over a lawn that is not there describes
+         * nothing on the screen. The strength is put by in the same place the
+         * wind switch puts it, so the next click on Wind brings back the gust
+         * that was blowing rather than the built-in default.
+         *
+         * Only this direction. Switching the grass ON leaves the wind alone —
+         * that is what makes a still lawn something the menu can express. */
+        if (!server->config.grass.enabled && server->config.grass.wind > 0.0) {
+            server->grass_wind_saved = server->config.grass.wind;
+            server->config.grass.wind = 0.0;
+        }
         server_state_save_modes(server);
         changed = 1;
         break;
