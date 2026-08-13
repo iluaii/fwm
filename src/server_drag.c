@@ -228,6 +228,11 @@ void server_drag_follow_camera(FwmServer *server) {
     server->interactive.cam_ref = o->camera_x;
     server->interactive.view_start_x += delta;
     drag_place(server, server->cursor->x, server->cursor->y);
+    /* The window did not move — the world did, and the hand is still holding it
+     * exactly where it was on screen. Telling the wobble otherwise hands it a
+     * whole desktop of travel in one tick, which is what made a window carried
+     * across with super+N jerk in the hand. */
+    view_jelly_carry(server->interactive.view, delta, 0);
 }
 
 /* Take a tiled window out of the layout so it can be carried.

@@ -338,6 +338,17 @@ void view_jelly_tick(FwmView *view, double strength, double dt);
 void view_jelly_release(FwmView *view);
 void view_jelly_stop(FwmView *view);
 
+/* The window's world coordinates just changed by (dx, dy) for a reason that is
+ * NOT the hand moving it: the camera slid a whole desktop under a drag, or the
+ * window was sent to another desktop, both of which move it a screen's width in
+ * world space while it sits still on screen.
+ *
+ * The sheet is driven by how far the window travelled, so without this those
+ * teleports arrive as a 1920px shove in one tick and the wobble snaps to its
+ * limit and rings. Re-base instead: the window is where it now is, and it got
+ * there without moving. A no-op when nothing is wobbling. */
+void view_jelly_carry(FwmView *view, double dx, double dy);
+
 /* The drop (see the drop_* fields above and droplet.h).
  *
  * view_droplet_begin says this window has just been taken out of a tiling

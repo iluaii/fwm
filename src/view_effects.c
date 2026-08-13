@@ -648,6 +648,12 @@ void view_jelly_begin(FwmView *view, double strength, double grab_lx, double gra
     if (!view_jelly_draw(view, strength)) view_jelly_stop(view);
 }
 
+void view_jelly_carry(FwmView *view, double dx, double dy) {
+    if (!view->jelly) return;
+    view->jelly_px += dx;
+    view->jelly_py += dy;
+}
+
 void view_jelly_release(FwmView *view) {
     if (!view->jelly) return;
     view->jelly_settling = 1;

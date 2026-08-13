@@ -1428,6 +1428,15 @@ static int physics_tick_cb(void *data) {
         if (view->scene_tree) {
             PhysicsBody *body = physics_find_body(&server->physics, view->id);
             if (body && !body->pinned && view->id != dragged_win) {
+                /* A window crossing the ring's join is carried the whole width
+                 * of the strip in one step (physics.c). That is a teleport, not
+                 * travel, and a window still ringing from the throw that sent it
+                 * there must not be shoved by it — same reasoning as carrying one
+                 * across with super+N. Half the strip is well past any distance
+                 * a window can cover in one step at max_throw_speed. */
+                double jump = body->x - view->x;
+                if (fabs(jump) > 5.0 * server->screen_width)
+                    view_jelly_carry(view, jump, 0.0);
                 view->x = body->x;
                 view->y = body->y;
                 server_place_node(server, &view->scene_tree->node, body->x, body->y);

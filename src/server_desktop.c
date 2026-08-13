@@ -243,6 +243,9 @@ void server_move_view_to_desktop(FwmServer *server, FwmView *view, int target,
         view->x += (target - src) * server->screen_width;
     }
     view->tile_anim = 0;
+    /* Sent a screen sideways without travelling: a window still wobbling from
+     * the drag that sent it must not be shoved by the coordinate change. */
+    view_jelly_carry(view, (double)(target - src) * server->screen_width, 0.0);
     view_sync_position(view);
 
     if (server->desktop_mode[target] == DESKTOP_MODE_TILING) {
