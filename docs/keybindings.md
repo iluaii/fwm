@@ -212,6 +212,27 @@ A knob is three ordinary keys — turning it is `XF86AudioRaiseVolume` and
 press with modifiers held, which leaves the bare press still muting. Check what
 yours sends with `libinput debug-events` first; some knobs scroll instead.
 
+Outside every menu the knob is nothing special — three keys, bindable like any
+others, and matched on modifiers EXACTLY. So a chord costs no code at all:
+
+```toml
+[binds]
+"XF86AudioRaiseVolume"      = "spawn:wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+"ctrl+XF86AudioRaiseVolume" = "view:next"      # ctrl held: a desktop over
+"ctrl+XF86AudioLowerVolume" = "view:prev"
+"alt+XF86AudioRaiseVolume"  = "move_camera:120"  # alt held: pan between them
+"alt+XF86AudioLowerVolume"  = "move_camera:-120"
+```
+
+Inside a `[mode.*]` the knob's keys are free without any modifier at all — a
+submap owns the keyboard outright, so a bare turn can drive whatever the mode is
+for (`sun_azimuth:+15` and its like) and the volume never comes into it.
+
+Bare turning still changes the volume, because `ctrl+…` is a different bind and
+the plain one no longer matches. Inside the ring or the desktop strip those keys
+belong to the overlay whatever is held down — and there turning already means
+"the next one along", so the two readings agree.
+
 **The volume does not move while the ring is up.** Those three keys are usually
 bound to `wpctl` in `[binds]`, and the menu is asked for them *before* the binds
 are, exactly as the launcher is: turning the knob to choose a petal must not
@@ -305,3 +326,8 @@ those three are intercepted early.
 Type to filter, `↑`/`↓` (or `Tab` / `Shift+Tab`) to move, `Return` to run,
 `Backspace` to erase, `Escape` to close. The launcher owns the keyboard while it
 is open, for the same reason the strip does.
+
+A knob works here too — turning it walks the list, pressing it runs the row —
+and the wallpaper picker is the same panel, so there the press applies the
+image. Nothing had to be done about the volume: the launcher is asked for its
+keys before the bind table is, which it always was.

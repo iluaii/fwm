@@ -144,7 +144,9 @@ the gtk3 setting and then hicolor).
 
 The tiles have physics of their own — they settle as the list filters — and the
 launcher owns the keyboard while it is open, so no keystroke reaches a client you
-cannot see.
+cannot see. A keyboard knob drives it as well: turning it walks the list,
+pressing it runs the selected row — and since the wallpaper picker is this same
+panel in another mode, the knob picks wallpapers too.
 
 ## The radial menu
 

@@ -911,19 +911,27 @@ bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
     case XKB_KEY_Escape:
         launcher_close(l);
         return true;
+    /* A keyboard knob walks the list and its press runs the row, the same two
+     * verbs it has in the radial menu and the desktop strip. Nothing has to be
+     * done about the volume here: this panel is asked for its keys well before
+     * the bind table is (see the launcher gate in server_input.c), so the
+     * wpctl binds those three usually carry never come up. */
     case XKB_KEY_Return:
     case XKB_KEY_KP_Enter:
+    case XKB_KEY_XF86AudioMute:
         launch_selected(l);
         launcher_close(l);
         return true;
     case XKB_KEY_Up:
     case XKB_KEY_ISO_Left_Tab:   /* what Shift+Tab arrives as */
+    case XKB_KEY_XF86AudioLowerVolume:
         /* Wraps to the last entry, mirroring Down. Clamping at 0 instead made
          * the two directions behave differently at the ends of the list. */
         if (shown > 0) l->sel = (l->sel + shown - 1) % shown;
         return true;
     case XKB_KEY_Down:
     case XKB_KEY_Tab:
+    case XKB_KEY_XF86AudioRaiseVolume:
         if (shown > 0) l->sel = (l->sel + 1) % shown;
         return true;
     case XKB_KEY_BackSpace: {

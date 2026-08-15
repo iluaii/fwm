@@ -709,6 +709,21 @@ tap = true
 # muting, as it always did. Check what yours actually sends with
 # `libinput debug-events` before writing the line; a few knobs scroll instead.
 #
+# Outside the ring the knob is just three keys, matched on modifiers exactly, so
+# a chord needs no code and no [radial] at all:
+#
+#   "XF86AudioRaiseVolume"      = "spawn:wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+#   "ctrl+XF86AudioRaiseVolume" = "view:next"   # ctrl held: one desktop over
+#   "ctrl+XF86AudioLowerVolume" = "view:prev"
+#   "alt+XF86AudioRaiseVolume"  = "move_camera:120"    # alt held: pan the camera
+#   "alt+XF86AudioLowerVolume"  = "move_camera:-120"
+#
+# And inside a [mode.*] the knob needs no modifier at all — a submap owns the
+# keyboard, so a bare turn is free there (see the sun mode below).
+#
+# Bare turning still changes the volume: ctrl+ is a different bind, and the
+# plain one stops matching the moment ctrl goes down.
+#
 # It works without one, too: the arrows and Tab walk the ring, Return fires,
 # the digits jump straight to a petal, the mouse hovers and clicks, and Escape
 # closes. `enter` is shorthand for putting "radial_menu" in [binds].
