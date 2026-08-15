@@ -772,13 +772,15 @@ static void test_radial(void) {
     FwmConfig cfg;
     config_load(&cfg, p);
     CHECK_INT(cfg.error_count, 0);
-    CHECK_INT(cfg.radial.item_count, 2);
+    CHECK_INT(cfg.radial.menu_count, 1);       /* the root ring, and no other */
+    CHECK_INT(cfg.radial.menus[0].item_count, 2);
     CHECK_DBL(cfg.radial.radius, 240.0, 1e-9);
-    CHECK_STR(cfg.radial.center_text, "fwm");
+    CHECK_STR(cfg.radial.menus[0].center_text, "fwm");
     /* File order is ring order, clockwise from the top. */
-    CHECK_STR(cfg.radial.items[0].label, "Terminal");
-    CHECK_STR(cfg.radial.items[0].action, "spawn:foot");
-    CHECK_STR(cfg.radial.items[1].text, "G");
+    CHECK_STR(cfg.radial.menus[0].items[0].label, "Terminal");
+    CHECK_STR(cfg.radial.menus[0].items[0].action, "spawn:foot");
+    CHECK_INT(cfg.radial.menus[0].items[0].submenu, 0);   /* a leaf */
+    CHECK_STR(cfg.radial.menus[0].items[1].text, "G");
 
     /* `enter` lands in the ROOT map, exactly as a mode's does — the knob's own
      * press with the modifiers held, which is the whole reason this exists. */
@@ -795,7 +797,7 @@ static void test_radial(void) {
     p = write_config("[binds]\n\"super+q\" = \"killclient\"\n");
     config_load(&cfg, p);
     CHECK_INT(cfg.error_count, 0);
-    CHECK_INT(cfg.radial.item_count, 0);
+    CHECK_INT(cfg.radial.menus[0].item_count, 0);
     CHECK_DBL(cfg.radial.radius, 190.0, 1e-9);
     config_free(&cfg);
     drop_config();
@@ -813,12 +815,12 @@ static void test_radial(void) {
         "[[radial.item]]\n"
         "action = \"calm_all\"\n");
     config_load(&cfg, p);
-    CHECK_INT(cfg.radial.item_count, 1);
+    CHECK_INT(cfg.radial.menus[0].item_count, 1);
     CHECK(cfg.error_count >= 3);          /* two items and the radius */
     CHECK_DBL(cfg.radial.radius, 190.0, 1e-9);
     /* An item with nothing to show falls back to naming its own action, so a
      * half-written petal is visibly half-written rather than a blank circle. */
-    CHECK_STR(cfg.radial.items[0].label, "calm_all");
+    CHECK_STR(cfg.radial.menus[0].items[0].label, "calm_all");
     CHECK_NOT_NULL(config_match_bind(&cfg, XKB_KEY_XF86AudioMute,
                                      FWM_MOD_LOGO | FWM_MOD_SHIFT));
     config_free(&cfg);
@@ -833,8 +835,118 @@ static void test_radial(void) {
                       "[[radial.item]]\naction = \"calm_all\"\n");
     p = write_config(body);
     config_load(&cfg, p);
-    CHECK_INT(cfg.radial.item_count, CONFIG_MAX_RADIAL);
+    CHECK_INT(cfg.radial.menus[0].item_count, CONFIG_MAX_RADIAL);
     CHECK(cfg.error_count >= 1);
+    config_free(&cfg);
+    drop_config();
+}
+
+static void test_radial_submenus(void) {
+    CASE("a petal with items of its own opens a ring instead of firing");
+    const char *p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[radial]\n"
+        "[[radial.item]]\n"
+        "label  = \"Terminal\"\n"
+        "action = \"spawn:foot\"\n"
+        "[[radial.item]]\n"
+        "label = \"Power\"\n"
+        "text  = \"P\"\n"
+        "[[radial.item.item]]\n"
+        "label  = \"Sleep\"\n"
+        "action = \"spawn:systemctl suspend\"\n"
+        "[[radial.item.item]]\n"
+        "label = \"Deeper\"\n"
+        "[[radial.item.item.item]]\n"
+        "label  = \"Bottom\"\n"
+        "action = \"calm_all\"\n"
+        "[[radial.item]]\n"
+        "label  = \"Desktops\"\n"
+        "action = \"expo\"\n");
+    FwmConfig cfg;
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_INT(cfg.radial.menu_count, 3);       /* root, Power, Deeper */
+    CHECK_INT(cfg.radial.menus[0].item_count, 3);
+    /* The sub-ring does not take a place in the ring it hangs off — order in
+     * the root is still the order the items were written. */
+    CHECK_STR(cfg.radial.menus[0].items[1].label, "Power");
+    CHECK_STR(cfg.radial.menus[0].items[2].label, "Desktops");
+
+    int sub = cfg.radial.menus[0].items[1].submenu;
+    CHECK_INT(sub, 1);
+    CHECK_INT(cfg.radial.menus[sub].item_count, 2);
+    CHECK_STR(cfg.radial.menus[sub].items[0].label, "Sleep");
+    /* The hub of a sub-ring wears the face of the petal that opens it. */
+    CHECK_STR(cfg.radial.menus[sub].center_text, "P");
+
+    int deep = cfg.radial.menus[sub].items[1].submenu;
+    CHECK_INT(deep, 2);
+    CHECK_STR(cfg.radial.menus[deep].items[0].action, "calm_all");
+    CHECK_STR(cfg.radial.menus[deep].center_text, "Deeper");  /* no text: the label */
+    config_free(&cfg);
+    drop_config();
+
+    CASE("a petal that is both an action and a ring is a ring");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[radial]\n"
+        "[[radial.item]]\n"
+        "label  = \"Power\"\n"
+        "action = \"calm_all\"\n"
+        "center_text = \"hub\"\n"
+        "[[radial.item.item]]\n"
+        "action = \"expo\"\n");
+    config_load(&cfg, p);
+    CHECK(cfg.error_count >= 1);
+    CHECK_INT(cfg.radial.menus[0].item_count, 1);
+    CHECK_STR(cfg.radial.menus[0].items[0].action, "");
+    CHECK_INT(cfg.radial.menus[0].items[0].submenu, 1);
+    CHECK_STR(cfg.radial.menus[1].center_text, "hub");   /* named, not inherited */
+    config_free(&cfg);
+    drop_config();
+
+    CASE("a petal whose ring is empty is dropped with it");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[radial]\n"
+        "[[radial.item]]\n"
+        "label = \"Power\"\n"
+        "[[radial.item.item]]\n"
+        "action = \"not_an_action\"\n"
+        "[[radial.item]]\n"
+        "action = \"calm_all\"\n");
+    config_load(&cfg, p);
+    CHECK(cfg.error_count >= 2);
+    CHECK_INT(cfg.radial.menus[0].item_count, 1);
+    CHECK_STR(cfg.radial.menus[0].items[0].action, "calm_all");
+    config_free(&cfg);
+    drop_config();
+
+    CASE("the rings have a cap of their own");
+    /* Five petals, each opening a ring of three that each open one more: 21
+     * rings asked for, twelve to give. They are spent depth first, in file
+     * order, so the first two petals get everything they asked for, the third
+     * runs out inside its ring, and the last two are refused a ring at all —
+     * and, having nothing else to do, are dropped. */
+    char body[8192];
+    int n = snprintf(body, sizeof body,
+                     "[binds]\n\"super+q\" = \"killclient\"\n[radial]\n");
+    for (int i = 0; i < 5; i++) {
+        n += snprintf(body + n, sizeof body - (size_t)n,
+                      "[[radial.item]]\nlabel = \"r%d\"\n", i);
+        for (int j = 0; j < 3; j++)
+            n += snprintf(body + n, sizeof body - (size_t)n,
+                          "[[radial.item.item]]\nlabel = \"r%d.%d\"\n"
+                          "[[radial.item.item.item]]\naction = \"calm_all\"\n", i, j);
+    }
+    p = write_config(body);
+    config_load(&cfg, p);
+    CHECK_INT(cfg.radial.menu_count, CONFIG_MAX_RADIAL_MENUS);
+    CHECK_INT(cfg.radial.menus[0].item_count, 3);
+    CHECK_STR(cfg.radial.menus[0].items[2].label, "r2");
+    CHECK_INT(cfg.radial.menus[cfg.radial.menus[0].items[2].submenu].item_count, 2);
+    CHECK(cfg.error_count >= 3);
     config_free(&cfg);
     drop_config();
 }
@@ -1104,6 +1216,7 @@ int main(void) {
     test_mouse();
     test_modes();
     test_radial();
+    test_radial_submenus();
     test_option_table();
     test_option_check();
     test_output_spellings();

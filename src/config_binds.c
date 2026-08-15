@@ -334,49 +334,138 @@ void load_modes(toml_table_t *root, FwmConfig *cfg) {
 
 /* ── the radial menu ─────────────────────────────────────────────────── */
 
-/* One [[radial.item]]. Everything but `action` is optional: an item with no
- * picture and no glyph still draws its label, and an item with no label still
- * fires. What it cannot lack is something to do. */
-static void load_radial_item(FwmConfig *cfg, toml_table_t *tbl, int idx) {
+static void load_radial_items(FwmConfig *cfg, toml_array_t *arr, int menu,
+                              const char *path);
+
+/* One [[radial.item]]. Everything but the thing it does is optional: an item
+ * with no picture and no glyph still draws its label, and an item with no
+ * label still fires. What it cannot lack is somewhere to go — an `action`, or
+ * a ring of items of its own written one level deeper.
+ *
+ * `path` is how this item is spelled in the file ("[[radial.item]]", then
+ * "[[radial.item]] Power" one ring in), so a mistake three rings down can be
+ * found by reading the message. */
+static void load_radial_item(FwmConfig *cfg, toml_table_t *tbl, int menu,
+                             int idx, const char *path) {
     RadialConfig *r = &cfg->radial;
+    RadialMenu *m = &r->menus[menu];
 
-    toml_datum_t act = toml_string_in(tbl, "action");
-    if (!act.ok) {
-        config_report_error(cfg, "[[radial.item]] #%d: no action — item ignored", idx + 1);
-        return;
-    }
-    if (!action_is_known(act.u.s)) {
-        config_report_error(cfg, "[[radial.item]] #%d: unknown action \"%s\"", idx + 1, act.u.s);
-        free(act.u.s);
-        return;
-    }
-
-    RadialItem *it = &r->items[r->item_count];
-    memset(it, 0, sizeof(*it));
-    snprintf(it->action, sizeof(it->action), "%s", act.u.s);
-
+    /* Read the face first: it names the item in every message below, and a
+     * sub-ring borrows it for its hub. */
+    RadialItem it;
+    memset(&it, 0, sizeof(it));
     toml_datum_t lbl = toml_string_in(tbl, "label");
-    if (lbl.ok) { snprintf(it->label, sizeof(it->label), "%s", lbl.u.s); free(lbl.u.s); }
+    if (lbl.ok) { snprintf(it.label, sizeof(it.label), "%s", lbl.u.s); free(lbl.u.s); }
     toml_datum_t ico = toml_string_in(tbl, "icon");
-    if (ico.ok) { expand_tilde(ico.u.s, it->icon, sizeof(it->icon)); free(ico.u.s); }
+    if (ico.ok) { expand_tilde(ico.u.s, it.icon, sizeof(it.icon)); free(ico.u.s); }
     toml_datum_t txt = toml_string_in(tbl, "text");
-    if (txt.ok) { snprintf(it->text, sizeof(it->text), "%s", txt.u.s); free(txt.u.s); }
+    if (txt.ok) { snprintf(it.text, sizeof(it.text), "%s", txt.u.s); free(txt.u.s); }
 
-    /* The petal has to say something. Falling back to the action means a
-     * half-written item is visibly half-written rather than a blank circle.
-     * Copied from the parsed string rather than from it->action: those two are
-     * members of one object, and gcc cannot see that they do not overlap. */
-    if (!it->label[0] && !it->icon[0] && !it->text[0])
-        snprintf(it->label, sizeof(it->label), "%s", act.u.s);
-    free(act.u.s);
+    /* How this one item is named from here on down. */
+    char here[160];
+    if (it.label[0]) snprintf(here, sizeof(here), "%s %s", path, it.label);
+    else             snprintf(here, sizeof(here), "%s #%d", path, idx + 1);
 
-    r->item_count++;
+    toml_array_t *sub = toml_array_in(tbl, "item");
+    toml_datum_t act = toml_string_in(tbl, "action");
+
+    if (sub && act.ok) {
+        /* Both is not a third behaviour — pressing a petal can either fire or
+         * open, and the items are the more specific thing to have written. */
+        config_report_error(cfg, "%s: has both an action and its own items — "
+                            "the sub-ring wins, \"%s\" ignored", here, act.u.s);
+        free(act.u.s);
+        act.ok = 0;
+    }
+
+    if (sub) {
+        if (r->menu_count >= CONFIG_MAX_RADIAL_MENUS) {
+            config_report_error(cfg, "%s: too many rings (max %d) — item ignored",
+                                here, CONFIG_MAX_RADIAL_MENUS);
+            return;
+        }
+        /* Claimed before its items are read, because reading them may claim
+         * more rings still. */
+        int child = r->menu_count++;
+        memset(&r->menus[child], 0, sizeof(r->menus[child]));
+        /* The sub-ring's hub is the face of the petal that opens it — so the
+         * middle of the ring says what was pressed to get here, which is also
+         * what pressing it undoes. `center`/`center_text` on the same item
+         * override that for a hub picture of its own. */
+        snprintf(r->menus[child].center, sizeof(r->menus[child].center), "%s", it.icon);
+        snprintf(r->menus[child].center_text, sizeof(r->menus[child].center_text),
+                 "%s", it.text[0] ? it.text : it.label);
+        toml_datum_t ctr = toml_string_in(tbl, "center");
+        if (ctr.ok) {
+            expand_tilde(ctr.u.s, r->menus[child].center, sizeof(r->menus[child].center));
+            free(ctr.u.s);
+        }
+        toml_datum_t ctxt = toml_string_in(tbl, "center_text");
+        if (ctxt.ok) {
+            snprintf(r->menus[child].center_text, sizeof(r->menus[child].center_text),
+                     "%s", ctxt.u.s);
+            free(ctxt.u.s);
+        }
+
+        load_radial_items(cfg, sub, child, here);
+
+        if (r->menus[child].item_count == 0) {
+            /* Nothing usable underneath: a petal that opens an empty ring is a
+             * dead end with a way back, which is worse than not being there.
+             * The ring stays claimed — indexes handed out below it are already
+             * spent — but nothing points at it. */
+            config_report_error(cfg, "%s: no usable items in its ring — item ignored", here);
+            return;
+        }
+        it.submenu = child;
+    } else {
+        if (!act.ok) {
+            config_report_error(cfg, "%s: no action and no items — item ignored", here);
+            return;
+        }
+        if (!action_is_known(act.u.s)) {
+            config_report_error(cfg, "%s: unknown action \"%s\"", here, act.u.s);
+            free(act.u.s);
+            return;
+        }
+        snprintf(it.action, sizeof(it.action), "%s", act.u.s);
+        /* The petal has to say something. Falling back to the action means a
+         * half-written item is visibly half-written rather than a blank circle.
+         * Copied from the parsed string rather than from it.action: those two
+         * are members of one object, and gcc cannot see that they do not
+         * overlap. */
+        if (!it.label[0] && !it.icon[0] && !it.text[0])
+            snprintf(it.label, sizeof(it.label), "%s", act.u.s);
+        free(act.u.s);
+    }
+
+    m->items[m->item_count++] = it;
+}
+
+/* The items of one ring, in file order. */
+static void load_radial_items(FwmConfig *cfg, toml_array_t *arr, int menu,
+                              const char *path) {
+    int n = toml_array_nelem(arr);
+    for (int i = 0; i < n; i++) {
+        if (cfg->radial.menus[menu].item_count >= CONFIG_MAX_RADIAL) {
+            config_report_error(cfg, "%s: too many items (max %d) — the rest ignored",
+                                path, CONFIG_MAX_RADIAL);
+            break;
+        }
+        toml_table_t *sub = toml_table_at(arr, i);
+        if (!sub) {
+            config_report_error(cfg, "%s #%d: items are tables", path, i + 1);
+            continue;
+        }
+        load_radial_item(cfg, sub, menu, i, path);
+    }
 }
 
 void load_radial(toml_table_t *root, FwmConfig *cfg) {
     RadialConfig *r = &cfg->radial;
     memset(r, 0, sizeof(*r));
     r->radius = 190.0;
+    r->menu_count = 1;   /* the root ring exists even when nothing fills it */
     if (!root) return;
 
     toml_table_t *tbl = toml_table_in(root, "radial");
@@ -388,32 +477,20 @@ void load_radial(toml_table_t *root, FwmConfig *cfg) {
         else config_report_error(cfg, "[radial] radius %.0f out of range 80..600 — using %.0f",
                                  rad.u.d, r->radius);
     }
+    RadialMenu *rootm = &r->menus[0];
     toml_datum_t ctr = toml_string_in(tbl, "center");
-    if (ctr.ok) { expand_tilde(ctr.u.s, r->center, sizeof(r->center)); free(ctr.u.s); }
+    if (ctr.ok) { expand_tilde(ctr.u.s, rootm->center, sizeof(rootm->center)); free(ctr.u.s); }
     toml_datum_t ctxt = toml_string_in(tbl, "center_text");
-    if (ctxt.ok) { snprintf(r->center_text, sizeof(r->center_text), "%s", ctxt.u.s); free(ctxt.u.s); }
+    if (ctxt.ok) { snprintf(rootm->center_text, sizeof(rootm->center_text), "%s", ctxt.u.s); free(ctxt.u.s); }
 
     toml_array_t *arr = toml_array_in(tbl, "item");
     if (!arr) {
         config_report_error(cfg, "[radial]: no items — write them as [[radial.item]]");
         return;
     }
-    int n = toml_array_nelem(arr);
-    for (int i = 0; i < n; i++) {
-        if (r->item_count >= CONFIG_MAX_RADIAL) {
-            config_report_error(cfg, "[[radial.item]]: too many items (max %d) — the rest ignored",
-                                CONFIG_MAX_RADIAL);
-            break;
-        }
-        toml_table_t *sub = toml_table_at(arr, i);
-        if (!sub) {
-            config_report_error(cfg, "[[radial.item]] #%d: items are tables", i + 1);
-            continue;
-        }
-        load_radial_item(cfg, sub, i);
-    }
+    load_radial_items(cfg, arr, 0, "[[radial.item]]");
 
-    if (r->item_count == 0) {
+    if (rootm->item_count == 0) {
         /* An empty ring can still be opened, and then there is nothing in it
          * but the way out. The errors above already said why. */
         return;

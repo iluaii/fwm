@@ -163,7 +163,11 @@ takes an accent ring.
 
 Nothing is in the ring until the config puts it there. Each petal shows an icon
 from your theme, a picture of your own, a glyph, or just its name, and fires any
-action a keybind could. Like the launcher it owns the keyboard while it is up —
+action a keybind could — or holds a ring of its own. A petal with one is marked
+with three dots on its outer edge; pressing it blooms that ring out of the hub
+in place of this one, and the hub takes the petal's face and becomes the way
+back, so a knob alone can walk down a tree of them and back up again. Like the
+launcher it owns the keyboard while it is up —
 which is also what keeps the knob off the volume while you are turning it to
 choose. Keys are listed in
 [Keybindings](keybindings.md#the-radial-menu), fields in

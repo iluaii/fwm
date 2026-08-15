@@ -729,8 +729,10 @@ tap = true
 # closes. `enter` is shorthand for putting "radial_menu" in [binds].
 #
 # Order in the file is order around the ring, clockwise from the top, and ten is
-# the cap — a ring past a dozen petals stops being something you can turn to and
-# becomes something you have to hunt through.
+# the cap on ONE ring — a ring past a dozen petals stops being something you can
+# turn to and becomes something you have to hunt through. Past that it grows
+# downwards instead: see the Power petal at the end, which holds a ring of its
+# own.
 #
 #[radial]
 #enter       = "super+shift+XF86AudioMute"
@@ -759,6 +761,32 @@ tap = true
 #[[radial.item]]
 #label  = "Wallpaper"
 #action = "wallpaper_picker"
+#
+# A petal with items of its own opens THEM instead of firing: pressing it swaps
+# the ring for the deeper one, which blooms out of the hub the same way. Such a
+# petal wears three dots on its outer edge, and the hub then wears the petal's
+# own face — press the hub (or Escape, or Backspace) to come back up a ring.
+# So the knob alone walks the whole tree: turn, press, turn, press, press the
+# middle to back out.
+#
+# Nest as deep as you like: ten petals per ring, twelve rings in the whole menu.
+# `center`/`center_text` on the parent item give its ring a hub of its own.
+#
+#[[radial.item]]
+#label = "Power"
+#text  = "⏻"
+#
+#[[radial.item.item]]
+#label  = "Shut down"
+#action = "spawn:systemctl poweroff"
+#
+#[[radial.item.item]]
+#label  = "Restart"
+#action = "spawn:systemctl reboot"
+#
+#[[radial.item.item]]
+#label  = "Sleep"
+#action = "spawn:systemctl suspend"
 
 # Mouse. What a drag with a modifier held does — the same table for the pointer
 # that [binds] is for the keyboard. Buttons: left, right, middle, side, extra.

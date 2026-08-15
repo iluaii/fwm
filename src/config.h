@@ -468,13 +468,31 @@ typedef struct {
  * is a picture and `text` is a glyph or two drawn in its place; an item may
  * give either, and with neither the label alone stands in the petal.
  *
- * Ten is the cap because a ring stops being readable well before it: the
- * petals are picked by turning, and past a dozen the turn becomes a hunt.
+ * A petal may hold a ring of its own instead of an action — its items are
+ * written one level deeper, and turning to it and pressing swaps the ring for
+ * theirs:
+ *
+ *   [[radial.item]]
+ *   label = "Power"
+ *   text  = "⏻"
+ *
+ *   [[radial.item.item]]
+ *   label  = "Sleep"
+ *   action = "spawn:systemctl suspend"
+ *
+ * Nesting goes as deep as the file cares to write, up to the ring budget
+ * below. The hub is the way back out: it shows what was pressed to get here,
+ * and pressing it (or Escape) returns one ring.
+ *
+ * Ten is the cap on one ring because a ring stops being readable well before
+ * it: the petals are picked by turning, and past a dozen the turn becomes a
+ * hunt. A sub-ring is exactly how a menu grows past that without becoming one.
  * `enter` works exactly as a mode's does — a convenience that registers
  * "radial_menu" in the root map, which can equally be bound by hand.
  */
 
-#define CONFIG_MAX_RADIAL 10
+#define CONFIG_MAX_RADIAL 10        /* petals in one ring */
+#define CONFIG_MAX_RADIAL_MENUS 12  /* rings in the whole menu, root included */
 #define FWM_RADIAL_ACTION "radial_menu"
 
 typedef struct {
@@ -482,14 +500,26 @@ typedef struct {
     char icon[256];   /* icon theme name, or a path; "" for none */
     char text[16];    /* drawn when there is no icon; "" for none */
     char action[256];
+    /* The ring this petal opens: an index into RadialConfig.menus, or 0 for
+     * none. Zero can mean "none" because menus[0] is the root ring and nothing
+     * descends back into it — which also makes a zeroed item a leaf, as every
+     * memset in the loader expects. */
+    int  submenu;
 } RadialItem;
 
+/* One ring. The root is menus[0]; a sub-ring inherits the hub picture of the
+ * petal that opens it unless it names its own. */
 typedef struct {
     RadialItem items[CONFIG_MAX_RADIAL];
     int        item_count;
-    double     radius;        /* hub centre to petal centre, px */
     char       center[512];   /* image in the hub; "" for none */
     char       center_text[32];
+} RadialMenu;
+
+typedef struct {
+    RadialMenu menus[CONFIG_MAX_RADIAL_MENUS];
+    int        menu_count;    /* >= 1 once anything is configured */
+    double     radius;        /* hub centre to petal centre, px */
 } RadialConfig;
 
 /* ── mouse binds ─────────────────────────────────────────────────────── */

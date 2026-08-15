@@ -245,12 +245,34 @@ the window behind the ring.
 | knob press, `Return`, `Space` | fire the focused petal |
 | `1`…`9`, `0` | fire that petal directly, 1 at the top |
 | pointer | hover to focus, click to fire, click outside to close |
-| `Escape` | close |
+| `Escape`, `Backspace` | back one ring — and from the root, close |
+| click the hub | back one ring (at the root the hub does nothing) |
 
 Order in the file is order around the ring, clockwise from twelve o'clock, and
-ten petals is the cap. `enter` is shorthand for putting `radial_menu` in
-`[binds]`. Every field is described in
-[Configuration](configuration.md#radial).
+ten petals is the cap on one ring. Past that a ring grows downwards rather than
+outwards: an item written with items of its own opens them instead of firing.
+
+```toml
+[[radial.item]]
+label = "Power"
+text  = "⏻"
+
+[[radial.item.item]]
+label  = "Shut down"
+action = "spawn:systemctl poweroff"
+
+[[radial.item.item]]
+label  = "Sleep"
+action = "spawn:systemctl suspend"
+```
+
+Those petals are marked with three dots on the outer edge. Pressing one blooms
+its ring out of the hub, and the hub becomes that petal — press it, `Escape` or
+`Backspace` to come back up. The knob alone walks the whole tree: turn, press,
+turn, press, and press the middle to back out.
+
+`enter` is shorthand for putting `radial_menu` in `[binds]`. Every field, and
+the caps on nesting, are described in [Configuration](configuration.md#radial).
 
 ## Mouse drags
 

@@ -189,7 +189,7 @@ rate your hand was turning it.
 
 ### Built-in overlays
 - **App launcher** (`Super+Space`) — fuzzy search over desktop entries with icons, no external `rofi` needed. Launched windows drop into the world with physics.
-- **Radial menu** — a ring of actions around a hub, built for a keyboard knob: turn to walk the ring, press to fire. Petals bloom out of the hub on springs, carry an icon or a glyph, and run anything a keybind can. While it is up the knob chooses petals instead of changing the volume. Configured in `[radial]`; opened by whatever key you give it.
+- **Radial menu** — a ring of actions around a hub, built for a keyboard knob: turn to walk the ring, press to fire. Petals bloom out of the hub on springs, carry an icon or a glyph, and run anything a keybind can — or hold a ring of their own, which blooms in place of this one, with the hub as the way back up. While it is up the knob chooses petals instead of changing the volume. Configured in `[radial]`; opened by whatever key you give it.
 - **Wallpaper picker** (`Super+Shift+P`) — browse a folder and apply an image instantly; the choice is remembered without ever rewriting your config.
 - **Screenshots** (`Print`, `Super+Shift+S` for a region) — built in, no `grim`/`slurp` to install. The PNG goes straight to the clipboard, ready to paste; nothing is written to disk. The region shot peels off the screen, tilts and flies away as it is taken, so you can see exactly which pixels were caught.
 - **Keybind cheat-sheet** (`Super+Shift+/`) — generated from your actual binds and gestures, not a static list.

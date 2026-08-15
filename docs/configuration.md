@@ -515,7 +515,8 @@ the root map.
 ## radial
 
 A ring of actions around a hub, meant for a keyboard with a knob. Up to 10
-petals. What it feels like and which keys drive it are in
+petals per ring, and a petal may open a ring of its own (see
+[Sub-rings](#sub-rings)). What it feels like and which keys drive it are in
 [Keybindings](keybindings.md#the-radial-menu); this is the table of fields.
 
 ```toml
@@ -547,14 +548,53 @@ And per `[[radial.item]]`, in file order, clockwise from twelve o'clock:
 
 | Key | Does |
 |---|---|
-| `action` | anything `[binds]` accepts. The one required field |
+| `action` | anything `[binds]` accepts. Required, unless the item has items of its own |
 | `label` | the name under the petal |
 | `icon` | a picture in the petal: an icon theme name (`"firefox"`) or a path |
 | `text` | a glyph or two drawn in the petal instead of a picture |
+| `center`, `center_text` | the hub of the ring this item opens; only with sub-items |
 
 An item with none of `label`, `icon` or `text` falls back to naming its own
 action, so a half-written petal looks half-written rather than blank. An item
-with no `action` is dropped and reported.
+with neither an action nor items of its own is dropped and reported.
+
+### Sub-rings
+
+A petal can hold a ring instead of an action. Write its items one level deeper
+— `[[radial.item.item]]` — and pressing that petal swaps the ring for theirs:
+
+```toml
+[[radial.item]]
+label = "Power"
+text  = "⏻"
+
+[[radial.item.item]]
+label  = "Shut down"
+action = "spawn:systemctl poweroff"
+
+[[radial.item.item]]
+label  = "Restart"
+action = "spawn:systemctl reboot"
+
+[[radial.item.item]]
+label  = "Sleep"
+action = "spawn:systemctl suspend"
+```
+
+A petal that opens a ring is marked with three dots on its outer edge. The hub
+of the ring it opens wears that petal's own `icon`/`text` — the middle of the
+ring says what was pressed to get there — unless the item gives `center` or
+`center_text` of its own. Pressing the hub, `Escape` or `Backspace` goes back
+one ring; `Escape` at the root closes the menu, as it always did.
+
+Nesting goes as deep as you write it, within two limits. Ten petals is the cap
+on any one ring, and **12 rings** is the cap on the whole menu, root included —
+they are handed out in file order, depth first, and a petal refused one is
+dropped and reported. (The TOML parser also stops at a table path ten keys
+deep, which is eight levels of sub-ring; past that the whole file is rejected
+as a syntax error.) An item whose ring ends up empty — every child broken, or
+the budget gone — is dropped too: a petal that opens nothing is worse than no
+petal.
 
 ## mouse
 

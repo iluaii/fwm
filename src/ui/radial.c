@@ -26,6 +26,13 @@
 /* A ring of actions around a hub, built for a knob: turning it walks the ring,
  * pressing it fires the petal the ring stopped on.
  *
+ * A petal may hold a ring of its own instead of an action. Pressing it swaps
+ * the ring for the deeper one — same panel, same hub, the petals simply bloom
+ * out of the middle again — and the hub becomes the way back: it wears the
+ * face of the petal that was pressed, and pressing it (or Escape, or
+ * Backspace) returns one ring. The path back is a stack, so the nesting is as
+ * deep as the config wrote it.
+ *
  * The petals are Box2D bodies that bloom out of the hub, each pulled to its
  * angle's slot by the same kind of under-damped spring the launcher's tiles
  * ride — this is a physics compositor, and a menu that simply appeared would
@@ -57,14 +64,25 @@ struct Radial {
     bool open;
     bool dirty;
 
-    /* The ring is a SNAPSHOT of [radial], taken when it opens, not a window
+    /* The menu is a SNAPSHOT of [radial], taken when it opens, not a window
      * onto the live config: `reload_config` is itself a bindable action, so a
-     * petal can replace the very table the menu is drawing from. Copying six
-     * kilobytes once per open buys immunity from that. */
-    int        count;
+     * petal can replace the very tables the menu is drawing from. Copying it
+     * once per open buys immunity from that — and the whole menu is copied,
+     * not just the ring on screen, because a sub-ring is entered later, long
+     * after a reload could have moved the ground. */
+    RadialConfig cfg;
+
+    int        menu;       /* the ring on screen: an index into cfg.menus */
+    int        count;      /* its items, mirrored from cfg for the loops below */
     int        sel;
-    RadialItem items[CONFIG_MAX_RADIAL];
     Petal      petals[CONFIG_MAX_RADIAL];
+
+    /* The way back: which ring was left, and which petal was focused in it.
+     * One entry per level descended — the config's ring budget is the depth
+     * budget too, since every level costs a ring. */
+    int   back_menu[CONFIG_MAX_RADIAL_MENUS];
+    int   back_sel[CONFIG_MAX_RADIAL_MENUS];
+    int   depth;
 
     char  center[512];
     char  center_text[32];
@@ -89,6 +107,13 @@ static inline float px2m(double px) { return (float)(px / 100.0); }
 static inline double m2px(float m)  { return (double)m * 100.0; }
 
 static const RadialConfig *conf(Radial *r) { return &r->server->config.radial; }
+
+/* The item at a place in the ring on screen. Everything below reads the menu
+ * through this, never through cfg.menus[0], so descending a level is a change
+ * of one integer. */
+static const RadialItem *item_at(Radial *r, int i) {
+    return &r->cfg.menus[r->menu].items[i];
+}
 
 /* Clockwise from the top: the first item written is the one straight up, which
  * is where a hand expects to find it. */
@@ -160,7 +185,7 @@ static void ensure_art(Radial *r, int i) {
     Petal *p = &r->petals[i];
     if (p->art_tried) return;
     p->art_tried = 1;
-    p->art = icon_load(r->items[i].icon,
+    p->art = icon_load(item_at(r, i)->icon,
                        r->server->config.decor.icon_theme, ICON_SZ);
 }
 
@@ -208,6 +233,18 @@ static void draw_radial(cairo_t *cr, int w, int h, void *data) {
     cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], alpha);
     cairo_fill(cr);
 
+    /* Inside a sub-ring the hub is the way back, and says so with a ring in
+     * the accent colour: the picture in the middle is the petal that was
+     * pressed to get here, and pressing it undoes that. At the root there is
+     * nothing to go back to and the hub stays plain. */
+    if (r->depth > 0) {
+        cairo_new_path(cr);
+        cairo_arc(cr, r->cx, r->cy, HUB_R - 1.0, 0, 2.0 * M_PI);
+        cairo_set_source_rgba(cr, thm->accent[0], thm->accent[1], thm->accent[2], 0.8);
+        cairo_set_line_width(cr, 2.0);
+        cairo_stroke(cr);
+    }
+
     ensure_hub_art(r);
     if (r->hub_art) {
         /* Clipped to the hub so an oversized or square picture still reads as
@@ -252,8 +289,26 @@ static void draw_radial(cairo_t *cr, int w, int h, void *data) {
             cairo_new_path(cr);
         }
 
-        const RadialItem *it = &r->items[i];
+        const RadialItem *it = item_at(r, i);
         ensure_art(r, i);
+
+        /* A petal that opens a ring of its own wears three dots on its outer
+         * edge, pointing the way the ring grows. Without a mark the only way
+         * to learn which petals go deeper is to press them, and pressing is
+         * how everything else fires. */
+        if (it->submenu) {
+            double a = slot_angle(r, i);
+            double ux = cos(a), uy = sin(a);      /* outward, hub to petal */
+            double px = -uy, py = ux;             /* along the edge */
+            cairo_set_source_rgb(cr, thm->accent[0], thm->accent[1], thm->accent[2]);
+            for (int d = -1; d <= 1; d++) {
+                double dx = x + ux * (rad - 8.0) + px * d * 6.0;
+                double dy = y + uy * (rad - 8.0) + py * d * 6.0;
+                cairo_new_path(cr);
+                cairo_arc(cr, dx, dy, 1.8, 0, 2.0 * M_PI);
+                cairo_fill(cr);
+            }
+        }
 
         /* With a picture or a glyph the name sits under it; with neither the
          * name has the whole petal to itself and is centred. */
@@ -318,6 +373,59 @@ static void art_free(Radial *r) {
     r->hub_tried = 0;
 }
 
+/* Put a ring on screen — the first one on open, and every one entered after.
+ * The petals of the ring that is leaving are thrown away and the new ones are
+ * born in the hub, so descending a level looks like the menu blooming again
+ * rather than a set of labels being swapped under the cursor.
+ *
+ * The world goes with them: a fresh one is cheaper to make than it is to
+ * reason about a body count that changes underneath a running simulation. */
+static void show_menu(Radial *r, int idx) {
+    const RadialMenu *m = &r->cfg.menus[idx];
+
+    r->menu  = idx;
+    r->count = m->item_count;
+    r->sel   = 0;
+    snprintf(r->center, sizeof(r->center), "%s", m->center);
+    snprintf(r->center_text, sizeof(r->center_text), "%s", m->center_text);
+
+    /* Icons belong to the ring that drew them, hub picture included. */
+    art_free(r);
+
+    if (r->world_ok) b2DestroyWorld(r->world);
+    b2WorldDef wd = b2DefaultWorldDef();
+    wd.gravity = (b2Vec2){0.0f, 0.0f};   /* the motion is all in the springs */
+    r->world = b2CreateWorld(&wd);
+    r->world_ok = true;
+    for (int i = 0; i < r->count; i++) {
+        r->petals[i].body = petal_body_create(r);
+        r->petals[i].grow = 0.0;
+    }
+    r->dirty = true;
+}
+
+/* Down into a petal's own ring. */
+static void enter_submenu(Radial *r, int sub) {
+    if (sub <= 0 || sub >= r->cfg.menu_count) return;   /* loader says impossible */
+    if (r->depth >= CONFIG_MAX_RADIAL_MENUS) return;
+    r->back_menu[r->depth] = r->menu;
+    r->back_sel[r->depth]  = r->sel;
+    r->depth++;
+    show_menu(r, sub);
+}
+
+/* Back up one ring, landing on the petal that was pressed to leave it. False
+ * at the root, where there is nothing above and the caller decides what a way
+ * out means — closing, for every caller there is. */
+static bool leave_submenu(Radial *r) {
+    if (r->depth <= 0) return false;
+    r->depth--;
+    int sel = r->back_sel[r->depth];
+    show_menu(r, r->back_menu[r->depth]);
+    if (sel >= 0 && sel < r->count) r->sel = sel;
+    return true;
+}
+
 /* `animate` false tears the panel down synchronously — required from
  * radial_destroy, where a pending callback would reference freed memory. */
 static void radial_close_ex(Radial *r, bool animate) {
@@ -341,6 +449,9 @@ static void radial_close_ex(Radial *r, bool animate) {
         r->world_ok = false;
     }
     r->count = 0;
+    /* The next open starts at the root, whichever ring this one ended on. */
+    r->menu  = 0;
+    r->depth = 0;
     /* Icons are dropped with the menu. Re-decoding ten of them costs a few ms
      * on the next open, and holding them costs memory for as long as the
      * session lasts — the menu is open for seconds at a time. */
@@ -356,16 +467,13 @@ static void radial_open(Radial *r) {
 
     /* Nothing configured: say so once, rather than flashing an empty ring. The
      * config error is already recorded by the loader. */
-    if (rc->item_count <= 0) return;
+    if (rc->menu_count <= 0 || rc->menus[0].item_count <= 0) return;
 
     closing_cancel(r);
 
-    r->count  = rc->item_count;
-    r->sel    = 0;
+    r->cfg    = *rc;      /* the snapshot; see the struct */
     r->radius = rc->radius;
-    memcpy(r->items, rc->items, sizeof(r->items));
-    snprintf(r->center, sizeof(r->center), "%s", rc->center);
-    snprintf(r->center_text, sizeof(r->center_text), "%s", rc->center_text);
+    r->depth  = 0;
 
     /* The ring must fit the monitor it is drawn on, labels and all. A radius
      * asked for in the config that does not fit is shrunk rather than clipped
@@ -386,24 +494,13 @@ static void radial_open(Radial *r) {
     r->px = (out ? out->box.x : 0) + (server->screen_width  - r->side) / 2;
     r->py = (out ? out->box.y : 0) + (server->screen_height - r->side) / 2;
 
-    b2WorldDef wd = b2DefaultWorldDef();
-    wd.gravity = (b2Vec2){0.0f, 0.0f};   /* the motion is all in the springs */
-    r->world = b2CreateWorld(&wd);
-    r->world_ok = true;
-    for (int i = 0; i < r->count; i++) {
-        r->petals[i].body = petal_body_create(r);
-        r->petals[i].grow = 0.0;
-    }
-
+    /* The panel before the petals: with no surface to draw on there is nothing
+     * to build a world for, and this way the failure path frees nothing. */
     r->overlay = cairo_overlay_create(server->layer_overlay, r->side, r->side);
-    if (!r->overlay) {
-        /* Torn down by hand, not through radial_close_ex: `open` is still
-         * false here, and that function's first line is to return when it is. */
-        b2DestroyWorld(r->world);
-        r->world_ok = false;
-        r->count = 0;
-        return;
-    }
+    if (!r->overlay) return;
+
+    show_menu(r, 0);
+
     wlr_scene_node_set_position(&r->overlay->node, r->px, r->py);
     cairo_overlay_animate_in(r->overlay, PANEL_ANIM_MS, PANEL_RISE_PX);
     r->open = true;
@@ -435,13 +532,21 @@ void radial_toggle(Radial *r) {
 
 bool radial_is_open(Radial *r) { return r && r->open; }
 
-/* Close BEFORE dispatching, never after: the action may be "mode:physics" or
+/* Press the focused petal: down into its ring if it has one, otherwise the
+ * action, and the menu is done.
+ *
+ * Close BEFORE dispatching, never after: the action may be "mode:physics" or
  * "launcher", and tearing the menu down on top of what it just opened would
  * undo it. */
 static void fire_selected(Radial *r) {
     if (r->sel < 0 || r->sel >= r->count) return;
-    char action[sizeof(r->items[0].action)];
-    snprintf(action, sizeof(action), "%s", r->items[r->sel].action);
+    const RadialItem *it = item_at(r, r->sel);
+    if (it->submenu) {
+        enter_submenu(r, it->submenu);
+        return;
+    }
+    char action[sizeof(it->action)];
+    snprintf(action, sizeof(action), "%s", it->action);
     radial_close(r);
     server_dispatch_action(r->server, action);
 }
@@ -457,8 +562,12 @@ bool radial_handle_key(Radial *r, xkb_keysym_t sym) {
     r->dirty = true;
 
     switch (sym) {
+    /* One ring at a time on the way out: Escape climbs back to the ring a
+     * petal was pressed in, and only closes the menu from the root. Anything
+     * else would make a mis-turn three levels down cost the whole menu. */
     case XKB_KEY_Escape:
-        radial_close(r);
+    case XKB_KEY_BackSpace:
+        if (!leave_submenu(r)) radial_close(r);
         return true;
 
     /* The knob. Turning it is a volume key on every keyboard that has one, and
@@ -543,10 +652,15 @@ bool radial_handle_button(Radial *r, double lx, double ly, bool pressed) {
         fire_selected(r);
         return true;
     }
-    /* The hub is the one place a click does nothing: it is the middle of the
-     * ring, and dismissing from there would make the picture a trap. */
+    /* The hub never dismisses — it is the middle of the ring, and closing from
+     * there would make the picture a trap. Inside a sub-ring it is the way
+     * back up; at the root it is simply the picture, and does nothing. */
     double dx = x - r->cx, dy = y - r->cy;
-    if (dx * dx + dy * dy > HUB_R * HUB_R) radial_close(r);
+    if (dx * dx + dy * dy <= HUB_R * HUB_R) {
+        leave_submenu(r);
+        return true;
+    }
+    radial_close(r);
     return true;
 }
 
