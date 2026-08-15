@@ -419,10 +419,10 @@ static void test_physics_profiles(void) {
         "gravity_steps = [0.0, 1.0]\n"
         "[physics.moon]\n"
         "gravity  = 160.0\n"
-        "desktops = [3, 4]\n"
+        "desktops = [1, 2]\n"
         "[physics.water]\n"
         "friction = 0.9\n"
-        "desktops = [7]\n");
+        "desktops = [3]\n");
     FwmConfig cfg;
     config_load(&cfg, p);
     CHECK_INT(cfg.error_count, 0);
@@ -432,16 +432,16 @@ static void test_physics_profiles(void) {
 
     /* Unclaimed desktops stay on the world's values. */
     CHECK_INT(cfg.physics.desktop_profile[0], -1);
-    CHECK_INT(cfg.physics.desktop_profile[3], cfg.physics.desktop_profile[4]);
-    CHECK(cfg.physics.desktop_profile[3] >= 0);
+    CHECK_INT(cfg.physics.desktop_profile[1], cfg.physics.desktop_profile[2]);
+    CHECK(cfg.physics.desktop_profile[1] >= 0);
 
-    const PhysicsProfileConfig *moon = &cfg.physics.profiles[cfg.physics.desktop_profile[3]];
+    const PhysicsProfileConfig *moon = &cfg.physics.profiles[cfg.physics.desktop_profile[1]];
     CHECK_STR(moon->name, "moon");
     CHECK_DBL(moon->gravity, 160.0, 1e-9);
     /* A profile is a diff: what it does not write, it inherits. */
     CHECK_DBL(moon->friction, 0.985, 1e-9);
 
-    const PhysicsProfileConfig *water = &cfg.physics.profiles[cfg.physics.desktop_profile[7]];
+    const PhysicsProfileConfig *water = &cfg.physics.profiles[cfg.physics.desktop_profile[3]];
     CHECK_DBL(water->friction, 0.9, 1e-9);
     CHECK_DBL(water->gravity, 981.0, 1e-9);
     config_free(&cfg);

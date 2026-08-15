@@ -379,7 +379,7 @@ void server_request_tray_redraw(FwmServer *server) {
     if (wl_list_empty(&server->outputs)) return;
     
     TrayData data = {0};
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < FWM_DESKTOPS; i++) {
         data.desktop_window_counts[i] = 0;
     }
     
@@ -388,7 +388,7 @@ void server_request_tray_redraw(FwmServer *server) {
         PhysicsBody *body = &server->physics.bodies[i];
         if (body->active) {
             int d = (int)((body->x + body->width / 2.0) / server->screen_width);
-            if (d >= 0 && d < 10) {
+            if (d >= 0 && d < FWM_DESKTOPS) {
                 data.desktop_window_counts[d]++;
             }
         }
@@ -468,10 +468,10 @@ void server_request_tray_redraw(FwmServer *server) {
         if (!expo_view_position(server, &d2.active_pos))
             d2.active_pos = (double)out->camera_x / server->screen_width;
         if (d2.active_pos < 0.0) d2.active_pos = 0.0;
-        if (d2.active_pos > 9.0) d2.active_pos = 9.0;
+        if (d2.active_pos > FWM_DESKTOPS - 1.0) d2.active_pos = FWM_DESKTOPS - 1.0;
         d2.active_desktop = (int)lround(d2.active_pos);
         if (d2.active_desktop < 0) d2.active_desktop = 0;
-        if (d2.active_desktop > 9) d2.active_desktop = 9;
+        if (d2.active_desktop > FWM_DESKTOPS - 1) d2.active_desktop = FWM_DESKTOPS - 1;
 
         /* Layout is per-desktop, so the pill reports this monitor's desktop;
          * gravity and cava are global. */

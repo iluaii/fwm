@@ -178,7 +178,7 @@ static void desktop_shove(FwmServer *server, int d) {
  * restore path (saved geometry, cleared tile state, the outward shove) starts
  * getting subtly wrong in some of them. */
 void server_set_desktop_mode(FwmServer *server, int d, int mode) {
-    if (d < 0 || d >= 10) return;
+    if (d < 0 || d >= FWM_DESKTOPS) return;
     int old = server->desktop_mode[d];
     if (old == mode) return;
 
@@ -212,7 +212,7 @@ void server_toggle_desktop_tiling(FwmServer *server, int d) {
  * does not silently mean different things depending on where you are. */
 void server_move_view_to_desktop(FwmServer *server, FwmView *view, int target,
                                         int follow) {
-    if (!view || target < 0 || target >= 10 || server->screen_width <= 0) return;
+    if (!view || target < 0 || target >= FWM_DESKTOPS || server->screen_width <= 0) return;
 
     PhysicsBody *b = physics_find_body(&server->physics, view->id);
     int src = b ? b->desktop_id : view->x / server->screen_width;
