@@ -354,7 +354,6 @@ static void load_radial_item(FwmConfig *cfg, toml_table_t *tbl, int idx) {
     RadialItem *it = &r->items[r->item_count];
     memset(it, 0, sizeof(*it));
     snprintf(it->action, sizeof(it->action), "%s", act.u.s);
-    free(act.u.s);
 
     toml_datum_t lbl = toml_string_in(tbl, "label");
     if (lbl.ok) { snprintf(it->label, sizeof(it->label), "%s", lbl.u.s); free(lbl.u.s); }
@@ -364,9 +363,12 @@ static void load_radial_item(FwmConfig *cfg, toml_table_t *tbl, int idx) {
     if (txt.ok) { snprintf(it->text, sizeof(it->text), "%s", txt.u.s); free(txt.u.s); }
 
     /* The petal has to say something. Falling back to the action means a
-     * half-written item is visibly half-written rather than a blank circle. */
+     * half-written item is visibly half-written rather than a blank circle.
+     * Copied from the parsed string rather than from it->action: those two are
+     * members of one object, and gcc cannot see that they do not overlap. */
     if (!it->label[0] && !it->icon[0] && !it->text[0])
-        snprintf(it->label, sizeof(it->label), "%s", it->action);
+        snprintf(it->label, sizeof(it->label), "%s", act.u.s);
+    free(act.u.s);
 
     r->item_count++;
 }
