@@ -40,6 +40,8 @@
 #include "screenshot.h"
 #include "ui/welcome.h"
 #include "ui/launcher.h"
+#include "ui/osd.h"
+#include "volume.h"
 #include "ui/radial.h"
 #include "expo.h"
 #include "ui/cairo_overlay.h"
@@ -380,6 +382,8 @@ bool server_init(FwmServer *server) {
 
     server->launcher = launcher_create(server);
     server->radial = radial_create(server);
+    server->osd = osd_create(server);
+    server->volume = volume_create(server);
 
     wl_list_init(&server->views);
     wl_list_init(&server->xwl_unmanaged);
@@ -612,6 +616,10 @@ void server_destroy(FwmServer *server) {
     server->launcher = NULL;
     radial_destroy(server->radial);
     server->radial = NULL;
+    osd_destroy(server->osd);
+    server->osd = NULL;
+    volume_destroy(server->volume);
+    server->volume = NULL;
     expo_destroy(server);
     {   /* each monitor's join-slide holds a buffer and a scene node */
         FwmOutput *o;

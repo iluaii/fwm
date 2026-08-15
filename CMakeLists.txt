@@ -163,6 +163,8 @@ set(SOURCES
     src/ui/welcome.c
     src/ui/launcher.c
     src/ui/radial.c
+    src/ui/osd.c
+    src/volume.c
     src/ui/icons.c
     src/ui/logo.c
     src/ui/expo_menu.c

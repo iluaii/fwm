@@ -91,7 +91,7 @@ int action_is_known(const char *a) {
     static const char *prefixes[] = {
         "spawn:", "view:", "move_camera:", "tile_focus:", "tile_move:",
         "move_to:", "move_to_view:", "global:",
-        "sun_azimuth:", "sun_elevation:", FWM_MODE_ACTION, NULL
+        "sun_azimuth:", "sun_elevation:", "set:", "volume:", FWM_MODE_ACTION, NULL
     };
     for (int i = 0; exact[i]; i++)
         if (strcmp(a, exact[i]) == 0) return 1;
@@ -546,6 +546,7 @@ static void load_input(toml_table_t *root, FwmConfig *cfg) {
     in->kbd_options[0] = '\0';
     in->repeat_rate  = 25;
     in->repeat_delay = 600;
+    in->knob_accel   = 4;
 
     /* Everything libinput owns is left alone unless the file says otherwise —
      * except tap, which fwm turns on (see InputConfig). */
@@ -576,6 +577,12 @@ static void load_input(toml_table_t *root, FwmConfig *cfg) {
     if (d.ok && d.u.i > 0) in->repeat_rate = (int)d.u.i;
     d = toml_int_in(tbl, "repeat_delay");
     if (d.ok && d.u.i > 0) in->repeat_delay = (int)d.u.i;
+    d = toml_int_in(tbl, "knob_accel");
+    if (d.ok) {
+        if (d.u.i >= 1 && d.u.i <= 16) in->knob_accel = (int)d.u.i;
+        else config_report_error(cfg, "[input] knob_accel %lld out of range 1..16 — using %d",
+                                 (long long)d.u.i, in->knob_accel);
+    }
 
     /* Touchpad. A device that cannot do one of these ignores it; see
      * pointer_apply_input_config. */
@@ -949,6 +956,71 @@ static void load_stats(toml_table_t *root, FwmConfig *cfg) {
         }
         free(d.u.s);
     }
+}
+
+/* ── volume section ──────────────────────────────────────────────────── */
+
+/* Is `name` an executable on PATH? Used to pick between wpctl and pactl, which
+ * is a choice worth making for the user: nearly every machine has exactly one
+ * of them, and asking someone to write out three shell commands to make a
+ * volume key work is asking them to configure something that has one answer. */
+static int mixer_on_path(const char *name) {
+    const char *path = getenv("PATH");
+    if (!path || !*path) path = "/usr/local/bin:/usr/bin:/bin";
+    while (*path) {
+        const char *sep = strchr(path, ':');
+        size_t len = sep ? (size_t)(sep - path) : strlen(path);
+        if (len == 0) { len = 1; path = "."; }
+        char full[512];
+        if (snprintf(full, sizeof(full), "%.*s/%s", (int)len, path, name) < (int)sizeof(full)
+            && access(full, X_OK) == 0) return 1;
+        if (!sep) break;
+        path = sep + 1;
+    }
+    return 0;
+}
+
+static void load_volume(toml_table_t *root, FwmConfig *cfg) {
+    VolumeConfig *v = &cfg->volume;
+    memset(v, 0, sizeof(*v));
+    v->max = 100.0;
+
+    /* pactl reads the volume and the mute state with two commands; both lines
+     * are handed to one parser, so they are simply run one after the other. */
+    if (mixer_on_path("wpctl")) {
+        snprintf(v->get,  sizeof(v->get),  "wpctl get-volume @DEFAULT_AUDIO_SINK@");
+        snprintf(v->set,  sizeof(v->set),  "wpctl set-volume @DEFAULT_AUDIO_SINK@ %%v%%");
+        snprintf(v->mute, sizeof(v->mute), "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle");
+    } else if (mixer_on_path("pactl")) {
+        snprintf(v->get,  sizeof(v->get),  "pactl get-sink-volume @DEFAULT_SINK@; "
+                                           "pactl get-sink-mute @DEFAULT_SINK@");
+        snprintf(v->set,  sizeof(v->set),  "pactl set-sink-volume @DEFAULT_SINK@ %%v%%");
+        snprintf(v->mute, sizeof(v->mute), "pactl set-sink-mute @DEFAULT_SINK@ toggle");
+    }
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "volume");
+    if (!tbl) return;
+
+    toml_datum_t d = toml_string_in(tbl, "get");
+    if (d.ok) { snprintf(v->get, sizeof(v->get), "%s", d.u.s); free(d.u.s); }
+    d = toml_string_in(tbl, "set");
+    if (d.ok) { snprintf(v->set, sizeof(v->set), "%s", d.u.s); free(d.u.s); }
+    d = toml_string_in(tbl, "mute");
+    if (d.ok) { snprintf(v->mute, sizeof(v->mute), "%s", d.u.s); free(d.u.s); }
+
+    toml_datum_t m = toml_double_in(tbl, "max");
+    if (m.ok) {
+        if (m.u.d >= 1.0 && m.u.d <= 200.0) v->max = m.u.d;
+        else config_report_error(cfg, "[volume] max %.0f out of range 1..200 — using %.0f",
+                                 m.u.d, v->max);
+    }
+
+    /* A `set` that never mentions %v would move the volume to the same place
+     * every time, which looks exactly like a knob that does nothing. */
+    if (v->set[0] && !strstr(v->set, "%v"))
+        config_report_error(cfg, "[volume] set has no %%v — fwm has nowhere to put "
+                                 "the value it wants");
 }
 
 /* ── sound section ───────────────────────────────────────────────────── */
@@ -1443,6 +1515,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_cava(NULL, cfg);
     load_grass(NULL, cfg);
     load_sound(NULL, cfg);
+    load_volume(NULL, cfg);
     load_stats(NULL, cfg);
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
     load_sun(NULL, cfg);     /* likewise: a sun in the sky before anything is read */
@@ -1489,6 +1562,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_cava(root, cfg);
     load_grass(root, cfg);
     load_sound(root, cfg);
+    load_volume(root, cfg);
     load_stats(root, cfg);
     load_wallpaper(root, cfg);
     load_wallpaper_picker(root, cfg);

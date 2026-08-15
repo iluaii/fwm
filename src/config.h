@@ -299,6 +299,13 @@ typedef struct {
     int  repeat_rate;      /* key repeat, chars/s */
     int  repeat_delay;     /* ms before repeat starts */
 
+    /* How far one detent of a knob may carry a menu when it is being spun
+     * rather than clicked: 1 is off, and the steps in between are earned by
+     * keeping the turn going. A knob is the one input fwm has that can be
+     * turned FAST, and a list of three hundred applications walked one row per
+     * detent is a list nobody reaches the end of. See server_knob_step. */
+    int  knob_accel;       /* biggest step one detent may become, 1..16 */
+
     /* Touchpad / pointer. -1 = leave libinput's default alone. */
     int  tap;              /* tap-to-click (default 1, see above) */
     int  tap_drag;         /* tap-and-drag: tap then slide moves */
@@ -747,6 +754,33 @@ typedef struct {
     double max_speed;   /* px/s: full volume at and above this */
 } SoundConfig;
 
+/* ── system volume ───────────────────────────────────────────────────── */
+
+/*
+ * How fwm talks to the mixer, for the `volume:` action:
+ *
+ *   [volume]
+ *   get  = "wpctl get-volume @DEFAULT_AUDIO_SINK@"
+ *   set  = "wpctl set-volume @DEFAULT_AUDIO_SINK@ %v%"   # %v = 0..max
+ *   mute = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+ *   max  = 100
+ *
+ * Left alone, these are wpctl's — or pactl's on a machine with no wpctl, which
+ * is decided when the config loads by looking for the binary. Shell commands
+ * rather than a library because fwm does not own the audio session: PipeWire
+ * does, and the one thing a compositor needs from it is a number to show and a
+ * way to move it. The same reasoning as [stats] custom sensors.
+ *
+ * `set` is given an ABSOLUTE value, never a step, so what fwm shows and what
+ * the mixer holds cannot drift apart over a fast turn of a knob.
+ */
+typedef struct {
+    char   get[256];
+    char   set[256];    /* %v is replaced with the percentage to set */
+    char   mute[256];
+    double max;         /* the loudest `volume:` will go, percent */
+} VolumeConfig;
+
 /* ── stats pill ──────────────────────────────────────────────────────── */
 
 /*
@@ -1012,6 +1046,7 @@ typedef struct {
     CavaConfig      cava;
     GrassConfig     grass;
     SoundConfig     sound;
+    VolumeConfig    volume;
     StatsConfig     stats;
     KeyBind        *keys;
     int             key_count;
@@ -1074,6 +1109,17 @@ int config_option_check(const ConfigOption *opt, const char *value,
 /* Format the current value into out (never fails for a valid opt). */
 void config_option_get(const FwmConfig *cfg, const ConfigOption *opt,
                        char *out, size_t cap);
+
+/* The current value as a number. 0 for a colour, which is not one. */
+int config_option_number(const FwmConfig *cfg, const ConfigOption *opt, double *out);
+
+/* Add `delta` to a numeric option and store the result, CLAMPED to the
+ * option's range rather than refused at the edge of it — see the comment on
+ * the definition; this is the "set:name+5" path, a hand on a dial rather than
+ * a script over a socket. `hit_end` (may be NULL) comes back 1 when the range
+ * stopped it. Returns 0 with a reason in err for a colour or an unknown. */
+int config_option_nudge(FwmConfig *cfg, const ConfigOption *opt, double delta,
+                        int *hit_end, char *err, size_t errcap);
 
 /* Fold every matching rule's properties into `out`, in file order. Returns 0
  * if nothing matched. app_id/title may be NULL. */

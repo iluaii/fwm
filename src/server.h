@@ -631,6 +631,19 @@ typedef struct FwmServer {
      * the pointer while it is up. Never NULL after startup — being open is
      * its own flag, not this pointer (see radial_is_open). */
     struct Radial *radial;
+    /* The dial readout: what a `set:` bind is worth now, low on the screen for
+     * a second after the turning stops. Never NULL after startup; being up is
+     * its own flag (see osd_busy). */
+    struct Osd *osd;
+    /* The system volume, for the `volume:` action: what fwm last knew it to
+     * be, and the reader that keeps that honest. Never NULL after startup. */
+    struct Volume *volume;
+    /* The knob's recent history, for server_knob_step: when the last detent
+     * arrived, which way it went, and how many have arrived in a row without
+     * the hand pausing. */
+    uint32_t knob_last_ms;
+    int      knob_dir;
+    int      knob_run;
     /* The desktop strip (expo). NULL when closed — that NULL is the mode flag
      * every input path tests, so there is no second copy of "is it open". */
     struct FwmExpo *expo;
@@ -809,6 +822,12 @@ void server_apply_physics_config(FwmServer *server);
  * function, and only exists to log that the socket was the hand (src/ipc.c). */
 void server_dispatch_action(FwmServer *server, const char *action);
 void server_dispatch_action_external(FwmServer *server, const char *action);
+/* How many steps this detent of the knob is worth, 1 or more: a spun knob
+ * carries further than a clicked one. `dir` is -1 or +1 and only decides
+ * whether the turn is a continuation of the last one — the caller multiplies
+ * its own step by the answer. Every menu the knob drives asks this, so the
+ * feel is one thing rather than three; capped by [input] knob_accel. */
+int server_knob_step(FwmServer *server, int dir);
 /* Swap the wallpaper at runtime: rebuilds the layers, recomputes the palette
  * when [decor] color_source = "wallpaper", and remembers the choice in the
  * state file so it survives a restart. Replaces the FIRST [[wallpaper]] layer;

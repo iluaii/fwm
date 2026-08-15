@@ -35,6 +35,8 @@
 #include "screenshot.h"
 #include "ui/welcome.h"
 #include "ui/launcher.h"
+#include "ui/osd.h"
+#include "volume.h"
 #include "ui/radial.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
@@ -311,6 +313,71 @@ static int tile_action_ctx(FwmServer *server, int *out_d, BspNode **out_leaf) {
     *out_d = d;
     *out_leaf = leaf;
     return 1;
+}
+
+/* "set:<option><op><value>" — the bindable half of `fwmctl set`.
+ *
+ *   set:physics.gravity=981     put it there
+ *   set:sun.blur+2              a step up, set:sun.blur-2 a step down
+ *
+ * The relative form is what this is FOR: a knob sends one key per detent, so
+ * a dial is a bind that says "+2" and a hand that keeps turning. Which is also
+ * why a step CLAMPS at the end of the range where the socket refuses — see
+ * config_option_nudge — and why every one of these puts the reading on screen:
+ * turning a number you cannot see is not turning anything.
+ *
+ * Errors are logged, not shown. A misspelled option is a config mistake, and
+ * the place fwm says so about config mistakes is the tray's pill. */
+static void server_action_set_option(FwmServer *server, const char *arg) {
+    size_t nlen = strcspn(arg, "=+-");
+    if (nlen == 0 || nlen >= 64 || arg[nlen] == '\0') {
+        wlr_log(WLR_ERROR, "set:%s: expected <option>=<value>, or +/- a step", arg);
+        return;
+    }
+    char name[64];
+    snprintf(name, sizeof(name), "%.*s", (int)nlen, arg);
+
+    const ConfigOption *opt = config_option_find(name);
+    if (!opt) {
+        wlr_log(WLR_ERROR, "set:%s: unknown option \"%s\" (fwmctl config lists them)",
+                arg, name);
+        return;
+    }
+
+    char err[192] = "";
+    int hit_end = 0;
+    if (arg[nlen] == '=') {
+        if (!config_option_set(&server->config, opt, arg + nlen + 1, err, sizeof(err))) {
+            wlr_log(WLR_ERROR, "set:%s: %s", arg, err);
+            return;
+        }
+    } else {
+        /* The sign belongs to the number: "+2" and "-2" are both read from the
+         * operator onward, so strtod does the arithmetic's sign for us. */
+        char *end;
+        double delta = strtod(arg + nlen, &end);
+        if (end == arg + nlen) {
+            wlr_log(WLR_ERROR, "set:%s: \"%s\" is not a step", arg, arg + nlen);
+            return;
+        }
+        if (!config_option_nudge(&server->config, opt, delta, &hit_end, err, sizeof(err))) {
+            wlr_log(WLR_ERROR, "set:%s: %s", arg, err);
+            return;
+        }
+    }
+
+    /* The same re-apply the socket's `set` runs, and for the same reason: an
+     * option is only worth what the compositor does about it. It also
+     * announces the change to subscribers, so a key and a socket look alike
+     * from outside. */
+    server_apply_config(server, 0);
+
+    char value[64];
+    config_option_get(&server->config, opt, value, sizeof(value));
+    double now, frac = -1.0;
+    if (config_option_number(&server->config, opt, &now) && opt->max > opt->min)
+        frac = (now - opt->min) / (opt->max - opt->min);
+    osd_show(server->osd, opt->name, value, frac, hit_end != 0);
 }
 
 void server_dispatch_action(FwmServer *server, const char *action) {
@@ -772,6 +839,13 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         int desktop = resolve_desktop(server, action + 13);
         if (desktop >= 0)
             server_move_view_to_desktop(server, server->focused_view, desktop, 1);
+    } else if (strncmp(action, "set:", 4) == 0) {
+        server_action_set_option(server, action + 4);
+    } else if (strncmp(action, "volume:", 7) == 0) {
+        /* The system volume is not fwm's to hold, so this is the one action
+         * that asks something else for a number and shows what came back —
+         * see src/volume.c. */
+        volume_action(server->volume, action + 7);
     }
 
     /* Several of the actions above write a runtime setting directly (the sun's

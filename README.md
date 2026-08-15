@@ -192,6 +192,7 @@ rate your hand was turning it.
 - **Radial menu** — a ring of actions around a hub, built for a keyboard knob: turn to walk the ring, press to fire. Petals bloom out of the hub on springs, carry an icon or a glyph, and run anything a keybind can — or hold a ring of their own, which blooms in place of this one, with the hub as the way back up. While it is up the knob chooses petals instead of changing the volume. Configured in `[radial]`; opened by whatever key you give it.
 - **Wallpaper picker** (`Super+Shift+P`) — browse a folder and apply an image instantly; the choice is remembered without ever rewriting your config.
 - **Screenshots** (`Print`, `Super+Shift+S` for a region) — built in, no `grim`/`slurp` to install. The PNG goes straight to the clipboard, ready to paste; nothing is written to disk. The region shot peels off the screen, tilts and flies away as it is taken, so you can see exactly which pixels were caught.
+- **Dial readout** — a `set:` bind (`set:sun.blur+2`) turns any runtime option from a key, and the name, the value and its place in its range appear low on the screen for a second while you turn. Built for a knob: spin it and the steps come faster, in this readout and in every menu the knob drives.
 - **Keybind cheat-sheet** (`Super+Shift+/`) — generated from your actual binds and gestures, not a static list.
 - **Config never costs you the session** — a broken file falls back to built-in binds and reports the problem in a tray pill; fix it and press `Super+Shift+R` to reload live.
 - **Window rules** — `[[rule]]` matches `app_id` / `title` with regexes and decides where a window opens and whether physics touches it.
@@ -967,6 +968,8 @@ fit  = "pan"
 | `pin_window`, `toggle_nocollide`, `calm_all`, `cycle_gravity` | physics toggles |
 | `toggle_sun` / `sun_mode` | shadows on or off / the sun follows the clock or your hand, taking hold of it where it stands |
 | `sun_azimuth:<deg>` / `sun_elevation:<deg>` | move the light: `+15` / `-15` steps, a bare number points it there. Below the horizon is night |
+| `volume:+N` / `volume:-N` / `volume:mute` | the system volume, through wpctl or pactl (configurable in `[volume]`), with `Volume 62%` and a bar on screen while it moves — what `spawn:wpctl` cannot do, because fwm never learns the number that way |
+| `set:<option><op><value>` | turn any runtime option from a key: `set:sun.blur+2` steps, `set:physics.gravity=981` puts it there. Everything `fwmctl config` lists, clamped to its range rather than refused at the end of it, with the value shown on screen while it moves |
 | `spin_window` / `spin_all` | **experimental:** set the focused window (or every window) spinning, picture and collision box alike; press again to settle |
 | `toggle_nocollide_all` / `toggle_tiling_all` / `toggle_floating_all` | same, but every window / every desktop at once |
 | `group_toggle`, `group_add`, `group_next`, `group_prev` | tab-stacks: make a stack, join it, cycle tabs |

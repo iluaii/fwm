@@ -144,6 +144,43 @@ void radial_grab_sync(FwmServer *server, bool was_open) {
     else      server_keyboard_enter(server, server_keyboard_target(server));
 }
 
+/* One detent of a knob, in steps.
+ *
+ * A knob has no velocity to report — it is three keys, and a fast turn differs
+ * from a slow one only in how closely the presses arrive. So the rate is read
+ * back out of their spacing: detents closer together than KNOB_FAST_MS in the
+ * same direction build a run, and a run that keeps going is worth more per
+ * click. Pause, or turn back, and it is one step again immediately, which is
+ * what makes the last click before the thing you wanted land on it.
+ *
+ * The curve is deliberately gentle at the start (three detents at one step
+ * before anything happens): the first click of a turn is aiming, and a menu
+ * that jumped by three on it would be a menu you cannot land on at all. */
+#define KNOB_FAST_MS  120   /* apart by more than this and the run is over */
+#define KNOB_WARMUP     3   /* detents at one step before the run counts */
+#define KNOB_PER_STEP   4   /* detents of run per extra step after that */
+
+int server_knob_step(FwmServer *server, int dir) {
+    int cap = server->config.input.knob_accel;
+    if (cap < 1) cap = 1;
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint32_t now = (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+
+    uint32_t gap = now - server->knob_last_ms;
+    if (server->knob_last_ms == 0 || gap > KNOB_FAST_MS || dir != server->knob_dir)
+        server->knob_run = 0;
+    else if (server->knob_run < 1000)
+        server->knob_run++;
+    server->knob_last_ms = now;
+    server->knob_dir = dir;
+
+    if (cap == 1 || server->knob_run < KNOB_WARMUP) return 1;
+    int step = 1 + (server->knob_run - KNOB_WARMUP) / KNOB_PER_STEP + 1;
+    return step > cap ? cap : step;
+}
+
 /* Hand the keyboard to a surface, minus the keys the compositor is keeping.
  *
  * An enter event carries the keys that are down at the time, and a client is

@@ -33,6 +33,8 @@
 #include "ui/stats_menu.h"
 #include "ui/welcome.h"
 #include "ui/launcher.h"
+#include "ui/osd.h"
+#include "volume.h"
 #include "ui/radial.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
@@ -427,6 +429,8 @@ static int server_is_busy(FwmServer *server) {
     if (!wl_list_empty(&server->ghosts)) return 1;     /* close animations */
     if (launcher_is_open(server->launcher)) return 1;  /* spring tiles */
     if (radial_is_open(server->radial)) return 1;      /* blooming petals */
+    if (osd_busy(server->osd)) return 1;               /* a dial reading, timing out */
+    if (volume_busy(server->volume)) return 1;         /* waiting on the mixer */
     if (cairo_overlay_animating()) return 1;
     if (server->modes_buffer && modes_menu_animating()) return 1;
     if (server->stats_buffer && stats_menu_animating()) return 1;
@@ -1282,6 +1286,13 @@ static int physics_tick_cb(void *data) {
 
     // The radial menu's petals, on exactly the same terms.
     radial_tick(server->radial, dt);
+
+    // The dial readout counting down its hold. Wall clock, like the menus
+    // below it: nothing in the simulation is waiting on it.
+    osd_tick(server->osd, elapsed);
+
+    // And the mixer's answer, when one was asked for.
+    volume_tick(server->volume, elapsed);
 
     // Modes menu: knobs sliding, the cava highlight travelling, rows staggering
     // in. Uses `elapsed`, not the fixed step — these are wall-clock animations

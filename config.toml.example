@@ -98,6 +98,24 @@ tick_rate             = 60.0
 #min_speed  = 200.0    # px/s: a nudge below this is not worth hearing
 #max_speed  = 2000.0   # px/s: full volume at and above this
 
+# The system volume, for the `volume:` action:
+#
+#   "XF86AudioRaiseVolume" = "volume:+5"
+#   "XF86AudioLowerVolume" = "volume:-5"
+#   "XF86AudioMute"        = "volume:mute"
+#
+# Unlike spawn:wpctl, fwm then KNOWS the number, so the knob gets a readout:
+# "Volume 62%" and a bar, low on the screen for a second while you turn.
+#
+# Nothing below is needed on an ordinary machine — the defaults are wpctl's, or
+# pactl's where wpctl is not installed, picked when the config loads. Write
+# these only for a mixer of your own; %v in `set` is the percentage fwm wants.
+#[volume]
+#get  = "wpctl get-volume @DEFAULT_AUDIO_SINK@"
+#set  = "wpctl set-volume @DEFAULT_AUDIO_SINK@ %v%"
+#mute = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+#max  = 100     # the loudest volume: will go, 1..200
+
 # What the machine is doing, in the tray: the island between the desktop dots
 # and the modes pill. Click it for the menu that switches each readout on and
 # off, or bind the `stats_menu` action to a key.
@@ -480,6 +498,12 @@ kbd_options = "grp:alt_shift_toggle"
 # kbd_variant = ""
 repeat_rate  = 25
 repeat_delay = 600
+# How far one detent of a keyboard knob may step when it is SPUN rather than
+# clicked, in the ring, the launcher and the desktop strip: a turn that keeps
+# going earns up to this many rows per click, and one pause puts it back to
+# one. 1 turns it off. Nothing else in fwm can be turned fast, which is why
+# only the knob gets this.
+#knob_accel = 4
 
 # Touchpad. Everything here is libinput's, and everything except `tap` is left
 # at whatever libinput chose for your model unless you say otherwise — those
@@ -712,11 +736,22 @@ tap = true
 # Outside the ring the knob is just three keys, matched on modifiers exactly, so
 # a chord needs no code and no [radial] at all:
 #
-#   "XF86AudioRaiseVolume"      = "spawn:wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+#   "XF86AudioRaiseVolume"      = "volume:+5"          # with a readout on screen
 #   "ctrl+XF86AudioRaiseVolume" = "view:next"   # ctrl held: one desktop over
 #   "ctrl+XF86AudioLowerVolume" = "view:prev"
 #   "alt+XF86AudioRaiseVolume"  = "move_camera:120"    # alt held: pan the camera
 #   "alt+XF86AudioLowerVolume"  = "move_camera:-120"
+#
+# And `set:` makes the knob a dial for anything `fwmctl config` lists — the
+# option, then + or - a step, or = a value. What it is worth now appears low on
+# the screen for a second, so there is something to turn it BY:
+#
+#   "super+XF86AudioRaiseVolume" = "set:sun.blur+2"
+#   "super+XF86AudioLowerVolume" = "set:sun.blur-2"
+#   "super+XF86AudioMute"        = "set:sun.blur=8"     # back where it was
+#
+# A step stops at the end of the option's range instead of being refused there,
+# which is what makes it a dial and not a socket command with a key on it.
 #
 # And inside a [mode.*] the knob needs no modifier at all — a submap owns the
 # keyboard, so a bare turn is free there (see the sun mode below).

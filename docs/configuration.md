@@ -23,7 +23,7 @@ Contents: [physics](#physics) · [per-desktop physics](#per-desktop-physics) ·
 [decor](#decor) · [input](#input) · [focus](#focus) · [effects](#effects) ·
 [session](#session) · [binds](#binds) · [modes](#modes) · [mouse](#mouse) ·
 [gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_picker](#wallpaper_picker) ·
-[cava](#cava) · [grass](#grass) · [sound](#sound) · [output](#output)
+[cava](#cava) · [grass](#grass) · [sound](#sound) · [volume](#volume) · [output](#output)
 
 ---
 
@@ -361,6 +361,7 @@ kbd_variant  = ""
 kbd_options  = "grp:alt_shift_toggle"
 repeat_rate  = 25       # chars/s
 repeat_delay = 600      # ms before repeat starts
+knob_accel   = 4        # how far a SPUN knob steps at most; 1 = off
 
 tap = true              # tap-to-click
 #tap_drag         = true
@@ -377,6 +378,13 @@ tap = true              # tap-to-click
 
 Keep a Latin layout **first** in `kbd_layout`: binds fall back to it, so
 `Super+Q` keeps working while you are typing in another script.
+
+`knob_accel` (1..16) is how many steps one detent of a keyboard knob may become
+when it is spun rather than clicked — in the radial menu, the launcher and the
+desktop strip. A turn earns its way up: three detents at one step, then one
+more step per four detents after that, and back to one the moment the hand
+pauses or turns around. 1 turns the whole thing off. See
+[the knob](keybindings.md#the-radial-menu).
 
 Every touchpad key except `tap` is tri-state — leave it out and the device keeps
 whatever libinput decided for that model, which is usually a better answer than a
@@ -788,6 +796,36 @@ max_speed  = 2000.0   # px/s: full volume at and above this
 cannot read is reported and the built-in click stands in, so a typo never leaves
 the feature silently doing nothing. Volume follows how hard the hit was; heavier
 windows knock deeper.
+
+## volume
+
+How the [`volume:`](keybindings.md#volume-the-system-mixer) action talks to your
+mixer. **Nothing here is needed on an ordinary machine** — the defaults are
+wpctl's, or pactl's where wpctl is not installed, chosen when the config loads
+by looking for the binary.
+
+```toml
+[volume]
+get  = "wpctl get-volume @DEFAULT_AUDIO_SINK@"
+set  = "wpctl set-volume @DEFAULT_AUDIO_SINK@ %v%"   # %v = the level to set
+mute = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+max  = 100
+```
+
+| Key | Does |
+|---|---|
+| `get` | prints the current level. A `62%` anywhere in its output is read as the level; failing that, a fraction (`0.62`) is. `MUTED` or `Mute: yes` anywhere in it means muted |
+| `set` | puts the level somewhere. `%v` is replaced with the percentage fwm wants; a `set` without one is reported, since it would move the volume to the same place every time |
+| `mute` | toggles mute |
+| `max` | the loudest `volume:` will go, 1..200. Above 100 needs a mixer that allows it |
+
+Shell commands rather than a PipeWire binding on purpose: fwm does not own the
+audio session, and the two things a compositor needs from it — a number to show
+and a way to move it — are one line each. The same reasoning as
+[`[stats]`](#stats) custom sensors.
+
+`get` runs in the background and never blocks the compositor; it is killed if it
+has not answered in five seconds.
 
 ## output
 

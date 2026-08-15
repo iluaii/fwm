@@ -7,6 +7,7 @@ compositor.
 
 Contents: [the tray](#the-tray) · [the modes menu](#the-modes-menu) ·
 [the launcher](#the-launcher) · [the radial menu](#the-radial-menu) ·
+[the dial readout](#the-dial-readout) ·
 [the desktop strip](#the-desktop-strip) ·
 [the wallpaper picker](#the-wallpaper-picker) · [key hints](#key-hints) ·
 [config problems](#config-problems) · [the visualiser](#the-audio-visualiser) ·
@@ -172,6 +173,19 @@ which is also what keeps the knob off the volume while you are turning it to
 choose. Keys are listed in
 [Keybindings](keybindings.md#the-radial-menu), fields in
 [Configuration](configuration.md#radial).
+
+## The dial readout
+
+Low on the screen, for about a second: the name of the option a `set:` bind just
+moved, what it is worth now, and a bar showing where that sits between the ends
+of its range. It is drawn as the tray's island is, because it belongs to the
+same set of things.
+
+It exists because [`set:`](keybindings.md#set-a-dial-for-every-option) turned
+every runtime option into something a knob can turn, and a dial with no face is
+a dial you turn while watching the wallpaper for a hint that anything happened.
+A run of turns retimes one panel rather than stacking up; the far end of the bar
+lights when the range, not your hand, stopped the number moving.
 
 ## The desktop strip
 

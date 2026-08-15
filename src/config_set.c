@@ -191,6 +191,50 @@ int config_option_check(const ConfigOption *opt, const char *value,
     return option_apply(NULL, opt, value, err, errcap);
 }
 
+int config_option_number(const FwmConfig *cfg, const ConfigOption *opt, double *out) {
+    if (!cfg || !opt || opt->type == CFG_OPT_COLOR) return 0;
+    const char *field = (const char *)cfg + opt->offset;
+    *out = opt->type == CFG_OPT_INT ? (double)*(const int *)field
+                                    : *(const double *)field;
+    return 1;
+}
+
+/* CLAMPED, unlike every other writer in this file, and deliberately: a dial is
+ * turned until something looks right, and a knob that refused the last click
+ * before the end of its range — the way the socket refuses an out-of-range
+ * value — would be a knob that stops working near the edges. `hit_end` says
+ * the range answered instead of the hand, which is what the OSD draws. */
+int config_option_nudge(FwmConfig *cfg, const ConfigOption *opt, double delta,
+                        int *hit_end, char *err, size_t errcap) {
+    if (hit_end) *hit_end = 0;
+    if (!opt) return 0;
+    if (opt->type == CFG_OPT_COLOR) {
+        snprintf(err, errcap, "%s is a colour — a step up or down means nothing to it",
+                 opt->name);
+        return 0;
+    }
+
+    double v;
+    if (!config_option_number(cfg, opt, &v)) {
+        snprintf(err, errcap, "%s cannot be read as a number", opt->name);
+        return 0;
+    }
+    v += delta;
+    if (v < opt->min) { v = opt->min; if (hit_end) *hit_end = 1; }
+    if (v > opt->max) { v = opt->max; if (hit_end) *hit_end = 1; }
+
+    char *field = (char *)cfg + opt->offset;
+    /* Rounded, not truncated. An int option cannot hold a fraction and this
+     * keeps no remainder between turns, so the whole of the rule is: a step of
+     * half a unit or more moves it one, and anything smaller moves it not at
+     * all. Truncating instead would have made every step under a whole unit do
+     * nothing, which is a dial that ignores you rather than one with a
+     * coarsest setting. */
+    if (opt->type == CFG_OPT_INT) *(int *)field = (int)(v < 0.0 ? v - 0.5 : v + 0.5);
+    else                          *(double *)field = v;
+    return 1;
+}
+
 void config_option_get(const FwmConfig *cfg, const ConfigOption *opt,
                        char *out, size_t cap) {
     const char *field = (const char *)cfg + opt->offset;

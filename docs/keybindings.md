@@ -113,6 +113,8 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `sun_mode` | swap the clock for your hand and back; taking hold leaves the sun where it stood |
 | `sun_azimuth:<deg>` | turn the light. `+15` / `-15` step, a bare number points it there |
 | `sun_elevation:<deg>` | raise or lower it, same two forms. Below the horizon is night |
+| `set:<option><op><value>` | turn any runtime option: `set:sun.blur+2`, `set:physics.gravity=981` — see [below](#set-a-dial-for-every-option) |
+| `volume:+N` / `volume:-N` / `volume:<N>` / `volume:mute` | the system volume, with the reading on screen — see [below](#volume-the-system-mixer) |
 
 ### Interface
 
@@ -190,6 +192,63 @@ One-shot by default: the first action drops you back. `sticky = true` keeps the
 mode open until `Escape`, for something you mean to repeat. The tray shows the
 mode's name while it is active. Up to 8 modes.
 
+## `set:` — a dial for every option
+
+Everything `fwmctl set` can change, a key can change too:
+
+```toml
+[binds]
+"super+ctrl+XF86AudioRaiseVolume" = "set:sun.blur+2"     # a step up
+"super+ctrl+XF86AudioLowerVolume" = "set:sun.blur-2"     # and back down
+"super+ctrl+0"                    = "set:sun.blur=8"     # straight there
+```
+
+`+`/`-` step from wherever the value is now; `=` puts it where you say. The
+names and their ranges are whatever `fwmctl config` lists — physics, gaps,
+opacities, the sun, the shadows, the tray. A colour takes `=#RRGGBB` only,
+having no steps to take.
+
+This is the shape a knob wants: one key per detent, each worth a step. Unlike
+the socket, **a step clamps at the end of its range instead of being refused** —
+a dial that stopped answering near the end would be a broken dial — and the
+last click that changed nothing lights the end of the bar on the readout.
+
+That readout is the other half: every `set:` puts the name, the value and its
+place in the range low on the screen for about a second (see
+[the dial readout](interface.md#the-dial-readout)). Turning a number you
+cannot see is not turning anything.
+
+Runtime only, like `fwmctl set`: `reload_config` puts the file's values back.
+A misspelled option is logged and ignored — the bind still loads, because the
+option table is not consulted until the key is pressed.
+
+## `volume:` — the system mixer
+
+```toml
+[binds]
+"XF86AudioRaiseVolume" = "volume:+5"
+"XF86AudioLowerVolume" = "volume:-5"
+"XF86AudioMute"        = "volume:mute"
+```
+
+`+N` / `-N` step, a bare number goes straight there, `mute` toggles. Each one
+puts `Volume 62%` and a bar on screen for a second — which is the whole reason
+this exists rather than `spawn:wpctl …`: fwm cannot show a number it never
+learns, and a knob with no readout is a knob you turn while watching the
+wallpaper for a clue.
+
+fwm is not a mixer. It runs the commands in [`[volume]`](configuration.md#volume)
+— wpctl's by default, pactl's on a machine without wpctl — and shows what they
+report. Anything else that speaks to your audio stack works there too.
+
+The reading is **predicted, then confirmed**: the panel shows the value on the
+frame the knob turned, while a read runs behind it and corrects the number if
+the mixer disagreed (something else moved it, or it clamped). `set` is always
+handed an absolute percentage, never a step, so a fast spin cannot drift out of
+step with the mixer. The very first turn of a session has nothing to predict
+from, so it reads first and lands one detent later; every turn after that is
+immediate.
+
 ## The radial menu
 
 A ring of actions around a hub, meant for a keyboard with a knob: turning the
@@ -232,6 +291,16 @@ Bare turning still changes the volume, because `ctrl+…` is a different bind an
 the plain one no longer matches. Inside the ring or the desktop strip those keys
 belong to the overlay whatever is held down — and there turning already means
 "the next one along", so the two readings agree.
+
+**A spun knob carries further than a clicked one.** Detents arriving less than
+120ms apart in the same direction build a run, and a run that keeps going is
+worth more per click — up to `[input] knob_accel` steps (4 by default, 1 turns
+it off). It takes three detents to start, so the first click of a turn is
+always worth exactly one, and a pause or a turn the other way puts it back to
+one immediately: the last click before the thing you want lands on it. The ring,
+the launcher and the desktop strip all ask the same question, so the feel is one
+thing in all three — and the launcher, the only list here that can be hundreds
+of rows long, is where it is felt.
 
 **The volume does not move while the ring is up.** Those three keys are usually
 bound to `wpctl` in `[binds]`, and the menu is asked for them *before* the binds

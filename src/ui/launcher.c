@@ -924,16 +924,28 @@ bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
         return true;
     case XKB_KEY_Up:
     case XKB_KEY_ISO_Left_Tab:   /* what Shift+Tab arrives as */
-    case XKB_KEY_XF86AudioLowerVolume:
+    case XKB_KEY_XF86AudioLowerVolume: {
         /* Wraps to the last entry, mirroring Down. Clamping at 0 instead made
-         * the two directions behave differently at the ends of the list. */
-        if (shown > 0) l->sel = (l->sel + shown - 1) % shown;
+         * the two directions behave differently at the ends of the list.
+         *
+         * A spun knob steps further than a clicked one — this is the list
+         * where that matters most, since it is the only one in the compositor
+         * that can be hundreds of rows long. The arrows and Tab ask for the
+         * same, and get 1: they arrive at the key-repeat rate, which is
+         * already a rate, and doubling it would run away. */
+        int step = sym == XKB_KEY_XF86AudioLowerVolume
+                 ? server_knob_step(l->server, -1) : 1;
+        if (shown > 0) l->sel = (l->sel + shown - step % shown) % shown;
         return true;
+    }
     case XKB_KEY_Down:
     case XKB_KEY_Tab:
-    case XKB_KEY_XF86AudioRaiseVolume:
-        if (shown > 0) l->sel = (l->sel + 1) % shown;
+    case XKB_KEY_XF86AudioRaiseVolume: {
+        int step = sym == XKB_KEY_XF86AudioRaiseVolume
+                 ? server_knob_step(l->server, +1) : 1;
+        if (shown > 0) l->sel = (l->sel + step) % shown;
         return true;
+    }
     case XKB_KEY_BackSpace: {
         size_t len = strlen(l->query);
         /* strip one UTF-8 codepoint: continuation bytes, then the lead */

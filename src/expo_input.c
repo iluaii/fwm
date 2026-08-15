@@ -158,11 +158,13 @@ bool expo_handle_key(FwmServer *server, xkb_keysym_t sym) {
      * binds do; see the gate there. */
     case XKB_KEY_Left:
     case XKB_KEY_XF86AudioLowerVolume:
-        expo_pan_by(e, -expo_pitch(e));
+        expo_pan_by(e, -expo_pitch(e) * (sym == XKB_KEY_Left
+                                         ? 1 : server_knob_step(server, -1)));
         return true;
     case XKB_KEY_Right:
     case XKB_KEY_XF86AudioRaiseVolume:
-        expo_pan_by(e, expo_pitch(e));
+        expo_pan_by(e, expo_pitch(e) * (sym == XKB_KEY_Right
+                                        ? 1 : server_knob_step(server, +1)));
         return true;
     case XKB_KEY_Up:
     case XKB_KEY_Down: {

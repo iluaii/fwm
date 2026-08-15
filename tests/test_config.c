@@ -533,6 +533,8 @@ static void test_every_dispatchable_action_binds(void) {
         "view:3", "move_to:7", "move_to_view:next", "move_camera:-50",
         "tile_focus:l", "tile_move:d", "spawn:true", "mode:default",
         "sun_azimuth:+15", "sun_elevation:-5",
+        "set:physics.gravity=981", "set:sun.blur+2", "set:sun.blur-2",
+        "volume:+5", "volume:-5", "volume:mute",
         NULL,
     };
 
@@ -951,6 +953,55 @@ static void test_radial_submenus(void) {
     drop_config();
 }
 
+/* [volume] is the one section whose DEFAULTS depend on the machine — which
+ * mixer is installed — so what is pinned here is the shape: commands come out
+ * non-empty and carry their placeholder, and what the file says wins. */
+static void test_volume(void) {
+    CASE("[volume] defaults to whichever mixer is installed");
+    FwmConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    config_load(&cfg, "/nonexistent/fwm-test.toml");
+    CHECK_DBL(cfg.volume.max, 100.0, 1e-9);
+    if (cfg.volume.set[0]) {
+        /* A `set` with nowhere to put the value would move the volume to the
+         * same place every time — the built-in ones must never be that. */
+        CHECK_NOT_NULL(strstr(cfg.volume.set, "%v"));
+        CHECK(cfg.volume.get[0] != '\0');
+        CHECK(cfg.volume.mute[0] != '\0');
+    }
+    config_free(&cfg);
+
+    CASE("[volume] takes commands of its own");
+    const char *p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[volume]\n"
+        "get  = \"mymixer get\"\n"
+        "set  = \"mymixer set %v\"\n"
+        "mute = \"mymixer mute\"\n"
+        "max  = 150\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_STR(cfg.volume.get, "mymixer get");
+    CHECK_STR(cfg.volume.set, "mymixer set %v");
+    CHECK_STR(cfg.volume.mute, "mymixer mute");
+    CHECK_DBL(cfg.volume.max, 150.0, 1e-9);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("[volume] a set with no %v, and a max out of range, are reported");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[volume]\n"
+        "set = \"mymixer set 50\"\n"
+        "max = 900\n");
+    config_load(&cfg, p);
+    CHECK(cfg.error_count >= 2);
+    CHECK_DBL(cfg.volume.max, 100.0, 1e-9);   /* the bad max left the default */
+    CHECK_STR(cfg.volume.set, "mymixer set 50");  /* kept: it is still their command */
+    config_free(&cfg);
+    drop_config();
+}
+
 static void test_option_table(void) {
     CASE("the runtime option table");
     int count = 0;
@@ -1003,6 +1054,65 @@ static void test_option_check(void) {
      * never be able to disagree about the same string. */
     CHECK(config_option_set(&cfg, blur, "12", err, sizeof(err)));
     CHECK_DBL(cfg.sun.blur, 12.0, 1e-12);
+
+    config_free(&cfg);
+}
+
+/* A step up or down, which is what a knob sends: the one writer in the config
+ * that CLAMPS instead of refusing, because a dial that stops answering near
+ * the end of its range is a broken dial. */
+static void test_option_nudge(void) {
+    CASE("nudging an option by a step");
+    FwmConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    config_load(&cfg, "/nonexistent/fwm-test.toml");
+
+    const ConfigOption *blur = config_option_find("sun.blur");
+    const ConfigOption *gaps = config_option_find("tiling.gaps_in");
+    const ConfigOption *col  = config_option_find("decor.col_active");
+    CHECK_NOT_NULL(blur);
+    CHECK_NOT_NULL(gaps);
+    CHECK_NOT_NULL(col);
+
+    char err[192];
+    int end = -1;
+    double v = 0.0;
+
+    CHECK(config_option_set(&cfg, blur, "10", err, sizeof(err)));
+    CHECK(config_option_nudge(&cfg, blur, 2.5, &end, err, sizeof(err)));
+    CHECK_DBL(cfg.sun.blur, 12.5, 1e-12);
+    CHECK_INT(end, 0);
+    CHECK(config_option_nudge(&cfg, blur, -2.5, &end, err, sizeof(err)));
+    CHECK_DBL(cfg.sun.blur, 10.0, 1e-12);
+
+    /* Past either end it stops there and says so, rather than refusing the
+     * turn the way the socket refuses an out-of-range value. */
+    CHECK(config_option_nudge(&cfg, blur, 1000.0, &end, err, sizeof(err)));
+    CHECK_DBL(cfg.sun.blur, blur->max, 1e-12);
+    CHECK_INT(end, 1);
+    CHECK(config_option_nudge(&cfg, blur, -1e9, &end, err, sizeof(err)));
+    CHECK_DBL(cfg.sun.blur, blur->min, 1e-12);
+    CHECK_INT(end, 1);
+
+    /* An int option holds no fraction and nothing remembers one between turns,
+     * so a half step rounds to a whole one every time — and a step smaller
+     * than half rounds away to nothing, every time. Both are worth pinning:
+     * they are what a config that says `+0.5` on a knob actually gets. */
+    CHECK(config_option_set(&cfg, gaps, "10", err, sizeof(err)));
+    CHECK(config_option_nudge(&cfg, gaps, 0.5, NULL, err, sizeof(err)));
+    CHECK(config_option_nudge(&cfg, gaps, 0.5, NULL, err, sizeof(err)));
+    CHECK_INT(cfg.tiling.gaps_in, 12);
+    CHECK(config_option_nudge(&cfg, gaps, 0.4, NULL, err, sizeof(err)));
+    CHECK(config_option_nudge(&cfg, gaps, 0.4, NULL, err, sizeof(err)));
+    CHECK_INT(cfg.tiling.gaps_in, 12);
+
+    /* A colour has no steps. It is still settable outright. */
+    CHECK(!config_option_nudge(&cfg, col, 1.0, &end, err, sizeof(err)));
+    CHECK_INT(end, 0);
+
+    CHECK(config_option_number(&cfg, blur, &v));
+    CHECK_DBL(v, cfg.sun.blur, 1e-12);
+    CHECK(!config_option_number(&cfg, col, &v));
 
     config_free(&cfg);
 }
@@ -1217,8 +1327,10 @@ int main(void) {
     test_modes();
     test_radial();
     test_radial_submenus();
+    test_volume();
     test_option_table();
     test_option_check();
+    test_option_nudge();
     test_output_spellings();
     test_outputs();
     test_stats();

@@ -575,10 +575,10 @@ bool radial_handle_key(Radial *r, xkb_keysym_t sym) {
      * before the binds are: [binds] answers these three by changing the
      * volume, and it must not do that with the ring up. */
     case XKB_KEY_XF86AudioRaiseVolume:
-        step_focus(r, +1);
+        step_focus(r, +server_knob_step(r->server, +1));
         return true;
     case XKB_KEY_XF86AudioLowerVolume:
-        step_focus(r, -1);
+        step_focus(r, -server_knob_step(r->server, -1));
         return true;
     case XKB_KEY_XF86AudioMute:
         fire_selected(r);
