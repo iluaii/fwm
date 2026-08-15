@@ -6,7 +6,8 @@ nothing else), and there is no panel process to start — all of it is the
 compositor.
 
 Contents: [the tray](#the-tray) · [the modes menu](#the-modes-menu) ·
-[the launcher](#the-launcher) · [the desktop strip](#the-desktop-strip) ·
+[the launcher](#the-launcher) · [the radial menu](#the-radial-menu) ·
+[the desktop strip](#the-desktop-strip) ·
 [the wallpaper picker](#the-wallpaper-picker) · [key hints](#key-hints) ·
 [config problems](#config-problems) · [the visualiser](#the-audio-visualiser) ·
 [collision sound](#collision-sound)
@@ -145,6 +146,27 @@ The tiles have physics of their own — they settle as the list filters — and 
 launcher owns the keyboard while it is open, so no keystroke reaches a client you
 cannot see.
 
+## The radial menu
+
+A ring of actions around a hub, opened by whatever `[radial] enter` names — the
+press of a keyboard knob with modifiers held, if you have one. Turning the knob
+walks the ring, pressing it fires the petal you stopped on; the arrows, the
+digits and the mouse do the same for a keyboard that has none.
+
+The petals are Box2D bodies that bloom out of the hub, each pulled to its
+angle's slot by an under-damped spring — the same treatment the launcher's tiles
+get, for the same reason: a panel that simply appeared would be the one thing on
+this desktop that does not belong to the world. The focused petal swells and
+takes an accent ring.
+
+Nothing is in the ring until the config puts it there. Each petal shows an icon
+from your theme, a picture of your own, a glyph, or just its name, and fires any
+action a keybind could. Like the launcher it owns the keyboard while it is up —
+which is also what keeps the knob off the volume while you are turning it to
+choose. Keys are listed in
+[Keybindings](keybindings.md#the-radial-menu), fields in
+[Configuration](configuration.md#radial).
+
 ## The desktop strip
 
 `Super+A` (`expo`). Every desktop becomes a live-looking card in a row you can
@@ -153,6 +175,10 @@ the cards become a ring in 3D you can orbit; `x` closes the strip into a ring
 (the same `toggle_wrap` the config's `[camera] wrap` sets).
 
 Keys are listed in [Keybindings](keybindings.md#keys-inside-the-desktop-strip).
+A keyboard knob drives it too: turning it walks the strip, pressing it steps
+into the desktop under the eye — the same two verbs as
+[the radial menu](#the-radial-menu), and with the volume left alone the same
+way.
 While the strip is up the **simulation is frozen** — otherwise the windows in
 those pictures would quietly have moved by the time you dropped one.
 

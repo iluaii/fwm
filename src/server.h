@@ -61,6 +61,7 @@ typedef enum {
 
 struct FwmView;
 struct Launcher;
+struct Radial;
 struct FwmShotPicker;
 struct FwmServer;
 
@@ -626,6 +627,10 @@ typedef struct FwmServer {
      * teach the hand nothing it could reuse. */
     struct wlr_scene_buffer *stats_buffer;
     struct Launcher *launcher;
+    /* The radial menu, on the launcher's terms: it owns the keyboard and
+     * the pointer while it is up. Never NULL after startup — being open is
+     * its own flag, not this pointer (see radial_is_open). */
+    struct Radial *radial;
     /* The desktop strip (expo). NULL when closed — that NULL is the mode flag
      * every input path tests, so there is no second copy of "is it open". */
     struct FwmExpo *expo;
@@ -798,7 +803,11 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper);
  * per-desktop profiles built out of them. Split out because startup and reload
  * both need exactly this and nothing else. */
 void server_apply_physics_config(FwmServer *server);
-/* Run a keybind action from outside the keyboard path (see src/ipc.c). */
+/* Run a keybind action. The one entry point, so an action never behaves
+ * differently depending on what triggered it — a key, a petal of the radial
+ * menu, or a gesture. The _external variant is the socket's door onto the same
+ * function, and only exists to log that the socket was the hand (src/ipc.c). */
+void server_dispatch_action(FwmServer *server, const char *action);
 void server_dispatch_action_external(FwmServer *server, const char *action);
 /* Swap the wallpaper at runtime: rebuilds the layers, recomputes the palette
  * when [decor] color_source = "wallpaper", and remembers the choice in the

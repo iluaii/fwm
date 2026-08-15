@@ -31,6 +31,7 @@
 #include "screenshot.h"
 #include "ui/welcome.h"
 #include "ui/launcher.h"
+#include "ui/radial.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
@@ -134,6 +135,15 @@ void launcher_grab_sync(FwmServer *server, bool was_open) {
     }
 }
 
+/* The radial menu takes and gives back the keyboard on exactly the launcher's
+ * terms, and for the same reasons — see the comment above launcher_grab_sync. */
+void radial_grab_sync(FwmServer *server, bool was_open) {
+    bool open = radial_is_open(server->radial);
+    if (open == was_open) return;
+    if (open) wlr_seat_keyboard_notify_clear_focus(server->seat);
+    else      server_keyboard_enter(server, server_keyboard_target(server));
+}
+
 /* Hand the keyboard to a surface, minus the keys the compositor is keeping.
  *
  * An enter event carries the keys that are down at the time, and a client is
@@ -161,6 +171,17 @@ void server_keyboard_enter(FwmServer *server, struct wlr_surface *surface) {
         keys[n++] = kc;
     }
     wlr_seat_keyboard_notify_enter(server->seat, surface, keys, n, &kbd->modifiers);
+}
+
+/* The three keys a keyboard knob sends: turning it either way, and pressing
+ * it. Two overlays have to intercept these BEFORE the bind table gets them —
+ * on every keyboard that has a knob they are the volume keys, and a config
+ * that binds them (nearly every config does) would answer the knob by changing
+ * the volume while the user was only steering a menu. */
+static bool is_knob_key(xkb_keysym_t sym) {
+    return sym == XKB_KEY_XF86AudioRaiseVolume
+        || sym == XKB_KEY_XF86AudioLowerVolume
+        || sym == XKB_KEY_XF86AudioMute;
 }
 
 static void key_repeat_stop(FwmServer *server) {
@@ -367,6 +388,54 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
             }
         } else if (server->repeat_l_active && event->keycode == server->repeat_keycode) {
             key_repeat_stop(server);
+        }
+        return;
+    }
+
+    /* The desktop strip's own gate is further down, AFTER the binds, and it
+     * stays there: super+a must still close the strip and every other bind
+     * must still work while it is up. The knob cannot wait that long, though —
+     * its three keys ARE the volume keys, and [binds] would have spent them on
+     * wpctl long before the strip was asked. So those three, and only those
+     * three, are taken here. */
+    if (expo_active(server) && event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        uint32_t kc = event->keycode + 8;
+        xkb_keysym_t sym = xkb_state_key_get_one_sym(keyboard->wlr_keyboard->xkb_state, kc);
+        if (is_knob_key(sym)) {
+            /* Marked before the key is acted on, for the strip's own reason:
+             * stepping into a desktop hands the keyboard to a window, and that
+             * window must not be told about a key whose release we swallow. */
+            if (event->keycode < sizeof(server->key_consumed))
+                server->key_consumed[event->keycode] = 1;
+            key_repeat_stop(server);
+            expo_handle_key(server, sym);
+            return;
+        }
+    }
+
+    /* The radial menu owns the keyboard while the ring is up, and — this is the
+     * whole point of where it sits — it is asked BEFORE the binds below.
+     *
+     * The knob is three ordinary keys: turning it is XF86AudioRaiseVolume /
+     * LowerVolume and pressing it is XF86AudioMute. Those are exactly the keys
+     * a config binds to `wpctl`, so a gate placed after try_binds (where the
+     * desktop strip's is) would change the volume on every click of the knob
+     * while the user was only walking the ring. Placed here, the menu takes
+     * them and nothing else hears about it.
+     *
+     * Releases are swallowed with the presses, for the launcher's reason: a
+     * client that never saw the press must not be handed the release. */
+    if (radial_is_open(server->radial)) {
+        if (event->keycode < sizeof(server->key_consumed))
+            server->key_consumed[event->keycode] = event->state == WL_KEYBOARD_KEY_STATE_PRESSED;
+        if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            /* Nothing in the ring repeats: a detent is one step, and a held
+             * knob press must not fire the same petal over and over. */
+            key_repeat_stop(server);
+            uint32_t kc = event->keycode + 8;
+            xkb_keysym_t sym = xkb_state_key_get_one_sym(keyboard->wlr_keyboard->xkb_state, kc);
+            radial_handle_key(server->radial, sym);
+            radial_grab_sync(server, true);   /* Escape, or a petal, may have closed it */
         }
         return;
     }

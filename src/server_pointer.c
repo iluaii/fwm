@@ -34,6 +34,7 @@
 #include "screenshot.h"
 #include "ui/welcome.h"
 #include "ui/launcher.h"
+#include "ui/radial.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
@@ -350,6 +351,16 @@ static void process_cursor_motion(FwmServer *server, uint32_t time_msec) {
 
     // While the launcher is open the pointer belongs to it: hover moves the
     // selection, clients get no motion (and no pointer focus).
+    /* The radial menu takes the pointer on the same terms as the launcher,
+     * and before it: only one of the two is ever up, but the order has to be
+     * decided somewhere and the ring is the one drawn on top. */
+    if (radial_is_open(server->radial)) {
+        radial_handle_motion(server->radial, lx, ly);
+        wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+        wlr_seat_pointer_clear_focus(server->seat);
+        return;
+    }
+
     if (launcher_is_open(server->launcher)) {
         launcher_handle_motion(server->launcher, lx, ly);
         wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
@@ -466,6 +477,13 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
      * and the release that takes the picture must reach nothing else. */
     if (screenshot_handle_button(server, event->state == WL_POINTER_BUTTON_STATE_PRESSED))
         return;
+
+    bool r_was_open = radial_is_open(server->radial);
+    if (radial_handle_button(server->radial, server->cursor->x, server->cursor->y,
+                             event->state == WL_POINTER_BUTTON_STATE_PRESSED)) {
+        radial_grab_sync(server, r_was_open);   /* the click may have closed it */
+        return;
+    }
 
     bool l_was_open = launcher_is_open(server->launcher);
     if (launcher_handle_button(server->launcher, server->cursor->x, server->cursor->y,

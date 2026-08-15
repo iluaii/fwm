@@ -33,6 +33,7 @@
 #include "ui/stats_menu.h"
 #include "ui/welcome.h"
 #include "ui/launcher.h"
+#include "ui/radial.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "cava.h"
@@ -425,6 +426,7 @@ static int server_is_busy(FwmServer *server) {
 
     if (!wl_list_empty(&server->ghosts)) return 1;     /* close animations */
     if (launcher_is_open(server->launcher)) return 1;  /* spring tiles */
+    if (radial_is_open(server->radial)) return 1;      /* blooming petals */
     if (cairo_overlay_animating()) return 1;
     if (server->modes_buffer && modes_menu_animating()) return 1;
     if (server->stats_buffer && stats_menu_animating()) return 1;
@@ -1277,6 +1279,9 @@ static int physics_tick_cb(void *data) {
 
     // Launcher: tile physics + overlay redraw while open.
     launcher_tick(server->launcher, dt);
+
+    // The radial menu's petals, on exactly the same terms.
+    radial_tick(server->radial, dt);
 
     // Modes menu: knobs sliding, the cava highlight travelling, rows staggering
     // in. Uses `elapsed`, not the fixed step — these are wall-clock animations

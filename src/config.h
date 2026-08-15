@@ -449,6 +449,49 @@ typedef struct {
     int       key_count;
 } ConfigMode;
 
+/* ── the radial menu ─────────────────────────────────────────────────── */
+
+/*
+ * A ring of actions around a hub, meant for a knob:
+ *
+ *   [radial]
+ *   enter  = "super+shift+XF86AudioMute"   # the knob's own press, with mods
+ *   radius = 200
+ *   center = "~/.config/fwm/radial.png"    # or center_text = "fwm"
+ *
+ *   [[radial.item]]
+ *   label  = "Terminal"
+ *   icon   = "foot"                        # theme name or a path to an image
+ *   action = "spawn:foot"
+ *
+ * Order in the file is order around the ring, clockwise from the top. `icon`
+ * is a picture and `text` is a glyph or two drawn in its place; an item may
+ * give either, and with neither the label alone stands in the petal.
+ *
+ * Ten is the cap because a ring stops being readable well before it: the
+ * petals are picked by turning, and past a dozen the turn becomes a hunt.
+ * `enter` works exactly as a mode's does — a convenience that registers
+ * "radial_menu" in the root map, which can equally be bound by hand.
+ */
+
+#define CONFIG_MAX_RADIAL 10
+#define FWM_RADIAL_ACTION "radial_menu"
+
+typedef struct {
+    char label[64];
+    char icon[256];   /* icon theme name, or a path; "" for none */
+    char text[16];    /* drawn when there is no icon; "" for none */
+    char action[256];
+} RadialItem;
+
+typedef struct {
+    RadialItem items[CONFIG_MAX_RADIAL];
+    int        item_count;
+    double     radius;        /* hub centre to petal centre, px */
+    char       center[512];   /* image in the hub; "" for none */
+    char       center_text[32];
+} RadialConfig;
+
 /* ── mouse binds ─────────────────────────────────────────────────────── */
 
 /*
@@ -944,6 +987,7 @@ typedef struct {
     int             key_count;
     ConfigMode      modes[CONFIG_MAX_MODES];
     int             mode_count;
+    RadialConfig    radial;
     WallpaperLayer *wallpapers;
     int             wallpaper_count;
     ConfigRule     *rules;

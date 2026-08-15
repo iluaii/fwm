@@ -526,7 +526,7 @@ static void test_every_dispatchable_action_binds(void) {
         "spin_window", "spin_all", "fake_fullscreen", "real_fullscreen",
         "group_toggle", "group_next", "group_prev", "group_add",
         "terminal", "launcher", "expo", "toggle_tray", "toggle_wrap",
-        "modes_menu", "show_hints", "show_errors", "reload_config",
+        "modes_menu", "radial_menu", "show_hints", "show_errors", "reload_config",
         "wallpaper_picker", "screenshot", "screenshot_region",
         "output_off", "outputs_on", "toggle_sun", "sun_mode",
         "toggle_internal_output", "EXIT",
@@ -749,6 +749,92 @@ static void test_modes(void) {
     CHECK_NULL(config_match_bind(&cfg, XKB_KEY_o, FWM_MOD_LOGO));
     CHECK_NULL(config_match_bind(&cfg, XKB_KEY_i, FWM_MOD_LOGO));
     CHECK(cfg.key_count > 0);
+    config_free(&cfg);
+    drop_config();
+}
+
+static void test_radial(void) {
+    CASE("[radial] and its items");
+    const char *p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[radial]\n"
+        "enter  = \"super+shift+XF86AudioMute\"\n"
+        "radius = 240\n"
+        "center_text = \"fwm\"\n"
+        "[[radial.item]]\n"
+        "label  = \"Terminal\"\n"
+        "icon   = \"foot\"\n"
+        "action = \"spawn:foot\"\n"
+        "[[radial.item]]\n"
+        "label  = \"Physics\"\n"
+        "text   = \"G\"\n"
+        "action = \"cycle_gravity\"\n");
+    FwmConfig cfg;
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_INT(cfg.radial.item_count, 2);
+    CHECK_DBL(cfg.radial.radius, 240.0, 1e-9);
+    CHECK_STR(cfg.radial.center_text, "fwm");
+    /* File order is ring order, clockwise from the top. */
+    CHECK_STR(cfg.radial.items[0].label, "Terminal");
+    CHECK_STR(cfg.radial.items[0].action, "spawn:foot");
+    CHECK_STR(cfg.radial.items[1].text, "G");
+
+    /* `enter` lands in the ROOT map, exactly as a mode's does — the knob's own
+     * press with the modifiers held, which is the whole reason this exists. */
+    const KeyBind *kb = config_match_bind(&cfg, XKB_KEY_XF86AudioMute,
+                                          FWM_MOD_LOGO | FWM_MOD_SHIFT);
+    CHECK_NOT_NULL(kb);
+    CHECK_STR(kb->action, "radial_menu");
+    /* And it is a chord: the bare mute key is still the volume key it was. */
+    CHECK_NULL(config_match_bind(&cfg, XKB_KEY_XF86AudioMute, 0));
+    config_free(&cfg);
+    drop_config();
+
+    CASE("no [radial] leaves an empty ring and no bind");
+    p = write_config("[binds]\n\"super+q\" = \"killclient\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_INT(cfg.radial.item_count, 0);
+    CHECK_DBL(cfg.radial.radius, 190.0, 1e-9);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("broken items are dropped, the rest of the ring survives");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[radial]\n"
+        "enter  = \"super+shift+XF86AudioMute\"\n"
+        "radius = 5000\n"
+        "[[radial.item]]\n"
+        "label = \"no action at all\"\n"
+        "[[radial.item]]\n"
+        "action = \"not_an_action\"\n"
+        "[[radial.item]]\n"
+        "action = \"calm_all\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.radial.item_count, 1);
+    CHECK(cfg.error_count >= 3);          /* two items and the radius */
+    CHECK_DBL(cfg.radial.radius, 190.0, 1e-9);
+    /* An item with nothing to show falls back to naming its own action, so a
+     * half-written petal is visibly half-written rather than a blank circle. */
+    CHECK_STR(cfg.radial.items[0].label, "calm_all");
+    CHECK_NOT_NULL(config_match_bind(&cfg, XKB_KEY_XF86AudioMute,
+                                     FWM_MOD_LOGO | FWM_MOD_SHIFT));
+    config_free(&cfg);
+    drop_config();
+
+    CASE("the ring has a cap");
+    char body[4096];
+    int n = snprintf(body, sizeof body,
+                     "[binds]\n\"super+q\" = \"killclient\"\n[radial]\n");
+    for (int i = 0; i < CONFIG_MAX_RADIAL + 3; i++)
+        n += snprintf(body + n, sizeof body - (size_t)n,
+                      "[[radial.item]]\naction = \"calm_all\"\n");
+    p = write_config(body);
+    config_load(&cfg, p);
+    CHECK_INT(cfg.radial.item_count, CONFIG_MAX_RADIAL);
+    CHECK(cfg.error_count >= 1);
     config_free(&cfg);
     drop_config();
 }
@@ -1017,6 +1103,7 @@ int main(void) {
     test_sound();
     test_mouse();
     test_modes();
+    test_radial();
     test_option_table();
     test_option_check();
     test_output_spellings();

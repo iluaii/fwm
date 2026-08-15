@@ -698,6 +698,53 @@ tap = true
 #"Left"  = "tile_move:l"
 #"Right" = "tile_move:r"
 
+# The radial menu: a ring of actions around a hub, built for a keyboard with a
+# knob. Turning the knob walks the ring, pressing it fires the petal you stopped
+# on — and while the ring is up the knob does NOT touch the volume, because the
+# menu is asked for those keys before [binds] is.
+#
+# A knob is three ordinary keys: turning it is XF86AudioRaiseVolume and
+# XF86AudioLowerVolume, pressing it is XF86AudioMute. So the natural way in is
+# the knob's own press with modifiers held — which leaves the bare press still
+# muting, as it always did. Check what yours actually sends with
+# `libinput debug-events` before writing the line; a few knobs scroll instead.
+#
+# It works without one, too: the arrows and Tab walk the ring, Return fires,
+# the digits jump straight to a petal, the mouse hovers and clicks, and Escape
+# closes. `enter` is shorthand for putting "radial_menu" in [binds].
+#
+# Order in the file is order around the ring, clockwise from the top, and ten is
+# the cap — a ring past a dozen petals stops being something you can turn to and
+# becomes something you have to hunt through.
+#
+#[radial]
+#enter       = "super+shift+XF86AudioMute"
+#radius      = 190                        # hub centre to petal centre, px
+#center      = "~/.config/fwm/radial.png" # the picture in the hub ...
+#center_text = "fwm"                      # ... or a word, when there is none
+#
+# Each petal: `action` is anything [binds] accepts. `icon` is a picture — an
+# icon theme name like "firefox", or a path — and `text` is a glyph or two
+# drawn in its place. Give neither and the label alone fills the petal.
+#
+#[[radial.item]]
+#label  = "Terminal"
+#icon   = "foot"
+#action = "spawn:foot"
+#
+#[[radial.item]]
+#label  = "Physics"
+#text   = "G"
+#action = "cycle_gravity"
+#
+#[[radial.item]]
+#label  = "Desktops"
+#action = "expo"
+#
+#[[radial.item]]
+#label  = "Wallpaper"
+#action = "wallpaper_picker"
+
 # Mouse. What a drag with a modifier held does — the same table for the pointer
 # that [binds] is for the keyboard. Buttons: left, right, middle, side, extra.
 # Modifiers match EXACTLY, as in [binds]: "super+left" does not fire while shift

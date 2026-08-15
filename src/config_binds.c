@@ -332,6 +332,106 @@ void load_modes(toml_table_t *root, FwmConfig *cfg) {
     }
 }
 
+/* ── the radial menu ─────────────────────────────────────────────────── */
+
+/* One [[radial.item]]. Everything but `action` is optional: an item with no
+ * picture and no glyph still draws its label, and an item with no label still
+ * fires. What it cannot lack is something to do. */
+static void load_radial_item(FwmConfig *cfg, toml_table_t *tbl, int idx) {
+    RadialConfig *r = &cfg->radial;
+
+    toml_datum_t act = toml_string_in(tbl, "action");
+    if (!act.ok) {
+        config_report_error(cfg, "[[radial.item]] #%d: no action — item ignored", idx + 1);
+        return;
+    }
+    if (!action_is_known(act.u.s)) {
+        config_report_error(cfg, "[[radial.item]] #%d: unknown action \"%s\"", idx + 1, act.u.s);
+        free(act.u.s);
+        return;
+    }
+
+    RadialItem *it = &r->items[r->item_count];
+    memset(it, 0, sizeof(*it));
+    snprintf(it->action, sizeof(it->action), "%s", act.u.s);
+    free(act.u.s);
+
+    toml_datum_t lbl = toml_string_in(tbl, "label");
+    if (lbl.ok) { snprintf(it->label, sizeof(it->label), "%s", lbl.u.s); free(lbl.u.s); }
+    toml_datum_t ico = toml_string_in(tbl, "icon");
+    if (ico.ok) { expand_tilde(ico.u.s, it->icon, sizeof(it->icon)); free(ico.u.s); }
+    toml_datum_t txt = toml_string_in(tbl, "text");
+    if (txt.ok) { snprintf(it->text, sizeof(it->text), "%s", txt.u.s); free(txt.u.s); }
+
+    /* The petal has to say something. Falling back to the action means a
+     * half-written item is visibly half-written rather than a blank circle. */
+    if (!it->label[0] && !it->icon[0] && !it->text[0])
+        snprintf(it->label, sizeof(it->label), "%s", it->action);
+
+    r->item_count++;
+}
+
+void load_radial(toml_table_t *root, FwmConfig *cfg) {
+    RadialConfig *r = &cfg->radial;
+    memset(r, 0, sizeof(*r));
+    r->radius = 190.0;
+    if (!root) return;
+
+    toml_table_t *tbl = toml_table_in(root, "radial");
+    if (!tbl) return;
+
+    toml_datum_t rad = toml_double_in(tbl, "radius");
+    if (rad.ok) {
+        if (rad.u.d >= 80.0 && rad.u.d <= 600.0) r->radius = rad.u.d;
+        else config_report_error(cfg, "[radial] radius %.0f out of range 80..600 — using %.0f",
+                                 rad.u.d, r->radius);
+    }
+    toml_datum_t ctr = toml_string_in(tbl, "center");
+    if (ctr.ok) { expand_tilde(ctr.u.s, r->center, sizeof(r->center)); free(ctr.u.s); }
+    toml_datum_t ctxt = toml_string_in(tbl, "center_text");
+    if (ctxt.ok) { snprintf(r->center_text, sizeof(r->center_text), "%s", ctxt.u.s); free(ctxt.u.s); }
+
+    toml_array_t *arr = toml_array_in(tbl, "item");
+    if (!arr) {
+        config_report_error(cfg, "[radial]: no items — write them as [[radial.item]]");
+        return;
+    }
+    int n = toml_array_nelem(arr);
+    for (int i = 0; i < n; i++) {
+        if (r->item_count >= CONFIG_MAX_RADIAL) {
+            config_report_error(cfg, "[[radial.item]]: too many items (max %d) — the rest ignored",
+                                CONFIG_MAX_RADIAL);
+            break;
+        }
+        toml_table_t *sub = toml_table_at(arr, i);
+        if (!sub) {
+            config_report_error(cfg, "[[radial.item]] #%d: items are tables", i + 1);
+            continue;
+        }
+        load_radial_item(cfg, sub, i);
+    }
+
+    if (r->item_count == 0) {
+        /* An empty ring can still be opened, and then there is nothing in it
+         * but the way out. The errors above already said why. */
+        return;
+    }
+
+    /* Like a mode's `enter`, this is a bind INTO the menu and belongs to the
+     * root map — added here, after [binds] has been read. */
+    toml_datum_t e = toml_string_in(tbl, "enter");
+    if (!e.ok) return;
+    unsigned int mod;
+    xkb_keysym_t sym;
+    if (!parse_bind_key(e.u.s, &mod, &sym)) {
+        config_report_error(cfg, "[radial] enter = \"%s\": unknown key or modifier", e.u.s);
+        free(e.u.s);
+        return;
+    }
+    add_root_bind(cfg, mod, sym, FWM_RADIAL_ACTION);
+    free(e.u.s);
+}
+
 /* ── mouse section ───────────────────────────────────────────────────── */
 
 /* "super+shift+left" -> mods + FWM_BTN_*. Shares parse_mod_token with the

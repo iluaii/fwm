@@ -52,9 +52,14 @@ int action_is_known(const char *a);
  * the same ones. */
 int parse_hex_color(const char *s, float out[4]);
 
+/* Expand a leading "~/" — config paths are hand-written, and the shell that
+ * would normally do this is not involved. */
+void expand_tilde(const char *in, char *out, size_t cap);
+
 /* The bindings sections, loaded by config_load beside all the others. */
 void load_binds(toml_table_t *root, FwmConfig *cfg);
 void load_modes(toml_table_t *root, FwmConfig *cfg);
+void load_radial(toml_table_t *root, FwmConfig *cfg);
 void load_mouse(toml_table_t *root, FwmConfig *cfg);
 void load_gestures(toml_table_t *root, FwmConfig *cfg);
 

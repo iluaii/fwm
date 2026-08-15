@@ -512,6 +512,50 @@ open until `Escape`.
 `mode:<name>` works as an ordinary action anywhere, and `mode:default` returns to
 the root map.
 
+## radial
+
+A ring of actions around a hub, meant for a keyboard with a knob. Up to 10
+petals. What it feels like and which keys drive it are in
+[Keybindings](keybindings.md#the-radial-menu); this is the table of fields.
+
+```toml
+[radial]
+enter       = "super+shift+XF86AudioMute"
+radius      = 190
+center      = "~/.config/fwm/radial.png"
+center_text = "fwm"
+
+[[radial.item]]
+label  = "Terminal"
+icon   = "foot"
+action = "spawn:foot"
+
+[[radial.item]]
+label  = "Physics"
+text   = "G"
+action = "cycle_gravity"
+```
+
+| Key | Default | Does |
+|---|---|---|
+| `enter` | — | key that opens the ring; shorthand for `radial_menu` in `[binds]` |
+| `radius` | `190` | hub centre to petal centre, px, 80..600. Shrunk to fit a small screen |
+| `center` | — | picture in the hub: an icon theme name or a path, clipped to the circle |
+| `center_text` | — | drawn in the hub when there is no `center` picture |
+
+And per `[[radial.item]]`, in file order, clockwise from twelve o'clock:
+
+| Key | Does |
+|---|---|
+| `action` | anything `[binds]` accepts. The one required field |
+| `label` | the name under the petal |
+| `icon` | a picture in the petal: an icon theme name (`"firefox"`) or a path |
+| `text` | a glyph or two drawn in the petal instead of a picture |
+
+An item with none of `label`, `icon` or `text` falls back to naming its own
+action, so a half-written petal looks half-written rather than blank. An item
+with no `action` is dropped and reported.
+
 ## mouse
 
 ```toml

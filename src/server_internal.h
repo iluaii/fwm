@@ -87,7 +87,6 @@ void server_sun_sync(FwmServer *server);
  * on or off, or nudging it by a key, lands on screen in the same frame. */
 void server_sun_apply(FwmServer *server);
 void server_reclaim_memory(void);
-void server_dispatch_action(FwmServer *server, const char *action);
 FwmView *server_find_view(FwmServer *server, uint32_t id);
 void server_camera_settled(FwmServer *server);
 
@@ -215,6 +214,7 @@ void server_input_register(FwmServer *server);
 uint32_t get_active_modifiers(FwmServer *server);
 void server_notify_activity(FwmServer *server);
 void launcher_grab_sync(FwmServer *server, bool was_open);
+void radial_grab_sync(FwmServer *server, bool was_open);
 void keyboard_apply_input_config(FwmServer *server, struct wlr_keyboard *kb);
 void pointer_apply_input_config(FwmServer *server, struct wlr_input_device *device);
 

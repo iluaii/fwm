@@ -189,6 +189,7 @@ rate your hand was turning it.
 
 ### Built-in overlays
 - **App launcher** (`Super+Space`) — fuzzy search over desktop entries with icons, no external `rofi` needed. Launched windows drop into the world with physics.
+- **Radial menu** — a ring of actions around a hub, built for a keyboard knob: turn to walk the ring, press to fire. Petals bloom out of the hub on springs, carry an icon or a glyph, and run anything a keybind can. While it is up the knob chooses petals instead of changing the volume. Configured in `[radial]`; opened by whatever key you give it.
 - **Wallpaper picker** (`Super+Shift+P`) — browse a folder and apply an image instantly; the choice is remembered without ever rewriting your config.
 - **Screenshots** (`Print`, `Super+Shift+S` for a region) — built in, no `grim`/`slurp` to install. The PNG goes straight to the clipboard, ready to paste; nothing is written to disk. The region shot peels off the screen, tilts and flies away as it is taken, so you can see exactly which pixels were caught.
 - **Keybind cheat-sheet** (`Super+Shift+/`) — generated from your actual binds and gestures, not a static list.
@@ -970,6 +971,7 @@ fit  = "pan"
 | `toggle_nocollide_all` / `toggle_tiling_all` / `toggle_floating_all` | same, but every window / every desktop at once |
 | `group_toggle`, `group_add`, `group_next`, `group_prev` | tab-stacks: make a stack, join it, cycle tabs |
 | `launcher` | built-in app launcher |
+| `radial_menu` | the ring of actions from `[radial]`: turn a knob to choose a petal, press it to fire |
 | `toggle_wrap` | close the desktop strip into a ring: stepping past the last desktop arrives on the first (`x` inside expo) |
 | `expo` | the desktop strip: the camera pulls back over the neighbouring desktops — click a window to go to it, super+drag to move it between desktops, right-click for its menu, `z` for a wider view and, from there, middle-drag (or alt+drag) to fly around the ring. The keys are listed along the bottom while it is open |
 | `show_hints` | keybind cheat-sheet overlay |

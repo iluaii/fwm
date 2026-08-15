@@ -35,6 +35,7 @@
 #include "screenshot.h"
 #include "ui/welcome.h"
 #include "ui/launcher.h"
+#include "ui/radial.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
@@ -694,6 +695,10 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         bool was_open = launcher_is_open(server->launcher);
         launcher_toggle(server->launcher);
         launcher_grab_sync(server, was_open);
+    } else if (strcmp(action, FWM_RADIAL_ACTION) == 0) {
+        bool was_open = radial_is_open(server->radial);
+        radial_toggle(server->radial);
+        radial_grab_sync(server, was_open);
     } else if (strncmp(action, "view:", 5) == 0) {
         int seam = 0;
         int desktop = resolve_desktop_ex(server, action + 5, &seam);

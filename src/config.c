@@ -83,7 +83,7 @@ int action_is_known(const char *a) {
         "toggle_floating", "toggle_floating_all",
         "calm_all", "fake_fullscreen", "real_fullscreen",
         "launcher", "toggle_tray", "spin_window", "spin_all", "terminal",
-        "expo", "toggle_wrap", "modes_menu", "stats_menu",
+        "expo", "toggle_wrap", "modes_menu", "stats_menu", FWM_RADIAL_ACTION,
         "toggle_sun", "sun_mode",
         "screenshot", "screenshot_region",
         "output_off", "toggle_internal_output", "outputs_on", NULL
@@ -823,7 +823,7 @@ static void load_session(toml_table_t *root, SessionConfig *s, FwmConfig *cfg) {
 
 /* Expand a leading "~/" — config paths are hand-written, and the shell that
  * would normally do this is not involved. */
-static void expand_tilde(const char *in, char *out, size_t cap) {
+void expand_tilde(const char *in, char *out, size_t cap) {
     const char *home = getenv("HOME");
     if (in[0] == '~' && (in[1] == '/' || in[1] == '\0') && home)
         snprintf(out, cap, "%s%s", home, in + 1);
@@ -1451,6 +1451,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     if (!f) {
         config_report_error(cfg, "cannot open %s — using defaults", path);
         apply_default_binds(cfg);
+        load_radial(NULL, cfg);
         load_wallpaper_picker(NULL, cfg);
         return;
     }
@@ -1466,6 +1467,7 @@ void config_load(FwmConfig *cfg, const char *path) {
         config_report_error(cfg, "syntax error: %s", errbuf);
         config_report_error(cfg, "config ignored — using defaults and built-in keybindings");
         apply_default_binds(cfg);
+        load_radial(NULL, cfg);
         load_wallpaper_picker(NULL, cfg);
         return;
     }
@@ -1481,6 +1483,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_session(root, &cfg->session, cfg);
     load_binds(root, cfg);
     load_modes(root, cfg);   /* after [binds]: each mode's `enter` key joins the root map */
+    load_radial(root, cfg);  /* likewise: [radial] enter joins the root map too */
     load_mouse(root, cfg);
     load_gestures(root, cfg);
     load_cava(root, cfg);

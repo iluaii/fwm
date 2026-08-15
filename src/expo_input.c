@@ -151,10 +151,17 @@ bool expo_handle_key(FwmServer *server, xkb_keysym_t sym) {
          * shortcut to it, not a second meaning for it. */
         server_dispatch_action(server, "toggle_wrap");
         return true;
+    /* Turning a keyboard knob walks the strip and pressing it steps into the
+     * desktop under the eye — the same two verbs the ring uses, so the hand
+     * learns one thing and it holds in both places. The knob's keys are the
+     * volume keys, which is why server_input.c has to take them before the
+     * binds do; see the gate there. */
     case XKB_KEY_Left:
+    case XKB_KEY_XF86AudioLowerVolume:
         expo_pan_by(e, -expo_pitch(e));
         return true;
     case XKB_KEY_Right:
+    case XKB_KEY_XF86AudioRaiseVolume:
         expo_pan_by(e, expo_pitch(e));
         return true;
     case XKB_KEY_Up:
@@ -181,6 +188,7 @@ bool expo_handle_key(FwmServer *server, xkb_keysym_t sym) {
     }
     case XKB_KEY_Return:
     case XKB_KEY_KP_Enter:
+    case XKB_KEY_XF86AudioMute:
         expo_close(server, expo_view_desktop(server));
         return true;
     default:

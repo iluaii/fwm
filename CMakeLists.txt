@@ -162,6 +162,8 @@ set(SOURCES
     src/ui/errors.c
     src/ui/welcome.c
     src/ui/launcher.c
+    src/ui/radial.c
+    src/ui/icons.c
     src/ui/logo.c
     src/ui/expo_menu.c
     src/ui/expo_hints.c

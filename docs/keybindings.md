@@ -5,7 +5,8 @@ Nothing here is hard-coded. Every entry in the default table below is an ordinar
 `Super+Shift+?` shows the live list on screen.
 
 Contents: [defaults](#default-bindings) · [actions](#actions) ·
-[modes](#modes-submaps) · [mouse](#mouse-drags) · [gestures](#gestures) ·
+[modes](#modes-submaps) · [the radial menu](#the-radial-menu) ·
+[mouse](#mouse-drags) · [gestures](#gestures) ·
 [the desktop strip](#keys-inside-the-desktop-strip) ·
 [the launcher](#keys-inside-the-launcher)
 
@@ -121,6 +122,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `terminal` | a terminal |
 | `toggle_tray` | hide/show the status strip |
 | `modes_menu` | open the modes menu (same as clicking the tray pill) |
+| `radial_menu` | open the ring of actions from `[radial]` — see [below](#the-radial-menu) |
 | `show_hints` | the key hints overlay |
 | `show_errors` | the config-problem panel (same as clicking the ⚠ pill) |
 | `wallpaper_picker` | the wallpaper picker |
@@ -188,6 +190,47 @@ One-shot by default: the first action drops you back. `sticky = true` keeps the
 mode open until `Escape`, for something you mean to repeat. The tray shows the
 mode's name while it is active. Up to 8 modes.
 
+## The radial menu
+
+A ring of actions around a hub, meant for a keyboard with a knob: turning the
+knob walks the ring, pressing it fires the petal you stopped on. The petals
+bloom out of the hub on springs, like the launcher's tiles.
+
+```toml
+[radial]
+enter  = "super+shift+XF86AudioMute"   # the knob's own press, with modifiers
+radius = 190
+
+[[radial.item]]
+label  = "Terminal"
+icon   = "foot"          # icon theme name or a path; `text = "T"` instead
+action = "spawn:foot"
+```
+
+A knob is three ordinary keys — turning it is `XF86AudioRaiseVolume` and
+`XF86AudioLowerVolume`, pressing it is `XF86AudioMute` — so the way in is that
+press with modifiers held, which leaves the bare press still muting. Check what
+yours sends with `libinput debug-events` first; some knobs scroll instead.
+
+**The volume does not move while the ring is up.** Those three keys are usually
+bound to `wpctl` in `[binds]`, and the menu is asked for them *before* the binds
+are, exactly as the launcher is: turning the knob to choose a petal must not
+also turn the sound down. Every other key is swallowed too, so nothing reaches
+the window behind the ring.
+
+| Key | Does |
+|---|---|
+| knob turn, `←` `→` `↑` `↓`, `Tab` | move the focus around the ring, wrapping |
+| knob press, `Return`, `Space` | fire the focused petal |
+| `1`…`9`, `0` | fire that petal directly, 1 at the top |
+| pointer | hover to focus, click to fire, click outside to close |
+| `Escape` | close |
+
+Order in the file is order around the ring, clockwise from twelve o'clock, and
+ten petals is the cap. `enter` is shorthand for putting `radial_menu` in
+`[binds]`. Every field is described in
+[Configuration](configuration.md#radial).
+
 ## Mouse drags
 
 ```toml
@@ -242,14 +285,20 @@ in a browser still works.
 |---|---|
 | `z` | step out to the wider view — the desktops become cards on a ring |
 | `x` | close the strip into a ring, or open it back into a line |
-| `←` `→` | move one desktop along |
+| `←` `→`, knob turn | move one desktop along |
 | `↑` `↓` | lift the camera over the ring (far view only) |
 | `PgUp` `PgDn` | closer / further (far view only) |
-| `Return` | enter the desktop you are looking at |
+| `Return`, knob press | enter the desktop you are looking at |
 | `Escape` | leave the strip |
 
 Windows can be dragged between cards with the mouse, and clicking a card enters
 that desktop.
+
+The knob does here what it does in [the radial menu](#the-radial-menu) — turn to
+choose, press to commit — and on the same terms: while the strip is up those
+three keys steer it and **the volume does not move**, whatever `[binds]` says
+about them. Every other bind still works inside the strip, which is why only
+those three are intercepted early.
 
 ## Keys inside the launcher
 

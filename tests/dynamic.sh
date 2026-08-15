@@ -23,7 +23,7 @@ BUILD="$REPO/build-asan"
 KEEP=0
 LIST=0
 
-SCENARIOS="bare clients churn tiling groups desktops overlays physics reload ipc settings outputs monitors xwayland threads kill"
+SCENARIOS="bare clients churn tiling groups desktops overlays radial physics reload ipc settings outputs monitors xwayland threads kill"
 
 # A scenario whose compositor has to be started differently says so here, in a
 # variable named after it. `outputs` needs a second monitor, and the headless
@@ -96,6 +96,32 @@ mode = "both"
 bars = 24
 TOML
 threads_env="HOME=$CFGHOME FWM_TEST_CAVA=1"
+
+# The radial menu is empty unless a config fills it, so this one gets a HOME of
+# its own too — and a ring with an icon in it, since resolving and decoding an
+# icon is the part of the menu that touches files.
+RADHOME="$LOGDIR/home-radial"
+mkdir -p "$RADHOME/.config/fwm"
+cat > "$RADHOME/.config/fwm/config.toml" <<TOML
+[radial]
+enter       = "super+shift+XF86AudioMute"
+center_text = "fwm"
+
+[[radial.item]]
+label  = "Calm"
+text   = "C"
+action = "calm_all"
+
+[[radial.item]]
+label  = "Gravity"
+icon   = "firefox"
+action = "cycle_gravity"
+
+[[radial.item]]
+label  = "Nothing at all"
+action = "toggle_split"
+TOML
+radial_env="HOME=$RADHOME"
 
 # `settings` WRITES a state file — the overlay `fwmctl save` keeps — so it gets
 # a state directory of its own under the logs. The developer's own
@@ -307,6 +333,21 @@ sc_overlays() {
     act wallpaper_picker 0.6;  act wallpaper_picker 0.4
     act show_hints 0.5;        act show_hints 0.3
     act show_errors 0.5;       act show_errors 0.3
+}
+
+# Opening and closing the ring, and closing it by FIRING a petal — the path
+# where an action runs out of a menu that tears itself down first.
+sc_radial() {
+    client 20
+    act radial_menu 0.6;  act radial_menu 0.4
+    act radial_menu 0.6
+    act calm_all 0.3      # dispatched while the ring is up
+    act radial_menu 0.4
+    # Reload under an open ring: the menu draws from the config it was opened
+    # with, and that config is about to be replaced.
+    act radial_menu 0.6
+    act reload_config 0.6
+    act radial_menu 0.4
 }
 
 sc_physics() {
