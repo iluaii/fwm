@@ -39,6 +39,7 @@
 #include "wallpaper.h"
 #include "group.h"
 #include "expo.h"
+#include "seam.h"
 #include <linux/input-event-codes.h>
 
 #include <stdlib.h>
@@ -384,6 +385,35 @@ static void process_cursor_motion(FwmServer *server, uint32_t time_msec) {
     pointer_update_focus(server, lx, ly, time_msec);
 }
 
+/* The compositor's half of the seam: the monitors' boxes in, the landing point
+ * out, and the warp. Which crossings this touches at all — only the ones with
+ * no screen at the height they left — is in seam.h.
+ *
+ * Returns true when it moved the cursor itself. */
+static bool cursor_cross_seam(FwmServer *server, struct wlr_input_device *dev,
+                              double dx, double dy) {
+    if (!server->config.input.seam_nearest || !server->cursor) return false;
+
+    SeamBox screens[SEAM_MAX_SCREENS];
+    int count = 0;
+    FwmOutput *o;
+    wl_list_for_each(o, &server->outputs, link) {
+        if (count >= SEAM_MAX_SCREENS) break;
+        if (!o->enabled || o->box.width <= 0 || o->box.height <= 0) continue;
+        screens[count++] = (SeamBox){ o->box.x, o->box.y, o->box.width, o->box.height };
+    }
+    /* One screen has no seam, and the layout is the only thing that could
+     * answer where a pointer leaving it should go. */
+    if (count < 2) return false;
+
+    double mx, my;
+    if (!seam_cross(screens, count, server->cursor->x, server->cursor->y,
+                    dx, dy, &mx, &my)) return false;
+
+    wlr_cursor_warp(server->cursor, dev, mx, my);
+    return true;
+}
+
 static void handle_cursor_motion(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;
@@ -412,7 +442,10 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
         }
     }
 
-    wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
+    /* Across the seam, or the ordinary move — the crossing has already put the
+     * cursor where it goes. */
+    if (!cursor_cross_seam(server, &event->pointer->base, event->delta_x, event->delta_y))
+        wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
     process_cursor_motion(server, event->time_msec);
 }
 

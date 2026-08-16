@@ -362,6 +362,7 @@ kbd_options  = "grp:alt_shift_toggle"
 repeat_rate  = 25       # chars/s
 repeat_delay = 600      # ms before repeat starts
 knob_accel   = 4        # how far a SPUN knob steps at most; 1 = off
+seam         = "nearest" # the overhang at a screen edge: through, or "off"
 
 tap = true              # tap-to-click
 #tap_drag         = true
@@ -385,6 +386,26 @@ desktop strip. A turn earns its way up: three detents at one step, then one
 more step per four detents after that, and back to one the moment the hand
 pauses or turns around. 1 turns the whole thing off. See
 [the knob](keybindings.md#the-radial-menu).
+
+`seam` is about the stretch of a shared edge that only one of two monitors
+covers. Side by side, a 1920x1080 and a 1366x768 have 312 pixels of right edge
+with no screen beyond them, and with `"off"` the pointer stops dead against
+that overhang — you have to go up first to get across. `"nearest"` (the
+default) makes it a way through: the pointer comes out at the nearest point of
+the neighbour's edge, the corner of the seam, which is as close to where the
+hand was pushing as a screen exists.
+
+Nothing is rescaled. A crossing at a height both screens cover comes out at
+exactly that height, whatever the two are sized — that is the plain behaviour
+and this setting never touches it.
+
+Where that height falls on the glass is the layout's business, so a screen that
+physically stands lower than the one beside it should be told so: `x = 1920`
+with `y = 350` in [`[[output]]`](#output) hangs it 350px lower, and then the
+height the pointer keeps is the physically right one and the seam is where the
+two screens really meet. To find the number without a reload after every guess,
+nudge it live with `fwmctl output DVI-D-1 position=1920,350` and write down the
+one that lines up — a reload puts the file back in charge.
 
 Every touchpad key except `tap` is tri-state — leave it out and the device keeps
 whatever libinput decided for that model, which is usually a better answer than a

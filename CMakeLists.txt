@@ -151,6 +151,7 @@ set(SOURCES
     src/server_drag.c
     src/gestures.c
     src/server_gestures.c
+    src/seam.c
     src/server_config.c
     src/server_desktop.c
     src/server_actions.c
@@ -346,6 +347,16 @@ if(FWM_TESTS)
     target_include_directories(test_gestures PRIVATE src tests ${XKBCOMMON_INCLUDE_DIRS})
     target_link_libraries(test_gestures PRIVATE m)
 
+    # Where the pointer comes out when it crosses between two monitors. A
+    # second screen of a different size is exactly what a test machine does not
+    # have, and the mistake it hides — arriving a quarter of the way into the
+    # lower half of the small screen after pushing straight sideways — is one
+    # nobody sees until they own one. seam.c reaches no further than its own
+    # boxes; the wlroots half is cursor_cross_seam in server_pointer.c.
+    add_executable(test_seam tests/test_seam.c src/seam.c)
+    target_include_directories(test_seam PRIVATE src tests)
+    target_link_libraries(test_seam PRIVATE m)
+
     # Where the sun is, which is a question about the hour of the day: half of
     # what it does only happens at dusk, and none of it can be watched on
     # demand. sun.c reaches no further than config.h's types, so the day is
@@ -388,6 +399,7 @@ if(FWM_TESTS)
     add_test(NAME wobble     COMMAND test_wobble)
     add_test(NAME droplet    COMMAND test_droplet)
     add_test(NAME gestures   COMMAND test_gestures)
+    add_test(NAME seam       COMMAND test_seam)
     add_test(NAME sun        COMMAND test_sun)
     add_test(NAME ram        COMMAND test_ram)
     add_test(NAME wav        COMMAND test_wav)

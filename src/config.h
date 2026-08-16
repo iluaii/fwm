@@ -306,6 +306,14 @@ typedef struct {
      * detent is a list nobody reaches the end of. See server_knob_step. */
     int  knob_accel;       /* biggest step one detent may become, 1..16 */
 
+    /* What happens at the stretch of a shared edge that only one of two
+     * monitors covers. 1 (default): the pointer goes through it, coming out at
+     * the nearest point of the neighbour's edge — see seam.h. 0: wlroots'
+     * plain clamp, where that overhang is a wall. Crossings at a height both
+     * screens cover keep their height either way; that is the layout's doing,
+     * not this flag's. */
+    int  seam_nearest;
+
     /* Touchpad / pointer. -1 = leave libinput's default alone. */
     int  tap;              /* tap-to-click (default 1, see above) */
     int  tap_drag;         /* tap-and-drag: tap then slide moves */

@@ -547,6 +547,7 @@ static void load_input(toml_table_t *root, FwmConfig *cfg) {
     in->repeat_rate  = 25;
     in->repeat_delay = 600;
     in->knob_accel   = 4;
+    in->seam_nearest = 1;
 
     /* Everything libinput owns is left alone unless the file says otherwise —
      * except tap, which fwm turns on (see InputConfig). */
@@ -582,6 +583,15 @@ static void load_input(toml_table_t *root, FwmConfig *cfg) {
         if (d.u.i >= 1 && d.u.i <= 16) in->knob_accel = (int)d.u.i;
         else config_report_error(cfg, "[input] knob_accel %lld out of range 1..16 — using %d",
                                  (long long)d.u.i, in->knob_accel);
+    }
+
+    d = toml_string_in(tbl, "seam");
+    if (d.ok) {
+        if (strcmp(d.u.s, "nearest") == 0) in->seam_nearest = 1;
+        else if (strcmp(d.u.s, "off") == 0) in->seam_nearest = 0;
+        else config_report_error(cfg, "[input] seam \"%s\" is not \"nearest\" or \"off\" — using %s",
+                                 d.u.s, in->seam_nearest ? "nearest" : "off");
+        free(d.u.s);
     }
 
     /* Touchpad. A device that cannot do one of these ignores it; see

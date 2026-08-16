@@ -522,6 +522,33 @@ repeat_delay = 600
 # only the knob gets this.
 #knob_accel = 4
 
+# Two monitors of different sizes, or hung at different heights, share an edge
+# that only one of them covers all of: a 1920x1080 beside a 1366x768 has 312
+# pixels of right edge with no screen beyond it. The pointer stops dead against
+# that overhang — you have to go up first to get across.
+#
+#   "nearest" (default) — it goes through, coming out at the nearest point of
+#                         the neighbour's edge: the corner of the seam, which
+#                         is as close to where the hand was pushing as a screen
+#                         exists.
+#   "off"               — the plain clamp: the overhang is a wall.
+#
+# Nothing here rescales anything. A crossing at a height BOTH screens cover
+# comes out at exactly that height, always — and where that height falls on the
+# glass is the layout's business, so a screen that physically stands lower than
+# the one beside it should be told so, in [[output]] below:
+#
+#   [[output]]
+#   name = "DVI-D-1"
+#   x    = 1920
+#   y    = 350        # hung 350px lower than the screen to its left
+#
+# Then the height the pointer keeps is the physically right one, and the seam
+# is where the two really meet. To find the number without reloading after
+# every guess, nudge it live — `fwmctl output DVI-D-1 position=1920,350` — and
+# write down the one that lines up; a reload puts the file back in charge.
+#seam = "nearest"
+
 # Touchpad. Everything here is libinput's, and everything except `tap` is left
 # at whatever libinput chose for your model unless you say otherwise — those
 # defaults are per-device and usually better than a number in a config file.
