@@ -449,6 +449,7 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         bool was_open = launcher_is_open(server->launcher);
         launcher_toggle_wallpapers(server->launcher);
         launcher_grab_sync(server, was_open);
+        ipc_emit_ui(server->ipc, "wallpaper_picker", launcher_is_open(server->launcher));
     } else if (strcmp(action, "reload_config") == 0) {
         server_reload_config(server);
     } else if (strcmp(action, "show_errors") == 0) {
@@ -758,14 +759,17 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         server_views_place(server);
     } else if (strcmp(action, "expo") == 0) {
         expo_toggle(server);
+        ipc_emit_ui(server->ipc, "expo", expo_active(server));
     } else if (strcmp(action, "launcher") == 0) {
         bool was_open = launcher_is_open(server->launcher);
         launcher_toggle(server->launcher);
         launcher_grab_sync(server, was_open);
+        ipc_emit_ui(server->ipc, "launcher", launcher_is_open(server->launcher));
     } else if (strcmp(action, FWM_RADIAL_ACTION) == 0) {
         bool was_open = radial_is_open(server->radial);
         radial_toggle(server->radial);
         radial_grab_sync(server, was_open);
+        ipc_emit_ui(server->ipc, "radial", radial_is_open(server->radial));
     } else if (strncmp(action, "view:", 5) == 0) {
         int seam = 0;
         int desktop = resolve_desktop_ex(server, action + 5, &seam);

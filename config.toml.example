@@ -490,6 +490,23 @@ fps        = 24
 [session]
 restore = "crash"
 
+# Helpers to start with the session, once, through a shell. They run after the
+# Wayland and control sockets exist and are in the environment, so a helper can
+# talk to the fwm that started it without waiting or guessing.
+#
+# This is for things that follow the session — a backlight bridge, a bar, a
+# notification daemon. Applications belong to [session] restore above, which
+# already puts them back where they were.
+#
+# fwm does not supervise these and does not stop them when it exits: a helper
+# that needs to clean up should notice the socket going away. Up to 16.
+#
+# [startup]
+# exec = [
+#     "fwm-kbd",                        # keyboard backlight follows the session
+#     "fwm-kbd --rest c0 --keepalive 1" # ...or with the light turned up
+# ]
+
 [input]
 # xkb keyboard: several layouts + a grp:* option = layout switching.
 # The FIRST layout must stay Latin so binds keep working on any layout.

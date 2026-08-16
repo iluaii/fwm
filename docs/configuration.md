@@ -472,6 +472,28 @@ Two limits: an application whose window belongs to a different process than the
 one launched (some browsers, Electron apps) comes back on the current desktop
 rather than its old one, and at most 64 applications are recorded.
 
+## startup
+
+```toml
+[startup]
+exec = ["fwm-kbd", "some-bar --follow"]
+```
+
+Helpers to run once with the session, through `/bin/sh`, so a command line with
+arguments or a pipe is written the way it would be typed. They start after
+`session` restore, and after the Wayland socket and the control socket exist and
+are exported — a helper launched here finds `WAYLAND_DISPLAY` and `FWM_SOCKET`
+already set and can subscribe immediately rather than polling for a compositor.
+
+This is for programs that follow the session: a backlight bridge, a bar, a
+notification daemon. Applications are `session` restore's job, not this one.
+
+fwm neither supervises these nor stops them when it exits. A helper that must
+clean up after itself should watch for the socket disappearing — which is what
+[`tools/fwm-kbd.py`](../tools/fwm-kbd.py) does, and why it survives an fwm that
+restarts underneath it. At most 16 commands, each up to 255 bytes; anything
+beyond that is reported at startup rather than silently dropped.
+
 ## binds
 
 ```toml

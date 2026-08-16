@@ -226,13 +226,19 @@ $ fwmctl subscribe
 {"event":"gravity","gravity":1.000}
 {"event":"config_reload"}
 {"event":"setting","name":"sun.blur","value":"18.000","saved":true}
+{"event":"ui","what":"launcher","open":true}
 ```
 
 Subscribe to everything, or a comma-separated subset:
 `window_open`, `window_close`, `window_focus`, `window_title`, `desktop`, `mode`,
-`gravity`, `config_reload`, `setting`. The reply names what was actually subscribed, so a
+`gravity`, `config_reload`, `setting`, `ui`. The reply names what was actually subscribed, so a
 client can log it rather than assume its request was understood. Subscribing twice
 widens the set rather than replacing it.
+
+`ui` covers fwm's own panels — `launcher`, `wallpaper_picker`, `radial`, `expo` —
+because they are not windows and nothing else in the stream mentions them. `open`
+carries the state the panel is in after the toggle, so a subscriber that starts
+mid-session and misses the opening still reads the closing correctly.
 
 `setting` fires whichever hand moved the knob — the socket, a keybind, the modes
 menu — because a subscriber cannot tell them apart and should not have to. It is

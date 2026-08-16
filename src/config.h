@@ -401,6 +401,24 @@ typedef struct {
     SessionRestorePolicy restore;
 } SessionConfig;
 
+/* ── autostart ───────────────────────────────────────────────────────── */
+
+#define FWM_STARTUP_MAX 16
+#define FWM_STARTUP_CMD_LEN 256
+
+/* Commands run once, after the Wayland socket exists and WAYLAND_DISPLAY and
+ * FWM_SOCKET are exported, so a helper started here can talk to the session
+ * that started it. They are orphaned deliberately: fwm does not supervise
+ * them, and it does not stop them on the way out either — a helper that wants
+ * to clean up after the compositor should notice the socket going away.
+ *
+ * This is for things that follow the session (a backlight bridge, a bar), not
+ * for applications: session restore already puts those back. */
+typedef struct {
+    char cmd[FWM_STARTUP_MAX][FWM_STARTUP_CMD_LEN];
+    int  count;
+} StartupConfig;
+
 /* ── binds ───────────────────────────────────────────────────────────── */
 
 /*
@@ -1041,6 +1059,7 @@ typedef struct {
     FocusConfig     focus;
     EffectsConfig   effects;
     SessionConfig   session;
+    StartupConfig   startup;
     MouseConfig     mouse;
     GesturesConfig  gestures;
     CavaConfig      cava;

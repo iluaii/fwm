@@ -146,6 +146,10 @@ install_files() {
     # applications back. The session entry below launches this, not the
     # compositor directly.
     $SUDO install -Dm755 "$REPO_DIR/session/fwm-session" "$PREFIX/bin/fwm-session"
+    # Keyboard backlight bridge. fwm-session starts it when it is on PATH, and
+    # it waits for a keyboard it recognises rather than failing without one, so
+    # installing it costs nothing on a machine that has no such keyboard.
+    $SUDO install -Dm755 "$REPO_DIR/tools/fwm-kbd.py" "$PREFIX/bin/fwm-kbd"
     # Substitute the real binary path rather than shipping a bare "fwm-session":
     # display managers run sessions with a trimmed PATH that need not contain
     # $PREFIX/bin, and the failure mode is the worst kind — the session shows up
@@ -300,6 +304,7 @@ update)
 uninstall)
     msg "Uninstalling"
     $SUDO rm -f "$PREFIX/bin/fwm" "$PREFIX/bin/fwm-wayland" "$PREFIX/bin/fwmctl" "$PREFIX/bin/fwm-session" \
+        "$PREFIX/bin/fwm-kbd" \
                 /usr/share/wayland-sessions/fwm.desktop \
                 /usr/share/xdg-desktop-portal/fwm-portals.conf
     msg "Removed (user config in ~/.config/fwm kept)"

@@ -826,6 +826,39 @@ static void load_session(toml_table_t *root, SessionConfig *s, FwmConfig *cfg) {
     free(d.u.s);
 }
 
+static void load_startup(toml_table_t *root, StartupConfig *s, FwmConfig *cfg) {
+    s->count = 0;
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "startup");
+    if (!tbl) return;
+
+    toml_array_t *arr = toml_array_in(tbl, "exec");
+    if (!arr) return;
+
+    int n = toml_array_nelem(arr);
+    for (int i = 0; i < n; i++) {
+        toml_datum_t d = toml_string_at(arr, i);
+        if (!d.ok) {
+            config_report_error(cfg, "[startup] exec[%d] is not a string — ignored", i);
+            continue;
+        }
+        if (s->count >= FWM_STARTUP_MAX) {
+            config_report_error(cfg, "[startup] more than %d commands — \"%s\" ignored",
+                                FWM_STARTUP_MAX, d.u.s);
+            free(d.u.s);
+            continue;
+        }
+        /* Silence here would leave a helper that never starts and no way to
+         * tell why, which is the same failure as a typo in its name. */
+        if (strlen(d.u.s) >= FWM_STARTUP_CMD_LEN)
+            config_report_error(cfg, "[startup] command %d is longer than %d bytes — truncated",
+                                i, FWM_STARTUP_CMD_LEN - 1);
+        snprintf(s->cmd[s->count], FWM_STARTUP_CMD_LEN, "%s", d.u.s);
+        s->count++;
+        free(d.u.s);
+    }
+}
+
 /* ── public api ──────────────────────────────────────────────────────── */
 
 /* Expand a leading "~/" — config paths are hand-written, and the shell that
@@ -1511,6 +1544,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_focus(NULL, &cfg->focus, cfg);
     load_effects(NULL, &cfg->effects);
     load_session(NULL, &cfg->session, cfg);
+    load_startup(NULL, &cfg->startup, cfg);
     load_gestures(NULL, cfg);
     load_cava(NULL, cfg);
     load_grass(NULL, cfg);
@@ -1554,6 +1588,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_focus(root, &cfg->focus, cfg);
     load_effects(root, &cfg->effects);
     load_session(root, &cfg->session, cfg);
+    load_startup(root, &cfg->startup, cfg);
     load_binds(root, cfg);
     load_modes(root, cfg);   /* after [binds]: each mode's `enter` key joins the root map */
     load_radial(root, cfg);  /* likewise: [radial] enter joins the root map too */

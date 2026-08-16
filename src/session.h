@@ -53,6 +53,10 @@ void session_maybe_save(struct FwmServer *server);
  * compositor is accepting clients. */
 void session_restore(struct FwmServer *server);
 
+/* Run the [startup] exec commands, once, after the sockets are up and in the
+ * environment. Not supervised and not stopped on exit: see StartupConfig. */
+void session_autostart(struct FwmServer *server);
+
 /* If this newly mapped window belongs to something session_restore launched,
  * return the desktop it should go to and forget the entry; -1 otherwise. */
 int session_claim_desktop(struct FwmServer *server, struct FwmView *view);

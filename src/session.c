@@ -256,6 +256,33 @@ static void spawn_argv_key(const char *key) {
     }
 }
 
+void session_autostart(struct FwmServer *server) {
+    const StartupConfig *s = &server->config.startup;
+    for (int i = 0; i < s->count; i++) {
+        /* Through a shell, unlike session restore: these come from a config
+         * file a person wrote, where "fwm-kbd --rest c0" and a pipe are both
+         * reasonable things to type. Restore takes its argv from /proc and
+         * must not let a shell near it. */
+        char cmd[FWM_STARTUP_CMD_LEN + 8];
+        snprintf(cmd, sizeof(cmd), "%s", s->cmd[i]);
+
+        pid_t pid = fork();
+        if (pid == 0) {
+            if (fork() == 0) {
+                setsid();
+                execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+                _exit(1);
+            }
+            _exit(0);
+        } else if (pid > 0) {
+            while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
+            wlr_log(WLR_INFO, "fwm: startup: %s", cmd);
+        } else {
+            wlr_log(WLR_ERROR, "fwm: failed to fork for startup: %s", cmd);
+        }
+    }
+}
+
 void session_restore(struct FwmServer *server) {
     if (server->config.session.restore == SESSION_RESTORE_NEVER) return;
 

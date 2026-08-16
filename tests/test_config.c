@@ -38,6 +38,30 @@ static const char *write_config(const char *body) {
 
 static void drop_config(void) { unlink(tmp_path); }
 
+static void test_startup(void) {
+    CASE("[startup] exec is read, and its limits are reported");
+    FwmConfig cfg;
+    const char *p = write_config(
+        "[startup]\n"
+        "exec = [\"fwm-kbd\", \"bar --follow\", 42]\n");
+    config_load(&cfg, p);
+
+    /* The integer is not a command; the two strings still make it through. */
+    CHECK_INT(cfg.startup.count, 2);
+    CHECK_STR(cfg.startup.cmd[0], "fwm-kbd");
+    CHECK_STR(cfg.startup.cmd[1], "bar --follow");
+    CHECK(cfg.error_count > 0);
+    config_free(&cfg);
+    drop_config();
+
+    /* No section at all is the common case and must stay empty and quiet. */
+    p = write_config("[physics]\nfriction = 0.9\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.startup.count, 0);
+    config_free(&cfg);
+    drop_config();
+}
+
 static void test_missing_file(void) {
     /* The path the compositor hands in need not exist — a fresh install has no
      * config at all, and that has to boot to a usable desktop. */
@@ -1334,5 +1358,6 @@ int main(void) {
     test_output_spellings();
     test_outputs();
     test_stats();
+    test_startup();
     return t_report("config");
 }

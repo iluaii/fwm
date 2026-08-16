@@ -556,6 +556,10 @@ void server_run(FwmServer *server) {
      * clients connect into the loop we are about to enter. */
     session_restore(server);
 
+    /* After restore, so a helper that reads the window list at startup sees
+     * the session it is joining rather than an empty one. */
+    session_autostart(server);
+
     wl_display_run(server->wl_display);
 }
 

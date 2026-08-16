@@ -1250,6 +1250,20 @@ void ipc_emit_gravity(FwmIpc *ipc, double gravity_scale) {
     free(b.data);
 }
 
+/* A piece of fwm's own interface opened or closed. These are not windows and
+ * never will be, so nothing else in the stream reports them: without this a
+ * subscriber cannot tell that the launcher is up. */
+void ipc_emit_ui(FwmIpc *ipc, const char *what, bool open) {
+    if (!ipc_wants(ipc, FWM_EV_UI)) return;
+
+    struct Buf b = {0};
+    buf_puts(&b, "{\"event\":\"ui\",\"what\":");
+    buf_json_string(&b, what);
+    buf_printf(&b, ",\"open\":%s}\n", open ? "true" : "false");
+    ipc_broadcast(ipc, FWM_EV_UI, &b);
+    free(b.data);
+}
+
 /* One option changed, by whatever route — a key, the socket, or the modes
  * menu underneath. `saved` says whether it also went into the overlay, which
  * is the difference between a bar redrawing itself and a bar that should also
