@@ -478,9 +478,11 @@ static void radial_open(Radial *r) {
     /* The ring must fit the monitor it is drawn on, labels and all. A radius
      * asked for in the config that does not fit is shrunk rather than clipped
      * — half a menu off the bottom of the screen is worse than a smaller one. */
+    struct wlr_box screen;
+    server_active_output_box(server, &screen);
+
     double need = 2.0 * (r->radius + PETAL_R + RING_PAD);
-    double room = server->screen_width < server->screen_height
-                ? server->screen_width : server->screen_height;
+    double room = screen.width < screen.height ? screen.width : screen.height;
     if (need > room) {
         r->radius = room / 2.0 - PETAL_R - RING_PAD;
         if (r->radius < PETAL_R) r->radius = PETAL_R;
@@ -489,10 +491,11 @@ static void radial_open(Radial *r) {
     r->side = (int)need;
     r->cx = r->cy = r->side / 2.0;
 
-    /* Centred on the monitor the user is at, not at the layout origin. */
-    FwmOutput *out = server_active_output(server);
-    r->px = (out ? out->box.x : 0) + (server->screen_width  - r->side) / 2;
-    r->py = (out ? out->box.y : 0) + (server->screen_height - r->side) / 2;
+    /* Centred on the monitor the user is at, not at the layout origin — and in
+     * that monitor's box, so the ring sits under the pointer's screen rather
+     * than in the middle of a column that screen only shows part of. */
+    r->px = screen.x + (screen.width  - r->side) / 2;
+    r->py = screen.y + (screen.height - r->side) / 2;
 
     /* The panel before the petals: with no surface to draw on there is nothing
      * to build a world for, and this way the failure path frees nothing. */

@@ -564,10 +564,29 @@ void server_cursor_world(FwmServer *server, double *wx, double *wy) {
     if (wy) *wy = cy - (o ? o->box.y : 0);
 }
 
+/* The screen a panel centres itself in: the monitor the user is at, in layout
+ * coordinates.
+ *
+ * NOT the column. A column is the primary monitor's size, so centring a
+ * launcher in one and then shifting it onto a 1366-wide screen puts it 277px
+ * right of that screen's middle — centred on a screen that is somewhere else.
+ * With no monitor at all (the first layout, a headless start) the column is
+ * the only size there is. */
+void server_active_output_box(FwmServer *server, struct wlr_box *box) {
+    if (!box) return;
+    FwmOutput *o = server_active_output(server);
+    if (o && o->box.width > 0 && o->box.height > 0) {
+        *box = o->box;
+        return;
+    }
+    *box = (struct wlr_box){ 0, 0, server->screen_width, server->screen_height };
+}
+
 /* A centred panel is built as if the screen started at 0,0, so this moves one
  * onto the monitor the user is actually at. Panels do not belong to a desktop
  * — they are not placed by server_place_node — so they are shifted once, when
- * they open. */
+ * they open. The size they centred against must be that monitor's too
+ * (server_active_output_box), or this shift merely moves the mistake. */
 void server_panel_to_active_output(FwmServer *server, struct wlr_scene_buffer *panel) {
     if (!panel) return;
     FwmOutput *o = server_active_output(server);
@@ -585,6 +604,99 @@ void server_place_node(FwmServer *server, struct wlr_scene_node *node,
         return;
     }
     wlr_scene_node_set_position(node, (int)lround(sx), (int)lround(sy));
+}
+
+/* A desktop just changed which monitor is showing it, so everything that was
+ * sized against a screen is now sized against the wrong one. A fullscreen
+ * window is the loud case: it was made 1920x1080 on the primary monitor, and
+ * bringing its desktop up on a 1366x768 one left it fullscreen at the old
+ * size — a screen's worth of window on a screen that cannot hold it.
+ *
+ * Only the size is recomputed; the fullscreen state and the geometry saved for
+ * leaving it are untouched, so a window that travels to the small screen and
+ * back ends up exactly where it started. */
+static void desktop_refit_fullscreen(FwmServer *server, int d) {
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        PhysicsBody *b = physics_find_body(&server->physics, v->id);
+        if (!b || !b->fullscreen || b->desktop_id != d) continue;
+
+        int x, y, w, h;
+        server_fullscreen_box(server, d, v->fs_real != 0, &x, &y, &w, &h);
+        if (x == v->x && y == v->y && w == v->width && h == v->height) continue;
+
+        v->x = x; v->y = y; v->width = w; v->height = h;
+        /* The body too, or the next physics tick syncs the scene node back to
+         * the old box and the window snaps out of fullscreen. */
+        b->x = x; b->y = y; b->width = w; b->height = h;
+        view_set_size(v, w, h);
+        if (v->scene_tree) server_place_node(server, &v->scene_tree->node, x, y);
+    }
+}
+
+/* And the ordinary windows, which are not sized against a screen but do have to
+ * BE on one.
+ *
+ * A column is the primary monitor's size, so on a narrower or shorter screen
+ * the right and bottom of every desktop is a strip of world the glass does not
+ * reach: a window standing there is still alive, still focusable, still in the
+ * alt-tab — simply nowhere on the monitor. Windows out there are brought back
+ * onto the glass.
+ *
+ * The move is one-way and not remembered: a desktop that goes back to the wide
+ * screen finds its windows where the small screen left them, not where they
+ * were before. Keeping a shadow position per window to undo this would mean a
+ * window that the user then moved BY HAND on the small screen still jumping
+ * somewhere else on the way back, which is the worse surprise of the two. */
+static void desktop_refit_clamp(FwmServer *server, int d) {
+    FwmOutput *mon = server_output_showing(server, d);
+    if (!mon || mon->box.width <= 0 || mon->box.height <= 0) return;
+    /* A screen at least as big as the column has no dead strip to rescue from. */
+    if (mon->box.width >= server->screen_width
+     && mon->box.height >= server->screen_height) return;
+
+    double min_x = (double)d * server->screen_width;
+
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        /* Not the one in the user's hand: it goes where the pointer goes, and
+         * moving it out from under the grab point is worse than a window
+         * briefly held off the edge of a screen. */
+        if (v == server->interactive.view) continue;
+        PhysicsBody *b = physics_find_body(&server->physics, v->id);
+        if (!b || b->desktop_id != d) continue;
+        /* Both of those own the whole screen already and are placed above. */
+        if (b->fullscreen || b->tiled) continue;
+
+        double x = b->x, y = b->y;
+        /* Order matters: a window bigger than the screen pins to the left and
+         * top edges rather than hanging off the right and bottom ones — the
+         * same choice world_reflow makes when the screen itself resizes. */
+        if (x > min_x + mon->box.width - v->width) x = min_x + mon->box.width - v->width;
+        if (x < min_x) x = min_x;
+        if (y > mon->box.height - v->height) y = mon->box.height - v->height;
+        if (y < 0) y = 0;
+        if (x == b->x && y == b->y) continue;
+
+        b->x = x; b->y = y;
+        /* A throw still in the air would carry it straight back out into the
+         * strip it was just rescued from. */
+        b->vx = 0; b->vy = 0;
+        v->x = (int)lround(x); v->y = (int)lround(y);
+        view_sync_position(v);
+        if (v->scene_tree) server_place_node(server, &v->scene_tree->node, v->x, v->y);
+    }
+}
+
+/* Everything on `d` that was cut to a screen's measurements, re-cut to the
+ * measurements of whichever screen is showing it now. */
+static void desktop_refit(FwmServer *server, int d) {
+    if (d < 0 || d >= FWM_DESKTOPS) return;
+    desktop_refit_clamp(server, d);
+    desktop_refit_fullscreen(server, d);
+    /* Tiles are the other thing built from the work area: the splits are
+     * fractions, but the box they divide is the monitor's. */
+    if (server->desktop_mode[d] == DESKTOP_MODE_TILING) server_apply_tiling(server, d);
 }
 
 void server_output_show_desktop(FwmServer *server, FwmOutput *out, int d, int seam) {
@@ -613,6 +725,15 @@ void server_output_show_desktop(FwmServer *server, FwmOutput *out, int d, int se
         out->camera_x = out->target_camera_x;
         out->cam_anim = 0;
     }
+    /* Both sides of a trade are now on a different screen than they were, and
+     * the two screens need not be the same shape. The desktop `out` left with
+     * nobody to trade with is deliberately not refitted: it is on no monitor
+     * now, and resizing its windows to the column would be a round of client
+     * configures for a screen nobody is looking at — it gets its fitting when
+     * some monitor picks it up. */
+    desktop_refit(server, out->desktop);
+    if (other) desktop_refit(server, other->desktop);
+
     server_views_place(server);
     server_request_tray_redraw(server);
 }
@@ -836,10 +957,15 @@ static void server_output_layout_update(FwmServer *server) {
      * bar is, and a monitor that changed shape under it must not be left
      * showing anything but the locker. */
     lock_arrange(server);
-    if (resized) {
-        for (int d = 0; d < FWM_DESKTOPS; d++) {
-            if (server->desktop_mode[d] == DESKTOP_MODE_TILING) server_apply_tiling(server, d);
-        }
+    for (int d = 0; d < FWM_DESKTOPS; d++) {
+        /* A hotplug deals the desktops out again: one that changed hands, or
+         * whose monitor changed mode, is fullscreen at the old screen's size
+         * until this. Cheap when nothing moved — the box comes out identical
+         * and nothing is sent. */
+        desktop_refit_clamp(server, d);
+        desktop_refit_fullscreen(server, d);
+        if (resized && server->desktop_mode[d] == DESKTOP_MODE_TILING)
+            server_apply_tiling(server, d);
     }
 
     /* The panels and the debug hooks that exist once, now that there is a

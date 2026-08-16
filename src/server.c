@@ -259,6 +259,36 @@ void server_start_interactive_resize(FwmServer *server, struct FwmView *view, ui
     physics_stop_body(&server->physics, view->id);
 }
 
+/* Real fullscreen covers the whole output; fake fullscreen fills the work area
+ * — below our tray and clear of any layer-shell bar that reserved space — so
+ * the tray stays visible.
+ *
+ * "The output" is the monitor the window is standing on, not the world: on two
+ * monitors a fullscreen video must not straddle the bezel. A desktop is one
+ * screen, so fullscreen is that screen — the physical one, not the strip's idea
+ * of one. A column is the size of the primary monitor, so on any other monitor
+ * "the whole column" is the wrong box: too tall on a shorter screen (the bottom
+ * of the video falls off the bottom of the glass) and too short on a taller one
+ * (a black band where the desktop ran out). The monitor showing this desktop
+ * knows its own size; with nobody showing it, the column is all there is. */
+void server_fullscreen_box(FwmServer *server, int desktop, bool real,
+                           int *x, int *y, int *w, int *h) {
+    if (!real) {
+        /* Fake fullscreen is "as large as a window is allowed to be", which is
+         * the same question the tiling layout answers — so it is the same
+         * function, gaps and all. A window filling the screen this way sits
+         * where a single tile would, rather than butting against the edges
+         * while every tiled window keeps its margin. */
+        server_work_area(server, desktop, x, y, w, h);
+        return;
+    }
+    FwmOutput *mon = server_output_showing(server, desktop);
+    *x = desktop * server->screen_width;
+    *y = 0;
+    *w = mon ? mon->box.width  : server->screen_width;
+    *h = mon ? mon->box.height : server->screen_height;
+}
+
 void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscreen, bool real) {
     PhysicsBody *b = physics_find_body(&server->physics, view->id);
     if (!b) return;
@@ -278,35 +308,8 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
          * fullscreened, so this is not a corner case, it is the normal path. */
         view->tile_anim = 0;
 
-        /* Real fullscreen covers the whole output; fake fullscreen fills the
-         * work area — below our tray and clear of any layer-shell bar that
-         * reserved space — so the tray stays visible.
-         *
-         * "The output" is the monitor the window is standing on, not the
-         * world: on two monitors a fullscreen video must not straddle the
-         * bezel. A single-output setup gets the box it always did. */
-        /* A desktop is one screen, so fullscreen is that screen — the physical
-         * one, not the strip's idea of one. A column is the size of the primary
-         * monitor, so on any other monitor "the whole column" is the wrong box:
-         * too tall on a shorter screen (the bottom of the video falls off the
-         * bottom of the glass) and too short on a taller one (a black band
-         * where the desktop ran out). The monitor showing this desktop knows
-         * its own size; with nobody showing it, the column is all there is. */
-        if (real) {
-            FwmOutput *mon = server_output_showing(server, d);
-            view->x = d * server->screen_width;
-            view->y = 0;
-            view->width  = mon ? mon->box.width  : server->screen_width;
-            view->height = mon ? mon->box.height : server->screen_height;
-        } else {
-            /* Fake fullscreen is "as large as a window is allowed to be", which
-             * is the same question the tiling layout answers — so it is the same
-             * function, gaps and all. A window filling the screen this way sits
-             * where a single tile would, rather than butting against the edges
-             * while every tiled window keeps its margin. */
-            server_work_area(server, d, &view->x, &view->y, &view->width, &view->height);
-        }
-
+        server_fullscreen_box(server, d, real,
+                              &view->x, &view->y, &view->width, &view->height);
 
         // Keep the physics body in sync with the fullscreen geometry, otherwise
         // physics_tick_cb re-syncs the scene node back to the body's stale

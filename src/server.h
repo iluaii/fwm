@@ -766,6 +766,10 @@ void server_place_node(FwmServer *server, struct wlr_scene_node *node,
                        double wx, double wy);
 /* Move a freshly opened centred panel onto the monitor the user is at. */
 void server_panel_to_active_output(FwmServer *server, struct wlr_scene_buffer *panel);
+/* The box that monitor covers, which is what a panel must centre itself in —
+ * the desktop column is the PRIMARY monitor's size and is the wrong screen
+ * everywhere else. Falls back to the column when there is no monitor yet. */
+void server_active_output_box(FwmServer *server, struct wlr_box *box);
 
 /* Every window and ghost put back where it belongs. Call after anything that
  * changes which monitor shows which desktop. */

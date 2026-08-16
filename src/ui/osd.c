@@ -179,9 +179,13 @@ void osd_show(Osd *o, const char *label, const char *value, double frac, bool at
         closing_cancel(o);
         o->overlay = cairo_overlay_create(server->layer_overlay, OSD_W, OSD_H);
         if (!o->overlay) return;
-        FwmOutput *out = server_active_output(server);
-        int px = (out ? out->box.x : 0) + (server->screen_width - OSD_W) / 2;
-        int py = (out ? out->box.y : 0) + server->screen_height - OSD_H - (int)OSD_MARGIN;
+        /* The monitor's box, not the column's: on a second screen of another
+         * size the pill would sit off-centre and, on a shorter one, below the
+         * bottom edge entirely. */
+        struct wlr_box screen;
+        server_active_output_box(server, &screen);
+        int px = screen.x + (screen.width - OSD_W) / 2;
+        int py = screen.y + screen.height - OSD_H - (int)OSD_MARGIN;
         wlr_scene_node_set_position(&o->overlay->node, px, py);
         cairo_overlay_animate_in(o->overlay, OSD_ANIM_MS, OSD_RISE_PX);
     }

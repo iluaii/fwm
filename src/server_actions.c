@@ -438,7 +438,12 @@ void server_dispatch_action(FwmServer *server, const char *action) {
             cairo_overlay_destroy(server->hints_buffer);
             server->hints_buffer = NULL;
         } else {
-            server->hints_buffer = hints_show(server->layer_overlay, server->screen_width, server->screen_height, &server->config);
+            /* Sized against the screen it will be shifted onto, not the
+             * column — see server_active_output_box. */
+            struct wlr_box screen;
+            server_active_output_box(server, &screen);
+            server->hints_buffer = hints_show(server->layer_overlay,
+                                              screen.width, screen.height, &server->config);
             server_panel_to_active_output(server, server->hints_buffer);
         }
     } else if (strcmp(action, "screenshot") == 0) {
@@ -456,8 +461,10 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         if (server->errors_buffer) {
             server_close_errors_panel(server);
         } else {
-            server->errors_buffer = errors_show(server->layer_overlay, server->screen_width,
-                                                server->screen_height, &server->config);
+            struct wlr_box screen;
+            server_active_output_box(server, &screen);
+            server->errors_buffer = errors_show(server->layer_overlay, screen.width,
+                                                screen.height, &server->config);
             server_panel_to_active_output(server, server->errors_buffer);
         }
         server_request_tray_redraw(server);

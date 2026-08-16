@@ -780,7 +780,11 @@ static void launcher_open(Launcher *l) {
         scan_apps(l);
     }
 
-    l->bar_w = server->screen_width / 3;
+    /* A third of the screen it opens on — the monitor's, not the column's. */
+    struct wlr_box screen;
+    server_active_output_box(server, &screen);
+
+    l->bar_w = screen.width / 3;
     if (l->bar_w < 420) l->bar_w = 420;
     if (l->bar_w > 640) l->bar_w = 640;
     l->tile_w = l->bar_w - 24;
@@ -789,10 +793,11 @@ static void launcher_open(Launcher *l) {
      * emerge from the bottom edge instead of the buffer holding the whole
      * spawn runway (which cost ~1.5 MB extra per frame buffer). */
     l->panel_h = (int)(BAR_H + BAR_GAP + MAX_SHOW * (TILE_H + TILE_GAP) + 120.0);
-    /* Centred on the monitor the user is at, not at the layout origin. */
-    FwmOutput *lo = server_active_output(server);
-    l->px = (lo ? lo->box.x : 0) + (server->screen_width - l->panel_w) / 2;
-    l->py = (lo ? lo->box.y : 0) + server->screen_height / 5;
+    /* Centred on the monitor the user is at, not at the layout origin — and on
+     * that monitor's WIDTH, not the column's, or a smaller second screen gets
+     * the launcher pushed off to the right of its middle. */
+    l->px = screen.x + (screen.width - l->panel_w) / 2;
+    l->py = screen.y + screen.height / 5;
 
     l->query[0] = '\0';
     refilter(l);

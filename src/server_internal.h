@@ -62,6 +62,13 @@ struct FwmKeyboard {
 
 /* ── server.c ─────────────────────────────────────────────────────────── */
 void server_shake_tick(FwmServer *server, double dt);
+/* The box a fullscreen window on `desktop` should have, in world coordinates:
+ * the whole monitor showing that desktop for a real fullscreen, the work area
+ * for a fake one. Asked both when a window goes fullscreen and whenever the
+ * desktop changes monitors — a screen of a different size is a different box,
+ * and the window has to be told. */
+void server_fullscreen_box(FwmServer *server, int desktop, bool real,
+                           int *x, int *y, int *w, int *h);
 /* Create the physics and video timers (server_tick.c owns both callbacks). */
 void server_tick_register(FwmServer *server, struct wl_event_loop *event_loop);
 void server_video_sync(FwmServer *server);

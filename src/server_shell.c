@@ -419,16 +419,36 @@ static void popup_handle_commit(struct wl_listener *listener, void *data) {
 
     // Keep the menu on screen: give the popup the whole output as its
     // constraint box, expressed in the parent's coordinate space.
+    //
+    // THE output, not the first one: the box is in layout coordinates, and a
+    // box at the layout origin is the primary monitor. A menu opened on the
+    // second screen was therefore constrained to the first one and slid all
+    // the way there — the whole width of the primary monitor away from the
+    // window it belongs to. The monitor the parent is standing on is the one
+    // the menu must stay inside.
     FwmServer *server = p->server;
     struct wlr_scene_tree *tree = p->popup->base->data;
     if (tree && tree->node.parent) {
         int px = 0, py = 0;
         wlr_scene_node_coords(&tree->node.parent->node, &px, &py);
+
+        /* The parent's top-left can hang off its own screen (a window pushed
+         * against the left edge, a nested submenu); its middle is the more
+         * honest answer to "which screen is this on", and the monitor the user
+         * is at is the last resort. */
+        FwmOutput *mon = server_output_at(server, px, py);
+        if (!mon && p->popup->parent) {
+            mon = server_output_at(server,
+                                   px + p->popup->parent->current.width / 2.0,
+                                   py + p->popup->parent->current.height / 2.0);
+        }
+        if (!mon) mon = server_active_output(server);
+
         struct wlr_box box = {
-            .x = -px,
-            .y = -py,
-            .width = server->screen_width,
-            .height = server->screen_height,
+            .x = (mon ? mon->box.x : 0) - px,
+            .y = (mon ? mon->box.y : 0) - py,
+            .width  = mon ? mon->box.width  : server->screen_width,
+            .height = mon ? mon->box.height : server->screen_height,
         };
         wlr_xdg_popup_unconstrain_from_box(p->popup, &box);
     }
