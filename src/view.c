@@ -698,8 +698,17 @@ void view_map(FwmView *view) {
         view->scene_tree = wlr_scene_xdg_surface_create(view->server->layer_windows, view->xdg_toplevel->base);
     } else {
         view->scene_tree = wlr_scene_tree_create(view->server->layer_windows);
+        /* A subsurface tree rather than a bare scene surface, exactly like the
+         * xdg path above builds. Two reasons, and the second one is fatal: an
+         * X11 client may paint through subsurfaces like any other, and
+         * wlr_scene_subsurface_tree_set_clip — which is how a window hanging
+         * off the edge of a screen is kept from painting on the screen next
+         * door (server_views_clip) — asserts that it found one under the node
+         * it was handed. A bare surface has none, and the assert takes the
+         * whole compositor down the first time an X11 window overhangs. */
         if (view->scene_tree &&
-            !wlr_scene_surface_create(view->scene_tree, view->xwl_surface->surface)) {
+            !wlr_scene_subsurface_tree_create(view->scene_tree,
+                                              view->xwl_surface->surface)) {
             wlr_scene_node_destroy(&view->scene_tree->node);
             view->scene_tree = NULL;
         }

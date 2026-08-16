@@ -739,6 +739,15 @@ void server_views_clip(FwmServer *server) {
     FwmView *v;
     wl_list_for_each(v, &server->views, link) {
         if (!v->scene_tree || v->width <= 0 || v->height <= 0) continue;
+        /* A crop is applied to the surfaces under the tree, and wlroots
+         * ASSERTS that it found at least one — an assert takes the compositor
+         * with it, so this is checked rather than assumed. A window whose
+         * surface has gone (an X11 window between its frame and its
+         * association, a client that died a moment ago) has nothing to cut. */
+        if (!view_surface(v) || wl_list_empty(&v->scene_tree->children)) {
+            view_uncut(server, v);
+            continue;
+        }
 
         double sx, sy;
         FwmOutput *o = world_output_near(server, v->x, v->width, v->drawn_on);
