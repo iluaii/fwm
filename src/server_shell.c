@@ -189,7 +189,10 @@ static void xwl_or_note_geometry(struct FwmXwlUnmanaged *u) {
 }
 
 static void xwl_or_place(struct FwmXwlUnmanaged *u) {
-    if (u->tree) server_place_node(u->server, &u->tree->node, u->wx, u->wy);
+    /* An override-redirect surface is its own size: a menu hanging off the
+     * edge of a screen belongs to the screen it hangs off, like a window. */
+    int w = u->xs && u->xs->surface ? u->xs->surface->current.width : 0;
+    if (u->tree) server_place_node(u->server, &u->tree->node, u->wx, u->wy, w);
 }
 
 void server_xwl_unmanaged_place(FwmServer *server) {

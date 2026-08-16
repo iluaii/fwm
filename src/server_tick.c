@@ -1035,7 +1035,8 @@ void server_drag_swing_place(FwmServer *server) {
     b->y = ny;
     view->x = (int)lround(nx);
     view->y = (int)lround(ny);
-    if (view->scene_tree) server_place_node(server, &view->scene_tree->node, nx, ny);
+    if (view->scene_tree)
+        server_place_view(server, view, nx, ny);
 }
 
 /* The camera has come to rest. Called from the tick when a slide or a pan
@@ -1162,7 +1163,16 @@ static int physics_tick_cb(void *data) {
     int any_settled = 0;
     FwmOutput *out;
     wl_list_for_each(out, &server->outputs, link) {
-        if (out->camera_x == out->target_camera_x && !out->cam_anim) continue;
+        if (out->camera_x == out->target_camera_x && !out->cam_anim) {
+            /* A screen standing still is not crossing anywhere, whatever it was
+             * doing a moment ago. Also the one path that clears a trade whose
+             * camera never animated at all: at the ring's join the camera jumps
+             * rather than slides, and nothing below would ever run for it. */
+            out->swap_with = NULL;
+            out->swap_dx0 = out->swap_dy0 = 0;
+            out->swap_dx = out->swap_dy = 0.0;
+            continue;
+        }
 
         // X11 clients place popups from their last-configured root coords;
         // tell them where they are once the camera comes to rest.
@@ -1175,6 +1185,10 @@ static int physics_tick_cb(void *data) {
             // every 40ms costs nothing — the camera tracks it immediately and
             // coasts the last few px once the key is released.
             out->cam_anim = 0;
+            /* A hand-driven pan has no curve to hang a crossing on, and the
+             * swap it can trigger teleports the other camera anyway. */
+            out->swap_dx0 = out->swap_dy0 = 0;
+            out->swap_dx = out->swap_dy = 0.0;
             int gap = out->target_camera_x - out->camera_x;
             if (gap != 0) {
                 double speed = server->config.camera.free_speed;
@@ -1195,6 +1209,13 @@ static int physics_tick_cb(void *data) {
                 out->cam_anim_from = out->camera_x;
                 out->cam_anim_to = out->target_camera_x;
                 out->cam_anim_t = 0.0;
+                /* A crossing still shrinking is re-anchored to what is LEFT of
+                 * it, because the curve it was riding starts over here. Kept as
+                 * a fraction of the original it would jump back to full size —
+                 * a window mid-flight teleported a screen sideways the moment a
+                 * second desktop switch was asked for. */
+                out->swap_dx0 = (int)lround(out->swap_dx);
+                out->swap_dy0 = (int)lround(out->swap_dy);
             }
             double cam_ms = server->config.camera.anim_ms;
             out->cam_anim_t += cam_ms > 0.0 ? dt * 1000.0 / cam_ms : 1.0;
@@ -1209,10 +1230,23 @@ static int physics_tick_cb(void *data) {
                                    : 1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0;
                 out->camera_x = out->cam_anim_from
                     + (int)lround((out->cam_anim_to - out->cam_anim_from) * e);
+                /* A desktop crossing to this screen rides the same curve out of
+                 * the frame it came from — see swap_dx0 in server.h. */
+                out->swap_dx = out->swap_dx0 * (1.0 - e);
+                out->swap_dy = out->swap_dy0 * (1.0 - e);
             }
         }
 
         wallpaper_update(out->wallpaper, out->camera_x);
+        /* The desktop this screen was trading for has arrived, so the crossing
+         * is over and its windows are cut to this screen again like everyone
+         * else's. Both cameras travel the same distance, so the two sides of a
+         * trade end on the same tick. */
+        if (cam_settled) {
+            out->swap_with = NULL;
+            out->swap_dx0 = out->swap_dy0 = 0;
+            out->swap_dx = out->swap_dy = 0.0;
+        }
         any_settled |= cam_settled;
 
         // Every window this monitor shows moves with it. Cheap enough to sweep
@@ -1222,7 +1256,7 @@ static int physics_tick_cb(void *data) {
         wl_list_for_each(view, &server->views, link) {
             if (view->id == dragged_win || !view->scene_tree) continue;
             PhysicsBody *body = physics_find_body(&server->physics, view->id);
-            if (body) server_place_node(server, &view->scene_tree->node, body->x, body->y);
+            if (body) server_place_view(server, view, body->x, body->y);
         }
     }
     /* A window in your hand goes where you go. The loop above moved every window
@@ -1463,7 +1497,7 @@ static int physics_tick_cb(void *data) {
                     view_jelly_carry(view, jump, 0.0);
                 view->x = body->x;
                 view->y = body->y;
-                server_place_node(server, &view->scene_tree->node, body->x, body->y);
+                server_place_view(server, view, body->x, body->y);
             }
         }
         /* Which screen a panel sees this window on. Here because a window

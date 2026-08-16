@@ -270,7 +270,7 @@ static bool pointer_surface_origin(FwmServer *server, struct wlr_surface *surfac
     }
     FwmView *view = view_from_surface(server, surface);
     if (!view) return false;
-    return server_world_to_screen(server, view->x, view->y, ox, oy);
+    return server_world_to_screen(server, view->x, view->y, view->width, ox, oy);
 }
 
 /* A locked pointer may say, before it lets go, where the cursor should be

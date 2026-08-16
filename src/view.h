@@ -96,6 +96,24 @@ typedef struct FwmView {
      * at map time, or when the nodes could not be created. */
     struct FwmShadow *shadow;
 
+    /* This window is hanging off the edge of the screen it is drawn on, and the
+     * part that is over the border has been cut away (server_views_clip). `cut`
+     * is whether a crop is currently applied and `cut_box` the one that is, in
+     * the surface's own coordinates, so a window travelling across the screen
+     * only pays for a new crop when the crop actually changes. */
+    int cut;
+    struct wlr_box cut_box;
+
+    /* The screen that drew this window last frame.
+     *
+     * Only consulted while no monitor owns its desktop — the few hundred ms
+     * after a switch, when the desktop is being left behind. Two monitors
+     * panning over the same strip can both have part of that column in view,
+     * and picking whichever of them shows more of the window flips mid-flight:
+     * the window vanishes off one screen and appears near the edge of the
+     * other, a whole screen away. It leaves by the screen it was on. */
+    struct FwmOutput *drawn_on;
+
     /* Unfocused windows fall back a step ([decor] inactive_opacity). `dim` is
      * what is on screen and `dim_target` what focus says it should be; the
      * tick walks one to the other so that clicking between windows is a fade

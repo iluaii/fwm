@@ -230,7 +230,7 @@ static void release_member(FwmServer *server, struct FwmView *view, int x, int y
     view->y = y;
     if (view->scene_tree) {
         wlr_scene_node_set_enabled(&view->scene_tree->node, true);
-        server_place_node(server, &view->scene_tree->node, x, y);
+        server_place_view(server, view, x, y);
     }
     physics_sync_body(&server->physics, view->id, view->x, view->y,
                       view->width, view->height, server->screen_width);
@@ -297,7 +297,7 @@ FwmGroup *group_bar_at(FwmServer *server, double lx, double ly, int *tab_index) 
         struct FwmView *v = group_active_view(g);
         if (!v || !g->tabbar) continue;
         double x, y_unused;
-        if (!server_world_to_screen(server, v->x, v->y, &x, &y_unused)) continue;
+        if (!server_world_to_screen(server, v->x, v->y, v->width, &x, &y_unused)) continue;
         double y = v->y - GROUP_TAB_H;
         double w = g->drawn_w;
         if (lx < x || lx >= x + w || ly < y || ly >= y + GROUP_TAB_H) continue;

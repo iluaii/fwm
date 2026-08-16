@@ -146,6 +146,35 @@ typedef struct FwmOutput {
     struct wlr_scene_buffer *wrap_ghost;   /* the desktop being left */
     struct wlr_buffer *wrap_ghost_buf;
     int render_dx, render_dy;              /* the two of them, resolved */
+    /* The monitor this one is trading desktops with, for as long as the two
+     * cameras are still travelling.
+     *
+     * A trade is the one move where a desktop changes SCREENS: each monitor
+     * takes the other's, so its windows are drawn by their new monitor from the
+     * moment it is asked for, while that monitor's camera is still standing
+     * over on the far side. The whole animation is therefore the two desktops
+     * crossing the gap between the screens — and it is the one case where a
+     * window over the neighbour's box belongs there and must not be cut off
+     * (see server_views_clip). NULL at every other moment. */
+    struct FwmOutput *swap_with;
+    /* And the jump that crossing would otherwise be.
+     *
+     * A monitor draws a window at `wx - camera_x + box.x`, `wy + box.y`: the
+     * frame is the SCREEN's, so the instant a desktop changes hands its windows
+     * are drawn in the new screen's frame — a screen that sits somewhere else in
+     * the layout and whose camera is still on the far side. They teleported to
+     * where they were about to fly out FROM and only then travelled, which is
+     * not a crossing, it is a cut with a slide after it. (Horizontally the
+     * camera happens to cancel it for neighbouring desktops; vertically there is
+     * no camera at all, so a screen mounted lower than its neighbour jumped
+     * every window by the difference.)
+     *
+     * So the difference between the two frames is taken at the moment of the
+     * trade and eased away over exactly the camera's own ride: at t=0 the window
+     * is drawn precisely where it already was, at t=1 the offset is gone and the
+     * screen's frame is the plain truth again. */
+    int swap_dx0, swap_dy0;   /* the whole jump, in layout pixels */
+    double swap_dx, swap_dy;  /* what is left of it */
     /* The desktop strip has taken this screen over: its windows are parked off
      * the layout until the strip closes. Per monitor, so opening the strip on
      * one screen leaves the other one working. */
@@ -757,12 +786,21 @@ int server_desktop_at_x(FwmServer *server, double wx);
  * point's desktop — or, while no monitor owns it, through one whose camera is
  * standing over it mid-slide, so the desktop being left goes on being drawn
  * until it has travelled off the screen. False when neither applies. */
-bool server_world_to_screen(FwmServer *server, double wx, double wy,
+bool server_world_to_screen(FwmServer *server, double wx, double wy, double span,
                             double *sx, double *sy);
 /* Place a scene node at a world position. A window on a desktop that nobody is
  * showing is parked far off the layout: no monitor covers that area, so it is
- * not drawn and no visibility flag has to be tracked and put back. */
+ * not drawn and no visibility flag has to be tracked and put back.
+ *
+ * `span` is how wide the thing is, and it decides WHICH monitor draws it while
+ * no monitor owns its desktop: the one showing most of its body. Pass 0 for a
+ * point, which only lands on a screen whose view contains it. */
 void server_place_node(FwmServer *server, struct wlr_scene_node *node,
+                       double wx, double wy, double span);
+/* The same for a window, which is every caller that has one: it knows its own
+ * width, and it remembers which screen drew it so that a desktop being left
+ * does not change screens halfway out. */
+void server_place_view(FwmServer *server, struct FwmView *view,
                        double wx, double wy);
 /* Move a freshly opened centred panel onto the monitor the user is at. */
 void server_panel_to_active_output(FwmServer *server, struct wlr_scene_buffer *panel);
@@ -774,6 +812,12 @@ void server_active_output_box(FwmServer *server, struct wlr_box *box);
 /* Every window and ghost put back where it belongs. Call after anything that
  * changes which monitor shows which desktop. */
 void server_views_place(FwmServer *server);
+
+/* Every window cut to the edge of the screen drawing it. Purely visual and
+ * cheap when nothing overhangs, so it runs once per frame, after the placing
+ * and before the scene is committed — see the definition for why a compositor
+ * with two monitors cannot do without it. */
+void server_views_clip(FwmServer *server);
 
 /* Layout coordinates back to world, through the monitor at that point — the
  * inverse of server_world_to_screen. False when the point is off every

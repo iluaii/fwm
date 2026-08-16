@@ -181,7 +181,7 @@ static void drag_place(FwmServer *server, double lx, double ly) {
         view->y = target_world_y;
 
         if (view->scene_tree)
-            server_place_node(server, &view->scene_tree->node, view->x, view->y);
+            server_place_view(server, view, view->x, view->y);
     }
 
     physics_sync_body(&server->physics, view->id, view->x, view->y,
@@ -623,7 +623,7 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
              * uninitialised stack happened to hold. The unwrap below keeps the
              * jump to half a turn if the monitor comes back mid-twist. */
             if (!server_world_to_screen(server, view->x + view->width / 2.0,
-                                        view->y + view->height / 2.0, &cx, &cy))
+                                        view->y + view->height / 2.0, 0, &cx, &cy))
                 return true;
             double a = atan2(ly - cy, lx - cx);
 
@@ -752,7 +752,8 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
                     double cx, cy;
                     if (pb && server_can_spin(pb) && server->config.effects.spin > 0.0
                         && server_world_to_screen(server, view->x + view->width / 2.0,
-                                                  view->y + view->height / 2.0, &cx, &cy)) {
+                                                  view->y + view->height / 2.0, 0,
+                                                  &cx, &cy)) {
                         /* Spinning it with no kick: the hand supplies the
                          * rotation from here, and physics only takes over at
                          * the release. */

@@ -139,8 +139,13 @@ bool snapshot_world(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst) {
         struct wlr_texture *tex = wlr_texture_from_buffer(server->wlr_renderer, src);
         if (!tex) continue;
         struct wlr_fbox crop;
-        wallpaper_layer_crop(wp, i, sout ? sout->camera_x : 0,
-                             server->screen_width, server->screen_height, &crop);
+        /* The monitor's own size, not the column's: a wallpaper is built for
+         * the screen it hangs on (wallpaper_create), so cropping a 1920x1080
+         * viewport out of a 1366x768 one hands the pass a box larger than the
+         * picture and the photograph comes out squashed. */
+        int crop_w = sout && sout->box.width  > 0 ? sout->box.width  : server->screen_width;
+        int crop_h = sout && sout->box.height > 0 ? sout->box.height : server->screen_height;
+        wallpaper_layer_crop(wp, i, sout ? sout->camera_x : 0, crop_w, crop_h, &crop);
         wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
             .texture = tex,
             .src_box = crop,

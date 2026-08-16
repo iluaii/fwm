@@ -321,7 +321,7 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
         view_set_fullscreen_hint(view, real);
         
         if (view->scene_tree) {
-            server_place_node(server, &view->scene_tree->node, view->x, view->y);
+            server_place_view(server, view, view->x, view->y);
             wlr_scene_node_raise_to_top(&view->scene_tree->node);
         }
         view_set_border_enabled(view, 0); // borderless fullscreen
@@ -350,7 +350,7 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
             view_set_fullscreen_hint(view, false);
             
             if (view->scene_tree) {
-                server_place_node(server, &view->scene_tree->node, view->x, view->y);
+                server_place_view(server, view, view->x, view->y);
             }
             view_set_border_enabled(view, 1);
             view->fs_real = 0;

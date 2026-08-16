@@ -181,7 +181,7 @@ void view_set_size(FwmView *view, int width, int height) {
          * resyncs every view once the camera stops, so it is corrected the
          * moment the window can be seen again. */
         double sx = view->xwl_surface->x, sy = view->xwl_surface->y;
-        server_world_to_screen(view->server, view->x, view->y, &sx, &sy);
+        server_world_to_screen(view->server, view->x, view->y, view->width, &sx, &sy);
         wlr_xwayland_surface_configure(view->xwl_surface,
             (int16_t)lround(sx), (int16_t)lround(sy),
             (uint16_t)width, (uint16_t)height);
@@ -795,7 +795,7 @@ void view_map(FwmView *view) {
     view->y = cy;
     
     view_set_size(view, view->width, view->height);
-    server_place_node(view->server, &view->scene_tree->node, view->x, view->y);
+    server_place_view(view->server, view, view->x, view->y);
     view_update_border_geometry(view);
     view_shadow_update(view);
 

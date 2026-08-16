@@ -782,7 +782,7 @@ static void cmd_window(FwmServer *server, const char *arg, struct Buf *b) {
         if (have_x) view->x = want_x;
         if (have_y) view->y = want_y;
         if (view->scene_tree)
-            server_place_node(server, &view->scene_tree->node, view->x, view->y);
+            server_place_view(server, view, view->x, view->y);
     }
     if (want_focus) server_focus_view(server, view);
     if (want_close) {

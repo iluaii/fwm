@@ -38,6 +38,7 @@
 #include "grass.h"
 #include "expo.h"
 #include "group.h"
+#include "shadow.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -269,14 +270,14 @@ static void server_animate(FwmServer *server) {
                                     fv->width > 0 ? fv->width : 1,
                                     fv->height > 0 ? fv->height : 1);
             wlr_scene_rect_set_color(fv->open_cover, cover);
-            server_place_node(server, &fv->scene_tree->node, fv->x,
+            server_place_view(server, fv, fv->x,
                               fv->y + OPEN_RISE_PX * (1.0 - e));
 
             if (done) {
                 wlr_scene_node_destroy(&fv->open_cover->node);
                 fv->open_cover = NULL;
                 fv->open_anim = 0;
-                server_place_node(server, &fv->scene_tree->node, fv->x, fv->y);
+                server_place_view(server, fv, fv->x, fv->y);
                 /* The dim held off while the window was opening (view_dim_apply
                  * refuses to blend a client's first frames). If it arrived at
                  * its target meanwhile, this is the only moment left to put it
@@ -334,7 +335,7 @@ static void server_animate(FwmServer *server) {
             }
 
             wlr_scene_buffer_set_opacity(g->scene_buffer, (float)o);
-            server_place_node(server, &g->scene_buffer->node, gx, gy);
+            server_place_node(server, &g->scene_buffer->node, gx, gy, g->w);
         }
     }
 
@@ -359,6 +360,7 @@ static void server_animate(FwmServer *server) {
             server_reclaim_memory();
         }
     }
+
 }
 
 static void handle_output_frame(struct wl_listener *listener, void *data) {
@@ -368,6 +370,13 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
      * frame event can still be in flight when it does. */
     if (!scene_output) return;
     server_animate(output->server);
+    /* And after it, unconditionally: every window cut to the screen drawing
+     * it. Not inside server_animate, which returns early on a frame that
+     * advanced no time — a second monitor presenting in the same instant does
+     * exactly that, and it would then commit the one frame nothing had cut.
+     * That is a window flashing onto the screen next door for a sixtieth of a
+     * second, which is precisely long enough to see. */
+    server_views_clip(output->server);
     wlr_scene_output_commit(scene_output, NULL);
 
     struct timespec now;
@@ -394,6 +403,17 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
      * is simply free again: its windows park off-layout until some monitor
      * takes that desktop. */
     server_wrap_slide_stop(output->server, output);
+    /* Nobody may be left holding this monitor: not the screen it was trading
+     * desktops with, and not a window remembering that this is what drew it.
+     * Both pointers are about to name freed memory. */
+    {
+        FwmOutput *so;
+        wl_list_for_each(so, &output->server->outputs, link)
+            if (so->swap_with == output) so->swap_with = NULL;
+        FwmView *dv;
+        wl_list_for_each(dv, &output->server->views, link)
+            if (dv->drawn_on == output) dv->drawn_on = NULL;
+    }
     /* A drag in progress remembers which monitor's camera it is following, and
      * compares that pointer every tick. Forget it here rather than leave it
      * dangling onto memory the next monitor may be handed. */
@@ -494,21 +514,6 @@ int server_desktop_at_x(FwmServer *server, double wx) {
     return d;
 }
 
-/* Is there room around this monitor for a window to hang off its edge without
- * landing on another one? Nothing clips the scene at a monitor's border, so a
- * window drawn half outside a screen would be drawn on whatever screen the
- * layout has next to it. */
-static bool output_has_elbow_room(FwmServer *server, FwmOutput *o) {
-    int reach = server->screen_width;
-    FwmOutput *p;
-    wl_list_for_each(p, &server->outputs, link) {
-        if (p == o || !p->enabled || p->box.width <= 0) continue;
-        if (p->box.x + p->box.width > o->box.x - reach
-         && p->box.x < o->box.x + o->box.width + reach) return false;
-    }
-    return true;
-}
-
 /* Which monitor draws a window whose desktop no monitor owns.
  *
  * `desktop` names where a monitor is HEADED — it is set the moment the switch
@@ -520,27 +525,68 @@ static bool output_has_elbow_room(FwmServer *server, FwmOutput *o) {
  *
  * Only the columns the camera actually overlaps count — one screen to the left
  * is the furthest a window can start and still have any part of it on screen.
- * Anything beyond that is genuinely somewhere else and stays parked. */
-static FwmOutput *output_passing_over(FwmServer *server, double wx) {
-    FwmOutput *o;
+ * Anything beyond that is genuinely somewhere else and stays parked.
+ *
+ * A monitor with a neighbour used to be refused here, because a window hanging
+ * off its edge would be drawn on the screen next door — which meant the desktop
+ * you were leaving blinked out instead of sliding away on every screen but a
+ * lone one. The overhang is cut off now instead (server_views_clip), so every
+ * monitor slides its world the same way. */
+/* How much of a body `span` wide at `wx` this screen has in view. */
+static double output_sees(FwmOutput *o, double wx, double span) {
+    double l = wx > o->camera_x ? wx : o->camera_x;
+    double r = wx + span < o->camera_x + o->box.width
+             ? wx + span : o->camera_x + o->box.width;
+    return r - l;
+}
+
+static FwmOutput *output_passing_over(FwmServer *server, double wx, double span) {
+    FwmOutput *o, *best = NULL;
+    double best_seen = 0.0;
     wl_list_for_each(o, &server->outputs, link) {
         if (!o->enabled || o->hide_world || o->box.width <= 0) continue;
-        if (wx <= o->camera_x - server->screen_width) continue;
-        if (wx >= o->camera_x + o->box.width) continue;
-        if (!output_has_elbow_room(server, o)) continue;
-        return o;
+        /* A point has to stand inside a view to count for anything. */
+        if (span <= 0.0) {
+            if (wx >= o->camera_x && wx < o->camera_x + o->box.width) return o;
+            continue;
+        }
+        /* A window is judged by its BODY, and goes to the screen showing most
+         * of it. Measuring from its top-left corner instead is what made a
+         * window flicker at the end of a switch: two monitors panning over the
+         * same strip can both be within a column of the same corner, so the
+         * claim jumped from one to the other and back — and the screen that
+         * won might have none of the window inside its view at all. */
+        double seen = output_sees(o, wx, span);
+        if (seen <= 0.0) continue;
+        if (!best || seen > best_seen) { best = o; best_seen = seen; }
     }
-    return NULL;
+    return best;
+}
+
+/* Which monitor draws a piece of the world, if any. The one showing the desktop
+ * it stands on; or, while no monitor owns that desktop, the one that is passing
+ * over it — with `prefer` (the screen that drew it last frame) keeping the job
+ * for as long as any of the thing is still on it, so a desktop being left
+ * leaves by the screen it was on rather than hopping to the other one. */
+static FwmOutput *world_output_near(FwmServer *server, double wx, double span,
+                                    FwmOutput *prefer) {
+    FwmOutput *o = server_output_showing(server, server_desktop_at_x(server, wx));
+    if (o) return o->hide_world ? NULL : o;
+    if (prefer && prefer->enabled && !prefer->hide_world && prefer->box.width > 0
+        && span > 0.0 && output_sees(prefer, wx, span) > 0.0) return prefer;
+    return output_passing_over(server, wx, span);
+}
+
+static FwmOutput *world_output(FwmServer *server, double wx, double span) {
+    return world_output_near(server, wx, span, NULL);
 }
 
 bool server_world_to_screen(FwmServer *server, double wx, double wy,
-                            double *sx, double *sy) {
-    FwmOutput *o = server_output_showing(server, server_desktop_at_x(server, wx));
-    if (o && o->hide_world) return false;
-    if (!o) o = output_passing_over(server, wx);
+                            double span, double *sx, double *sy) {
+    FwmOutput *o = world_output(server, wx, span);
     if (!o) return false;
-    if (sx) *sx = wx - o->camera_x + o->box.x + o->render_dx;
-    if (sy) *sy = wy + o->box.y + o->render_dy;
+    if (sx) *sx = wx - o->camera_x + o->box.x + o->render_dx + o->swap_dx;
+    if (sy) *sy = wy + o->box.y + o->render_dy + o->swap_dy;
     return true;
 }
 
@@ -548,8 +594,8 @@ bool server_screen_to_world(FwmServer *server, double lx, double ly,
                             double *wx, double *wy) {
     FwmOutput *o = server_output_at(server, lx, ly);
     if (!o) return false;
-    if (wx) *wx = lx - o->box.x - o->render_dx + o->camera_x;
-    if (wy) *wy = ly - o->box.y - o->render_dy;
+    if (wx) *wx = lx - o->box.x - o->render_dx - o->swap_dx + o->camera_x;
+    if (wy) *wy = ly - o->box.y - o->render_dy - o->swap_dy;
     return true;
 }
 
@@ -595,15 +641,150 @@ void server_panel_to_active_output(FwmServer *server, struct wlr_scene_buffer *p
                                 panel->node.x + o->box.x, panel->node.y + o->box.y);
 }
 
+/* A window, put where this frame draws it — and the record of which screen did
+ * it, which is what keeps a desktop being left from hopping screens mid-flight
+ * (see FwmView.drawn_on). Everything with a view goes through here; ghosts and
+ * override-redirect surfaces use the plain node version below. */
+void server_place_view(FwmServer *server, FwmView *v, double wx, double wy) {
+    if (!v || !v->scene_tree) return;
+    FwmOutput *o = world_output_near(server, wx, v->width, v->drawn_on);
+    v->drawn_on = o;
+    if (!o) {
+        wlr_scene_node_set_position(&v->scene_tree->node, PARKED_X, (int)lround(wy));
+        return;
+    }
+    wlr_scene_node_set_position(&v->scene_tree->node,
+        (int)lround(wx - o->camera_x + o->box.x + o->render_dx + o->swap_dx),
+        (int)lround(wy + o->box.y + o->render_dy + o->swap_dy));
+}
+
 void server_place_node(FwmServer *server, struct wlr_scene_node *node,
-                       double wx, double wy) {
+                       double wx, double wy, double span) {
     if (!node) return;
     double sx, sy;
-    if (!server_world_to_screen(server, wx, wy, &sx, &sy)) {
+    if (!server_world_to_screen(server, wx, wy, span, &sx, &sy)) {
         wlr_scene_node_set_position(node, PARKED_X, (int)lround(wy));
         return;
     }
     wlr_scene_node_set_position(node, (int)lround(sx), (int)lround(sy));
+}
+
+/* ── cutting a window to the screen it is drawn on ────────────────────────
+ *
+ * Nothing in wlr_scene clips at a monitor's border: the scene is one layout and
+ * every output draws whatever lands inside its box, so a window hanging off the
+ * edge of one screen is drawn on whichever screen the layout has next to it.
+ * That is the whole reason a desktop switch used to be a cut rather than a
+ * slide on any monitor with a neighbour — the only way to keep a travelling
+ * window off the screen next door was not to draw it at all.
+ *
+ * Cut it instead, and let every monitor pan its camera like a lone one does.
+ * The window's own content is a surface tree, which wlr_scene can crop. The
+ * focus border and the shadow are separate nodes that it cannot, so they stand
+ * down while the window is being cut: an outline missing from a window in the
+ * middle of a 350ms slide is not a thing anyone has ever noticed, and a window
+ * painting itself onto the other screen is a thing everyone does. */
+
+/* The offset from the window's top-left to the SURFACE's, which is the space a
+ * crop is measured in. An xdg client draws its shadows and resize handles
+ * outside the geometry it calls the window, and the tree is placed by that
+ * geometry — so on a GTK window the two differ by tens of pixels. */
+static void view_surface_offset(FwmView *v, int *gx, int *gy) {
+    *gx = *gy = 0;
+    if (v->type == FWM_VIEW_XDG && v->xdg_toplevel) {
+        *gx = v->xdg_toplevel->base->current.geometry.x;
+        *gy = v->xdg_toplevel->base->current.geometry.y;
+    }
+}
+
+/* Put a window back the way it is entitled to be, whole. */
+static void view_uncut(FwmServer *server, FwmView *v) {
+    if (!v->cut || !v->scene_tree) return;
+    v->cut = 0;
+    v->cut_box = (struct wlr_box){0};
+    wlr_scene_subsurface_tree_set_clip(&v->scene_tree->node, NULL);
+
+    /* The border comes back unless something else is holding it down: a real
+     * fullscreen window is borderless by right, and the effects that replace
+     * the window with a picture of itself put it out for their own duration
+     * and restore it themselves. */
+    PhysicsBody *b = physics_find_body(&server->physics, v->id);
+    if (!(b && b->fullscreen) && !v->spin_buf && !v->jelly && !v->squash_buf)
+        view_set_border_enabled(v, 1);
+    /* And the shadow goes back to whatever the light says, which is the only
+     * thing entitled to an opinion about it. */
+    view_shadow_update(v);
+}
+
+/* Would any of this box be drawn on a screen other than `o`? The only reason to
+ * cut anything: an overhang that falls off the layout, where no monitor covers
+ * it, harms nobody, and a window standing half off the edge of a lone screen
+ * keeps its border and its shadow exactly as it always has. */
+static bool rect_reaches_other_output(FwmServer *server, FwmOutput *o,
+                                      int x, int y, int w, int h) {
+    FwmOutput *p;
+    wl_list_for_each(p, &server->outputs, link) {
+        if (p == o || !p->enabled || p->box.width <= 0 || p->box.height <= 0) continue;
+        /* Except the screen this one is trading desktops with: a window over
+         * THAT box is a window on its way there, and cutting it would hide the
+         * whole crossing — which is the entire animation of a trade. */
+        if (o->swap_with == p || p->swap_with == o) continue;
+        if (x < p->box.x + p->box.width && x + w > p->box.x
+         && y < p->box.y + p->box.height && y + h > p->box.y) return true;
+    }
+    return false;
+}
+
+void server_views_clip(FwmServer *server) {
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        if (!v->scene_tree || v->width <= 0 || v->height <= 0) continue;
+
+        double sx, sy;
+        FwmOutput *o = world_output_near(server, v->x, v->width, v->drawn_on);
+        if (!o || !server_world_to_screen(server, v->x, v->y, v->width, &sx, &sy)) {
+            view_uncut(server, v);   /* parked: nothing is drawn to cut */
+            continue;
+        }
+
+        int x = (int)lround(sx), y = (int)lround(sy);
+        if (!rect_reaches_other_output(server, o, x, y, v->width, v->height)) {
+            view_uncut(server, v);
+            continue;
+        }
+        int x0 = x > o->box.x ? x : o->box.x;
+        int y0 = y > o->box.y ? y : o->box.y;
+        int x1 = x + v->width  < o->box.x + o->box.width
+               ? x + v->width  : o->box.x + o->box.width;
+        int y1 = y + v->height < o->box.y + o->box.height
+               ? y + v->height : o->box.y + o->box.height;
+
+        if (x1 <= x0 || y1 <= y0) {
+            /* Gone past the screen entirely — the far side of a slide. Park it
+             * where a window on a desktop nobody is showing goes; a crop cannot
+             * express "none of it", and an empty one means "no crop at all". */
+            wlr_scene_node_set_position(&v->scene_tree->node, PARKED_X, y);
+            view_uncut(server, v);
+            continue;
+        }
+        if (x0 == x && y0 == y && x1 == x + v->width && y1 == y + v->height) {
+            view_uncut(server, v);   /* all of it is on the screen */
+            continue;
+        }
+
+        int gx, gy;
+        view_surface_offset(v, &gx, &gy);
+        struct wlr_box cut = { x0 - x + gx, y0 - y + gy, x1 - x0, y1 - y0 };
+        if (!v->cut || memcmp(&cut, &v->cut_box, sizeof(cut)) != 0) {
+            wlr_scene_subsurface_tree_set_clip(&v->scene_tree->node, &cut);
+            v->cut_box = cut;
+        }
+        if (!v->cut) {
+            v->cut = 1;
+            view_set_border_enabled(v, 0);
+            if (v->shadow) shadow_set_enabled(v->shadow, false);
+        }
+    }
 }
 
 /* A desktop just changed which monitor is showing it, so everything that was
@@ -630,7 +811,7 @@ static void desktop_refit_fullscreen(FwmServer *server, int d) {
          * the old box and the window snaps out of fullscreen. */
         b->x = x; b->y = y; b->width = w; b->height = h;
         view_set_size(v, w, h);
-        if (v->scene_tree) server_place_node(server, &v->scene_tree->node, x, y);
+        server_place_view(server, v, x, y);
     }
 }
 
@@ -678,13 +859,18 @@ static void desktop_refit_clamp(FwmServer *server, int d) {
         if (y < 0) y = 0;
         if (x == b->x && y == b->y) continue;
 
-        b->x = x; b->y = y;
         /* A throw still in the air would carry it straight back out into the
          * strip it was just rescued from. */
         b->vx = 0; b->vy = 0;
-        v->x = (int)lround(x); v->y = (int)lround(y);
-        view_sync_position(v);
-        if (v->scene_tree) server_place_node(server, &v->scene_tree->node, v->x, v->y);
+        /* Glided rather than moved. This runs the moment a desktop changes
+         * screens, which is also the moment its windows start travelling
+         * there — and a window that jumps first and travels afterwards reads
+         * as a glitch followed by an animation, not as one move. The tiling
+         * glide is the same easing every other window in the compositor gets
+         * for being put somewhere it did not walk to. */
+        v->tile_tx = x;
+        v->tile_ty = y;
+        v->tile_anim = 1;
     }
 }
 
@@ -707,7 +893,32 @@ void server_output_show_desktop(FwmServer *server, FwmOutput *out, int d, int se
      * that keeps "one desktop, one monitor" true and never leaves a monitor
      * showing nothing. */
     FwmOutput *other = server_output_showing(server, d);
+    /* The two desktops are about to cross the gap between the screens; both
+     * sides have to know, or the clip would cut each of them off at the edge it
+     * is leaving and the trade would look like both desktops blinking out.
+     * Cleared as each camera arrives (physics_tick_cb). */
+    out->swap_with = other;
+    if (other) other->swap_with = out;
     if (other) {
+        /* Where each of the two screens is drawing the world RIGHT NOW. The
+         * desktops are about to change frames with each other, and the
+         * difference between these is exactly the jump that has to be eased
+         * away rather than taken in one frame. Read before anything moves. */
+        /* Whatever a previous crossing has not finished paying off counts as
+         * part of where the world is drawn now, or a trade asked for during one
+         * would start from a frame nobody is looking at. */
+        double ox = out->box.x - out->camera_x + out->swap_dx;
+        double px = other->box.x - other->camera_x + other->swap_dx;
+        double oy = out->box.y + out->swap_dy, py = other->box.y + other->swap_dy;
+        out->swap_dx0   = (int)lround(px - ox);
+        out->swap_dy0   = (int)lround(py - oy);
+        other->swap_dx0 = (int)lround(ox - px);
+        other->swap_dy0 = (int)lround(oy - py);
+        out->swap_dx   = out->swap_dx0;
+        out->swap_dy   = out->swap_dy0;
+        other->swap_dx = other->swap_dx0;
+        other->swap_dy = other->swap_dy0;
+
         int back = out->desktop;
         other->desktop = back;
         /* Only the target moves: the monitor being traded with slides to its
@@ -744,13 +955,13 @@ void server_output_show_desktop(FwmServer *server, FwmOutput *out, int d, int se
 void server_views_place(FwmServer *server) {
     FwmView *v;
     wl_list_for_each(v, &server->views, link) {
-        if (v->scene_tree) server_place_node(server, &v->scene_tree->node, v->x, v->y);
+        server_place_view(server, v, v->x, v->y);
     }
     FwmGhost *g;
     wl_list_for_each(g, &server->ghosts, link) {
         if (g->scene_buffer)
             server_place_node(server, &g->scene_buffer->node,
-                              g->x + g->draw_dx, g->y + g->draw_dy);
+                              g->x + g->draw_dx, g->y + g->draw_dy, g->w);
     }
     /* Override-redirect X11 surfaces are not views, but they sit on a desktop
      * like everything else and have to travel with it. */
