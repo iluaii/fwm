@@ -6,6 +6,7 @@ Nothing here is hard-coded. Every entry in the default table below is an ordinar
 
 Contents: [defaults](#default-bindings) · [actions](#actions) ·
 [modes](#modes-submaps) · [the radial menu](#the-radial-menu) ·
+[the sound panel](#the-sound-panel) ·
 [mouse](#mouse-drags) · [gestures](#gestures) ·
 [the desktop strip](#keys-inside-the-desktop-strip) ·
 [the launcher](#keys-inside-the-launcher)
@@ -125,6 +126,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `toggle_tray` | hide/show the status strip |
 | `modes_menu` | open the modes menu (same as clicking the tray pill) |
 | `radial_menu` | open the ring of actions from `[radial]` — see [below](#the-radial-menu) |
+| `mixer` | the sound panel: every application's volume, master at the top — see [below](#the-sound-panel) |
 | `show_hints` | the key hints overlay |
 | `show_errors` | the config-problem panel (same as clicking the ⚠ pill) |
 | `wallpaper_picker` | the wallpaper picker |
@@ -342,6 +344,50 @@ turn, press, and press the middle to back out.
 
 `enter` is shorthand for putting `radial_menu` in `[binds]`. Every field, and
 the caps on nesting, are described in [Configuration](configuration.md#radial).
+
+## The sound panel
+
+`mixer`. Every application that is playing, one row each, with the master at the
+top — and the one place in fwm where the knob does two things:
+
+```toml
+[binds]
+"super+XF86AudioMute" = "mixer"
+
+[[radial.item]]          # or, where it was meant to live: a petal in the ring
+label  = "Sound"
+text   = "🔊"
+action = "mixer"
+```
+
+Turning walks the list. **Pressing takes hold** of the row you stopped on, and
+while a row is held turning moves that row's volume instead of the selection.
+Press again to let go. A ring could not do this — turning is how you leave a
+ring — which is why this one is a list, and why the corner of the panel says
+which of the two the knob means right now.
+
+| Key | Does |
+|---|---|
+| knob turn, `↑` `↓`, `Tab` | walk the list, wrapping at both ends — or, while a row is held, move its volume |
+| knob press, `Return`, `Space` | take hold of the row, or let go of it |
+| `←` `→` | move the selected row's volume, held or not |
+| `m` | mute the selected row |
+| `1`…`9` | jump to that row, 1 being the master |
+| `Home`, `End` | the master, the last row |
+| wheel | walk the list, or move a held row's volume |
+| click a row | take hold of it; **click a bar** to drop the volume where you clicked |
+| `Escape` | let go — and with nothing held, close |
+
+The list wraps, as the ring does — off the top is the last row, off the bottom
+the master. A knob has no ends, so neither does anything it drives.
+
+The volume keys do not reach `[binds]` while the panel is up, for the ring's
+reason and then some — here they are *moving* a volume already. Levels are
+predicted and confirmed exactly as [`volume:`](#volume-the-system-mixer) does,
+and the list is re-read about once a second so an application that starts
+playing appears on its own. What it runs is
+[`[mixer]`](configuration.md#mixer), with the master row on
+[`[volume]`](configuration.md#volume).
 
 ## Mouse drags
 

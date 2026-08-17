@@ -35,6 +35,7 @@
 #include "ui/welcome.h"
 #include "ui/launcher.h"
 #include "ui/radial.h"
+#include "ui/mixer.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
@@ -355,6 +356,13 @@ static void process_cursor_motion(FwmServer *server, uint32_t time_msec) {
     /* The radial menu takes the pointer on the same terms as the launcher,
      * and before it: only one of the two is ever up, but the order has to be
      * decided somewhere and the ring is the one drawn on top. */
+    if (mixer_is_open(server->mixer)) {
+        mixer_handle_motion(server->mixer, lx, ly);
+        wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+        wlr_seat_pointer_clear_focus(server->seat);
+        return;
+    }
+
     if (radial_is_open(server->radial)) {
         radial_handle_motion(server->radial, lx, ly);
         wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
@@ -510,6 +518,13 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
      * and the release that takes the picture must reach nothing else. */
     if (screenshot_handle_button(server, event->state == WL_POINTER_BUTTON_STATE_PRESSED))
         return;
+
+    bool m_was_open = mixer_is_open(server->mixer);
+    if (mixer_handle_button(server->mixer, server->cursor->x, server->cursor->y,
+                            event->state == WL_POINTER_BUTTON_STATE_PRESSED)) {
+        mixer_grab_sync(server, m_was_open);    /* the click may have closed it */
+        return;
+    }
 
     bool r_was_open = radial_is_open(server->radial);
     if (radial_handle_button(server->radial, server->cursor->x, server->cursor->y,
@@ -708,6 +723,12 @@ static void handle_cursor_axis(struct wl_listener *listener, void *data) {
     struct wlr_pointer_axis_event *event = data;
     server_notify_activity(server);
     if (lock_is_active(server)) return;
+
+    /* The sound panel takes the wheel whole while it is up: over a list whose
+     * whole subject is a value you turn, a notch that reached the window
+     * underneath instead would be scrolling a page nobody is looking at. */
+    if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL &&
+        mixer_handle_axis(server->mixer, event->delta)) return;
 
     // Scrolling over the desktop island steps between desktops. Consumed, so
     // it never also scrolls whatever window happens to be under the tray.

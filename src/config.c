@@ -84,6 +84,7 @@ int action_is_known(const char *a) {
         "calm_all", "fake_fullscreen", "real_fullscreen",
         "launcher", "toggle_tray", "spin_window", "spin_all", "terminal",
         "expo", "toggle_wrap", "modes_menu", "stats_menu", FWM_RADIAL_ACTION,
+        FWM_MIXER_ACTION,
         "toggle_sun", "sun_mode",
         "screenshot", "screenshot_region",
         "output_off", "toggle_internal_output", "outputs_on", NULL
@@ -1023,6 +1024,17 @@ static int mixer_on_path(const char *name) {
     return 0;
 }
 
+/* A number that may be written either way. TOML tells `5` and `5.0` apart and
+ * so does the parser; a user writing `step = 5` and getting silence would be a
+ * mean trick — the same reasoning as rule_number further down. */
+static bool toml_number_in(toml_table_t *tbl, const char *key, double *out) {
+    toml_datum_t d = toml_double_in(tbl, key);
+    if (d.ok) { *out = d.u.d; return true; }
+    toml_datum_t i = toml_int_in(tbl, key);
+    if (i.ok) { *out = (double)i.u.i; return true; }
+    return false;
+}
+
 static void load_volume(toml_table_t *root, FwmConfig *cfg) {
     VolumeConfig *v = &cfg->volume;
     memset(v, 0, sizeof(*v));
@@ -1052,11 +1064,11 @@ static void load_volume(toml_table_t *root, FwmConfig *cfg) {
     d = toml_string_in(tbl, "mute");
     if (d.ok) { snprintf(v->mute, sizeof(v->mute), "%s", d.u.s); free(d.u.s); }
 
-    toml_datum_t m = toml_double_in(tbl, "max");
-    if (m.ok) {
-        if (m.u.d >= 1.0 && m.u.d <= 200.0) v->max = m.u.d;
+    double max;
+    if (toml_number_in(tbl, "max", &max)) {
+        if (max >= 1.0 && max <= 200.0) v->max = max;
         else config_report_error(cfg, "[volume] max %.0f out of range 1..200 — using %.0f",
-                                 m.u.d, v->max);
+                                 max, v->max);
     }
 
     /* A `set` that never mentions %v would move the volume to the same place
@@ -1064,6 +1076,60 @@ static void load_volume(toml_table_t *root, FwmConfig *cfg) {
     if (v->set[0] && !strstr(v->set, "%v"))
         config_report_error(cfg, "[volume] set has no %%v — fwm has nowhere to put "
                                  "the value it wants");
+}
+
+/* ── mixer section ───────────────────────────────────────────────────── */
+
+/* The per-application panel. pactl only, even where [volume] chose wpctl: the
+ * panel needs a LIST, and the only thing wpctl prints one in is `wpctl status`,
+ * a tree with box-drawing characters in it that is meant to be read by a
+ * person. pactl's block output is the same information written down. */
+static void load_mixer(toml_table_t *root, FwmConfig *cfg) {
+    MixerConfig *m = &cfg->mixer;
+    memset(m, 0, sizeof(*m));
+    m->step = 5.0;
+    m->max  = 100.0;
+
+    if (mixer_on_path("pactl")) {
+        snprintf(m->list, sizeof(m->list), "pactl list sink-inputs");
+        snprintf(m->set,  sizeof(m->set),  "pactl set-sink-input-volume %%i %%v%%");
+        snprintf(m->mute, sizeof(m->mute), "pactl set-sink-input-mute %%i toggle");
+    }
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "mixer");
+    if (!tbl) return;
+
+    toml_datum_t d = toml_string_in(tbl, "list");
+    if (d.ok) { snprintf(m->list, sizeof(m->list), "%s", d.u.s); free(d.u.s); }
+    d = toml_string_in(tbl, "set");
+    if (d.ok) { snprintf(m->set, sizeof(m->set), "%s", d.u.s); free(d.u.s); }
+    d = toml_string_in(tbl, "mute");
+    if (d.ok) { snprintf(m->mute, sizeof(m->mute), "%s", d.u.s); free(d.u.s); }
+
+    double num;
+    if (toml_number_in(tbl, "step", &num)) {
+        if (num >= 0.5 && num <= 50.0) m->step = num;
+        else config_report_error(cfg, "[mixer] step %.1f out of range 0.5..50 — using %.0f",
+                                 num, m->step);
+    }
+    if (toml_number_in(tbl, "max", &num)) {
+        if (num >= 1.0 && num <= 200.0) m->max = num;
+        else config_report_error(cfg, "[mixer] max %.0f out of range 1..200 — using %.0f",
+                                 num, m->max);
+    }
+
+    /* Same trap as [volume] set, one field wider: a command with nowhere to put
+     * the stream would move a stream, just never the one that was asked for. */
+    if (m->set[0] && !strstr(m->set, "%v"))
+        config_report_error(cfg, "[mixer] set has no %%v — fwm has nowhere to put "
+                                 "the value it wants");
+    if (m->set[0] && !strstr(m->set, "%i"))
+        config_report_error(cfg, "[mixer] set has no %%i — every row of the panel "
+                                 "would move the same stream");
+    if (m->mute[0] && !strstr(m->mute, "%i"))
+        config_report_error(cfg, "[mixer] mute has no %%i — every row of the panel "
+                                 "would mute the same stream");
 }
 
 /* ── sound section ───────────────────────────────────────────────────── */
@@ -1560,6 +1626,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_grass(NULL, cfg);
     load_sound(NULL, cfg);
     load_volume(NULL, cfg);
+    load_mixer(NULL, cfg);
     load_stats(NULL, cfg);
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
     load_sun(NULL, cfg);     /* likewise: a sun in the sky before anything is read */
@@ -1608,6 +1675,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_grass(root, cfg);
     load_sound(root, cfg);
     load_volume(root, cfg);
+    load_mixer(root, cfg);
     load_stats(root, cfg);
     load_wallpaper(root, cfg);
     load_wallpaper_picker(root, cfg);

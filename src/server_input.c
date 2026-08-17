@@ -32,6 +32,7 @@
 #include "ui/welcome.h"
 #include "ui/launcher.h"
 #include "ui/radial.h"
+#include "ui/mixer.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
@@ -139,6 +140,14 @@ void launcher_grab_sync(FwmServer *server, bool was_open) {
  * terms, and for the same reasons — see the comment above launcher_grab_sync. */
 void radial_grab_sync(FwmServer *server, bool was_open) {
     bool open = radial_is_open(server->radial);
+    if (open == was_open) return;
+    if (open) wlr_seat_keyboard_notify_clear_focus(server->seat);
+    else      server_keyboard_enter(server, server_keyboard_target(server));
+}
+
+/* The sound panel, on the ring's terms and for the ring's reasons. */
+void mixer_grab_sync(FwmServer *server, bool was_open) {
+    bool open = mixer_is_open(server->mixer);
     if (open == was_open) return;
     if (open) wlr_seat_keyboard_notify_clear_focus(server->seat);
     else      server_keyboard_enter(server, server_keyboard_target(server));
@@ -462,6 +471,23 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
      *
      * Releases are swallowed with the presses, for the launcher's reason: a
      * client that never saw the press must not be handed the release. */
+    /* And the sound panel, ahead of the ring for no reason but that one of the
+     * two is ever up: it takes the same three knob keys, on the same terms and
+     * for the same reason — the panel is where the knob MOVES a volume, and
+     * [binds] must not also move the master one while it does. */
+    if (mixer_is_open(server->mixer)) {
+        if (event->keycode < sizeof(server->key_consumed))
+            server->key_consumed[event->keycode] = event->state == WL_KEYBOARD_KEY_STATE_PRESSED;
+        if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            key_repeat_stop(server);
+            uint32_t kc = event->keycode + 8;
+            xkb_keysym_t sym = xkb_state_key_get_one_sym(keyboard->wlr_keyboard->xkb_state, kc);
+            mixer_handle_key(server->mixer, sym);
+            mixer_grab_sync(server, true);   /* Escape may have closed it */
+        }
+        return;
+    }
+
     if (radial_is_open(server->radial)) {
         if (event->keycode < sizeof(server->key_consumed))
             server->key_consumed[event->keycode] = event->state == WL_KEYBOARD_KEY_STATE_PRESSED;

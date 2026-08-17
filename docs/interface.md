@@ -7,6 +7,7 @@ compositor.
 
 Contents: [the tray](#the-tray) · [the modes menu](#the-modes-menu) ·
 [the launcher](#the-launcher) · [the radial menu](#the-radial-menu) ·
+[the sound panel](#the-sound-panel) ·
 [the dial readout](#the-dial-readout) ·
 [the desktop strip](#the-desktop-strip) ·
 [the wallpaper picker](#the-wallpaper-picker) · [key hints](#key-hints) ·
@@ -173,6 +174,31 @@ which is also what keeps the knob off the volume while you are turning it to
 choose. Keys are listed in
 [Keybindings](keybindings.md#the-radial-menu), fields in
 [Configuration](configuration.md#radial).
+
+## The sound panel
+
+Everything that is playing, one row each, with the master at the top: `mixer`,
+which is what a radial petal with `action = "mixer"` fires. It is the panel a
+knob was waiting for — turning it walks the list, **pressing it takes hold** of
+the row you stopped on, and while a row is held the knob is that row's volume
+knob. Press again to let go and go back to walking. `m` mutes the selected row,
+Escape lets go, and Escape again closes.
+
+That double meaning is why the panel is a list and not a second ring: a ring
+cannot hold a value you turn, because turning is how you leave it. The corner of
+the panel says which of the two the knob means right now.
+
+With a mouse there is no holding to do — the wheel walks the list, a click on a
+bar drops the volume where you clicked, and a click outside closes. Rows arrive
+staggered from the top and the bars ease to their values, so a level that moves
+while you watch is something you can see move.
+
+fwm does not own the audio session, so the rows come from shell commands:
+`[mixer]` for the applications (pactl by default) and `[volume]` for the master
+row — the very commands the volume keys already use, so the two can never
+disagree. The list is re-read about once a second, and a level you just moved is
+shown immediately and confirmed behind you. Fields in
+[Configuration](configuration.md#mixer).
 
 ## The dial readout
 

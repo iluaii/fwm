@@ -222,6 +222,7 @@ uint32_t get_active_modifiers(FwmServer *server);
 void server_notify_activity(FwmServer *server);
 void launcher_grab_sync(FwmServer *server, bool was_open);
 void radial_grab_sync(FwmServer *server, bool was_open);
+void mixer_grab_sync(FwmServer *server, bool was_open);
 void keyboard_apply_input_config(FwmServer *server, struct wlr_keyboard *kb);
 void pointer_apply_input_config(FwmServer *server, struct wlr_input_device *device);
 

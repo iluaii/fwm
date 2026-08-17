@@ -660,6 +660,9 @@ typedef struct FwmServer {
      * the pointer while it is up. Never NULL after startup — being open is
      * its own flag, not this pointer (see radial_is_open). */
     struct Radial *radial;
+    /* The per-application volume panel, on the ring's terms — keyboard and
+     * pointer while it is up. Never NULL after startup (see mixer_is_open). */
+    struct Mixer *mixer;
     /* The dial readout: what a `set:` bind is worth now, low on the screen for
      * a second after the turning stops. Never NULL after startup; being up is
      * its own flag (see osd_busy). */

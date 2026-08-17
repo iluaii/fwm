@@ -116,6 +116,33 @@ tick_rate             = 60.0
 #mute = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
 #max  = 100     # the loudest volume: will go, 1..200
 
+# Every application's volume, one row each, opened by the `mixer` action — from
+# a key, or from a radial petal, which is what it was written for:
+#
+#   [[radial.item]]
+#   label  = "Sound"
+#   text   = "🔊"
+#   action = "mixer"
+#
+# The knob does two things there: turning walks the list, PRESSING takes hold of
+# the row you stopped on, and a held row is what turning moves. Press again to
+# let go. `m` mutes a row, Escape lets go, Escape again closes.
+#
+# The master row at the top is [volume] above — the same commands the volume
+# keys use — so the panel and the keys can never disagree. Everything below it
+# comes from `list`, and nothing here is needed on an ordinary machine: the
+# defaults are pactl's, which answers on PipeWire as readily as on PulseAudio.
+#
+# `list` may also print one stream per line as "id<TAB>percent<TAB>muted<TAB>name",
+# which is the escape hatch — one line of awk instead of a wait for fwm to grow
+# a backend for your machine.
+#[mixer]
+#list = "pactl list sink-inputs"
+#set  = "pactl set-sink-input-volume %i %v%"   # %i = the stream, %v = the level
+#mute = "pactl set-sink-input-mute %i toggle"
+#step = 5       # percent per detent of the knob, 0.5..50
+#max  = 100     # the loudest the panel will go, 1..200
+
 # What the machine is doing, in the tray: the island between the desktop dots
 # and the modes pill. Click it for the menu that switches each readout on and
 # off, or bind the `stats_menu` action to a key.
@@ -840,6 +867,13 @@ tap = true
 #[[radial.item]]
 #label  = "Wallpaper"
 #action = "wallpaper_picker"
+#
+# The petal the sound panel was written for: press it, and the knob you turned
+# to get here becomes a volume knob for whatever you turn to next. See [mixer].
+#[[radial.item]]
+#label  = "Sound"
+#text   = "🔊"
+#action = "mixer"
 #
 # A petal with items of its own opens THEM instead of firing: pressing it swaps
 # the ring for the deeper one, which blooms out of the hub the same way. Such a

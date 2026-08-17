@@ -807,6 +807,48 @@ typedef struct {
     double max;         /* the loudest `volume:` will go, percent */
 } VolumeConfig;
 
+/* ── the mixer panel ─────────────────────────────────────────────────── */
+
+/*
+ * Per-application volume, for the `mixer` action:
+ *
+ *   [mixer]
+ *   list = "pactl list sink-inputs"
+ *   set  = "pactl set-sink-input-volume %i %v%"   # %i = stream, %v = 0..max
+ *   mute = "pactl set-sink-input-mute %i toggle"
+ *   step = 5
+ *   max  = 100
+ *
+ * Shell commands for [volume]'s reason: fwm does not own the audio session and
+ * has no business linking a mixer library to move one slider. Left alone these
+ * are pactl's, which is what a PipeWire machine answers on as readily as a
+ * PulseAudio one — wpctl is not used here even where [volume] picked it,
+ * because `wpctl status` is a tree drawn for a human and the sink-input list
+ * has to be parsed, not looked at.
+ *
+ * The master row of the panel is NOT read through `list`: it is [volume]'s
+ * get/set/mute, the same three commands the volume keys already use, so the
+ * two never disagree about what the machine is playing at.
+ *
+ * `list` may print pactl's own blocks or one stream per line as
+ *
+ *   id<TAB>percent<TAB>muted<TAB>name
+ *
+ * which is the escape hatch — a machine with an unusual setup writes one line
+ * of awk rather than waiting for fwm to grow a backend for it.
+ */
+typedef struct {
+    char   list[512];
+    char   set[256];    /* %i = stream id, %v = the percentage to set */
+    char   mute[256];   /* %i = stream id */
+    double step;        /* percent per detent of the knob */
+    double max;         /* the loudest the panel will go, percent */
+} MixerConfig;
+
+/* The action that opens the panel. Registered like the radial menu's, so a
+ * petal can carry it: action = "mixer". */
+#define FWM_MIXER_ACTION "mixer"
+
 /* ── stats pill ──────────────────────────────────────────────────────── */
 
 /*
@@ -1074,6 +1116,7 @@ typedef struct {
     GrassConfig     grass;
     SoundConfig     sound;
     VolumeConfig    volume;
+    MixerConfig     mixer;
     StatsConfig     stats;
     KeyBind        *keys;
     int             key_count;

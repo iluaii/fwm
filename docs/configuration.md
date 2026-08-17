@@ -23,7 +23,8 @@ Contents: [physics](#physics) · [per-desktop physics](#per-desktop-physics) ·
 [decor](#decor) · [input](#input) · [focus](#focus) · [effects](#effects) ·
 [session](#session) · [binds](#binds) · [modes](#modes) · [mouse](#mouse) ·
 [gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_picker](#wallpaper_picker) ·
-[cava](#cava) · [grass](#grass) · [sound](#sound) · [volume](#volume) · [output](#output)
+[cava](#cava) · [grass](#grass) · [sound](#sound) · [volume](#volume) ·
+[mixer](#mixer) · [output](#output)
 
 ---
 
@@ -869,6 +870,44 @@ and a way to move it — are one line each. The same reasoning as
 
 `get` runs in the background and never blocks the compositor; it is killed if it
 has not answered in five seconds.
+
+## mixer
+
+What [the sound panel](interface.md#the-sound-panel) — the `mixer` action —
+lists, and how it moves one application's volume. **Nothing here is needed on an
+ordinary machine**: the defaults are pactl's, and pactl answers on a PipeWire
+box as readily as on a PulseAudio one.
+
+```toml
+[mixer]
+list = "pactl list sink-inputs"
+set  = "pactl set-sink-input-volume %i %v%"   # %i = the stream, %v = the level
+mute = "pactl set-sink-input-mute %i toggle"
+step = 5     # percent per detent of the knob
+max  = 100
+```
+
+| Key | Does |
+|---|---|
+| `list` | prints what is playing. pactl's `Sink Input #N` blocks are understood — the id, the `Volume:` percentage, `Mute:`, and `application.name` / `application.icon_name` / `application.process.binary` for the row's name and icon |
+| `set` | puts one stream's level somewhere. `%i` is the stream, `%v` the percentage; missing either is reported, since one would move nothing and the other would move the wrong thing |
+| `mute` | toggles one stream's mute. `%i` is the stream |
+| `step` | percent per detent while a row is held, 0.5..50. A fast turn is worth more per detent, exactly as it is everywhere else a knob is read |
+| `max` | the loudest the panel will go, 1..200 |
+
+`list` may print one stream per line instead, as
+`id<TAB>percent<TAB>muted<TAB>name` — the escape hatch for a machine pactl does
+not serve, so an unusual setup is one line of awk rather than a wait for fwm to
+grow a backend.
+
+The **master row is not read through `list`**: it is [`[volume]`](#volume)'s
+`get`, `set` and `mute`, the same three commands the volume keys use, so the
+panel and the keys can never disagree about the machine's own level. wpctl is
+not used for the applications even where `[volume]` picked it: `wpctl status` is
+a tree drawn for a person to read, and this list has to be parsed.
+
+`list` runs in the background about once a second while the panel is up, never
+blocks the compositor, and is killed if it has not answered in five seconds.
 
 ## output
 

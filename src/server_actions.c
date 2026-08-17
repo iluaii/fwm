@@ -38,6 +38,7 @@
 #include "ui/osd.h"
 #include "volume.h"
 #include "ui/radial.h"
+#include "ui/mixer.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
@@ -777,6 +778,14 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         radial_toggle(server->radial);
         radial_grab_sync(server, was_open);
         ipc_emit_ui(server->ipc, "radial", radial_is_open(server->radial));
+    } else if (strcmp(action, FWM_MIXER_ACTION) == 0) {
+        /* The sound panel, on the ring's terms — and usually FROM the ring: a
+         * petal with action = "mixer" is what it was written for. The ring
+         * closes before it dispatches, so the two are never up at once. */
+        bool was_open = mixer_is_open(server->mixer);
+        mixer_toggle(server->mixer);
+        mixer_grab_sync(server, was_open);
+        ipc_emit_ui(server->ipc, "mixer", mixer_is_open(server->mixer));
     } else if (strncmp(action, "view:", 5) == 0) {
         int seam = 0;
         int desktop = resolve_desktop_ex(server, action + 5, &seam);

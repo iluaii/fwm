@@ -29,7 +29,7 @@ is the tour. The manual is in [`docs/`](docs/):
 | [Configuration](docs/configuration.md) | every section of `config.toml`, key by key |
 | [Keybindings and actions](docs/keybindings.md) | the defaults, the full action vocabulary, modes, mouse, gestures |
 | [Physics](docs/physics.md) | how the simulation works, its units, its limits |
-| [The interface](docs/interface.md) | tray, modes menu, stats menu, launcher, desktop strip, picker, visualiser, sound |
+| [The interface](docs/interface.md) | tray, modes menu, stats menu, launcher, radial menu, sound panel, desktop strip, picker, visualiser, sound |
 | [fwmctl and the IPC](docs/fwmctl.md) | reading state, live settings, events, scripting |
 | [Troubleshooting](docs/troubleshooting.md) | when something does not work |
 | [Architecture](docs/architecture.md) | for anyone changing the code |
@@ -190,6 +190,7 @@ rate your hand was turning it.
 ### Built-in overlays
 - **App launcher** (`Super+Space`) — fuzzy search over desktop entries with icons, no external `rofi` needed. Launched windows drop into the world with physics.
 - **Radial menu** — a ring of actions around a hub, built for a keyboard knob: turn to walk the ring, press to fire. Petals bloom out of the hub on springs, carry an icon or a glyph, and run anything a keybind can — or hold a ring of their own, which blooms in place of this one, with the hub as the way back up. While it is up the knob chooses petals instead of changing the volume. Configured in `[radial]`; opened by whatever key you give it.
+- **Sound panel** — every application that is playing, one row each, with the master at the top: the `mixer` action, usually a petal in the ring above. The knob does two things here, which is why it is a list and not a second ring: turning walks it, pressing takes *hold* of a row, and a held row is what turning moves — press again to let go. A click on a bar drops the volume where you clicked. The rows come from `[mixer]` (pactl by default) and the master from `[volume]`, so the panel and the volume keys can never disagree.
 - **Wallpaper picker** (`Super+Shift+P`) — browse a folder and apply an image instantly; the choice is remembered without ever rewriting your config.
 - **Screenshots** (`Print`, `Super+Shift+S` for a region) — built in, no `grim`/`slurp` to install. The PNG goes straight to the clipboard, ready to paste; nothing is written to disk. The region shot peels off the screen, tilts and flies away as it is taken, so you can see exactly which pixels were caught.
 - **Dial readout** — a `set:` bind (`set:sun.blur+2`) turns any runtime option from a key, and the name, the value and its place in its range appear low on the screen for a second while you turn. Built for a knob: spin it and the steps come faster, in this readout and in every menu the knob drives.
@@ -975,6 +976,7 @@ fit  = "pan"
 | `group_toggle`, `group_add`, `group_next`, `group_prev` | tab-stacks: make a stack, join it, cycle tabs |
 | `launcher` | built-in app launcher |
 | `radial_menu` | the ring of actions from `[radial]`: turn a knob to choose a petal, press it to fire |
+| `mixer` | the sound panel: every application's volume in a list, master at the top. Turn the knob to walk it, press to take hold of a row, and a held row is what turning moves |
 | `toggle_wrap` | close the desktop strip into a ring: stepping past the last desktop arrives on the first (`x` inside expo) |
 | `expo` | the desktop strip: the camera pulls back over the neighbouring desktops — click a window to go to it, super+drag to move it between desktops, right-click for its menu, `z` for a wider view and, from there, middle-drag (or alt+drag) to fly around the ring. The keys are listed along the bottom while it is open |
 | `show_hints` | keybind cheat-sheet overlay |

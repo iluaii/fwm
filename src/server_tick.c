@@ -36,6 +36,7 @@
 #include "ui/osd.h"
 #include "volume.h"
 #include "ui/radial.h"
+#include "ui/mixer.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "cava.h"
@@ -429,6 +430,7 @@ static int server_is_busy(FwmServer *server) {
     if (!wl_list_empty(&server->ghosts)) return 1;     /* close animations */
     if (launcher_is_open(server->launcher)) return 1;  /* spring tiles */
     if (radial_is_open(server->radial)) return 1;      /* blooming petals */
+    if (mixer_busy(server->mixer)) return 1;           /* the sound panel, or its reader */
     if (osd_busy(server->osd)) return 1;               /* a dial reading, timing out */
     if (volume_busy(server->volume)) return 1;         /* waiting on the mixer */
     if (cairo_overlay_animating()) return 1;
@@ -1320,6 +1322,10 @@ static int physics_tick_cb(void *data) {
 
     // The radial menu's petals, on exactly the same terms.
     radial_tick(server->radial, dt);
+
+    // The sound panel: eased bars, arriving rows, and the poll that keeps
+    // the list honest about what is playing.
+    mixer_tick(server->mixer, elapsed);
 
     // The dial readout counting down its hold. Wall clock, like the menus
     // below it: nothing in the simulation is waiting on it.

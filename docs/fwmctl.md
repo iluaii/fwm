@@ -235,7 +235,8 @@ Subscribe to everything, or a comma-separated subset:
 client can log it rather than assume its request was understood. Subscribing twice
 widens the set rather than replacing it.
 
-`ui` covers fwm's own panels — `launcher`, `wallpaper_picker`, `radial`, `expo` —
+`ui` covers fwm's own panels — `launcher`, `wallpaper_picker`, `radial`, `mixer`,
+`expo` —
 because they are not windows and nothing else in the stream mentions them. `open`
 carries the state the panel is in after the toggle, so a subscriber that starts
 mid-session and misses the opening still reads the closing correctly.

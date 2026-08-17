@@ -111,6 +111,7 @@ static const char *action_label(const char *a, char *buf, size_t cap) {
         { "group_add",        "join stack under" },
         { "launcher",         "app launcher" },
         { "radial_menu",      "radial menu" },
+        { "mixer",            "sound panel" },
         { "expo",             "desktop strip" },
         { "terminal",         "terminal" },
         { "show_hints",       "this help" },
