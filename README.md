@@ -354,16 +354,24 @@ The desktop's size is the primary monitor's, so a second monitor of a different 
 
 Known gaps: output scale is applied to the monitor and to client surfaces, but fwm's own chrome (status strip, launcher, expo) is still drawn at logical size and scaled up, so it is soft rather than crisp on a HiDPI screen. No IME (xkb layouts do work).
 
-### Games under Wine and Proton: use borderless, not exclusive fullscreen
+### Games under Wine and Proton: exclusive fullscreen and input
 
 A Windows game running under Proton that is set to **exclusive fullscreen** can go black and deaf the first time it stops being the focused window — switch to another desktop, come back, and the screen is black, the game takes no input, and the process sits there burning a core. Clicking it does not bring it back. Elite Dangerous with `FullScreen=1` does exactly this.
 
-It is worth writing down what that is, because it looks like a compositor bug and is not one. Two things meet:
+It is worth writing down, because it looks like a compositor bug and is not one. The same failure is tracked upstream as [Wine bug 57585](https://bugs.winehq.org/show_bug.cgi?id=57585): alt-tab away from a fullscreen game, come back, and it ignores mouse and keyboard. Wine's X11 driver can hand the input focus over through `WM_TAKE_FOCUS` rather than accepting it directly — a window manager may then only *offer* the focus, and a client that declines never becomes interactive again. Which of the two paths Wine takes is controlled by the `UseTakeFocus` registry value, and the bug asks for it to default to `N` on Linux because the problem is so common.
 
-- Wine gives its game windows the ICCCM **globally active** input model — `WM_HINTS.input = False` plus `WM_TAKE_FOCUS`. A window manager must not hand such a window the X input focus; it may only *offer* it, and the client decides. fwm focuses the window, wlroots advertises it in `_NET_ACTIVE_WINDOW` and sends the offer — and a game whose Direct3D device has gone dormant declines it.
-- In exclusive fullscreen the swapchain is lost when the game stops being the foreground application, and a game that will not take the focus back never re-acquires it. What fwm then puts on screen is the game's own frame, which is black.
+Two things help, and they fix different halves.
 
-Borderless avoids the whole exchange: the game stays an ordinary window, keeps drawing, and comes back with the desktop. In Elite Dangerous it is Graphics → Display mode → Borderless, or in
+**`UseTakeFocus="N"`** addresses the input side, without giving up exclusive fullscreen. In the game's Proton prefix:
+
+```
+[HKCU\Software\Wine\X11 Driver]
+"UseTakeFocus"="N"
+```
+
+`protontricks <appid> regedit` is the easy way in. This is the upstream workaround for 57585; whether it also brings the picture back depends on the game, since a title that stopped drawing while it was in the background has to recover on its own.
+
+**Borderless** avoids the exchange entirely: the game stays an ordinary window, keeps drawing, and comes back with the desktop. In Elite Dangerous it is Graphics → Display mode → Borderless, or in
 `.../compatdata/<appid>/pfx/drive_c/users/steamuser/AppData/Local/Frontier Developments/Elite Dangerous/Options/Graphics/DisplaySettings.xml`:
 
 ```xml
