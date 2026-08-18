@@ -16,6 +16,8 @@
 
 A Wayland compositor written in C (wlroots) where windows behave as physical objects with **mass, momentum, inertia, and velocity** — simulated by a real rigid-body engine ([Box2D](https://box2d.org/) v3). Drag a window and throw it — it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
 
+Physics is the first thing you see, not the whole of it. Ten desktops sit on one continuous strip you scroll across, and each of them chooses for itself whether it is a physics desktop, a BSP tiling one, or plain floating. The launcher, the desktop strip, screenshots, the wallpaper picker, the sound panel and the spectrum visualiser are built in, so there is no `rofi`, `grim`, `slurp` or `cava` to install alongside. Multiple monitors, XWayland, layer-shell and session lock work the way you already expect. `fwmctl` reads the state, changes any setting live without touching your config file, and streams events a script can react to — and where a keybind belongs to an external shell rather than to fwm, it can have it.
+
 This is the primary, actively developed version. The legacy X11 version lives on the [`x11`](https://github.com/iluaii/fwm/tree/x11) branch and is no longer supported.
 
 ## 📚 Documentation
@@ -154,6 +156,14 @@ centre to the cursor. Stir and it winds up; let go and it keeps spinning at the
 rate your hand was turning it.
 
 ### World
+
+A window should have more room to fly than one screen. That is where the ten
+desktops come from: not ten boxes to sort windows into, but one strip ten
+screens wide that the camera travels along, with every window holding an
+absolute position in it. The edge of a desktop is a coordinate, not a wall —
+which is why a thrown window crosses one under its own momentum, and why what
+it finds on the other side can be a different gravity.
+
 - **10 virtual desktops** on one continuous strip — the world is 10 screens wide, windows keep absolute positions.
 - **Three modes per desktop** — physics (default), BSP tiling (`Super+T`), and floating (`Super+Alt+Space`), where windows stay exactly where you drop them and overlap freely, like an ordinary desktop environment. Each desktop picks its own.
 - **Smooth camera** — scroll with `Super+H`/`Super+L` (hold to repeat), jump with `Super+1`…`0`.
