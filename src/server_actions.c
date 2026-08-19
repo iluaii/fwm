@@ -86,6 +86,7 @@ static BspNode *tile_neighbor(FwmServer *server, int desktop, BspNode *from, cha
     return best;
 }
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -253,6 +254,12 @@ static int resolve_desktop_ex(FwmServer *server, const char *arg, int *seam) {
         d = here + 1; step = 1;
     } else if (strcmp(arg, "prev") == 0) {
         d = here - 1; step = 1;
+    } else if (strcmp(arg, "back") == 0) {
+        /* Not a step and not a number: the desktop this screen was showing
+         * before the one it shows now. Nowhere to go before the first switch,
+         * and never a wrap — there is no direction in it. */
+        FwmOutput *out = server_active_output(server);
+        d = out ? out->prev_desktop : -1;
     } else {
         char *end;
         long v = strtol(arg, &end, 10);
@@ -265,6 +272,23 @@ static int resolve_desktop_ex(FwmServer *server, const char *arg, int *seam) {
         if (seam) *seam = 1;
     }
     return (d >= 0 && d < FWM_DESKTOPS) ? d : -1;
+}
+
+/* The other half of view:back, for the binds that name a desktop outright:
+ * asking for the one you are already on means the one you came from, so
+ * super+1 super+1 is a round trip. Steps are exempt (they never resolve to
+ * where they started) and so is view:back itself, hence `numeric`. */
+static int back_and_forth(FwmServer *server, int d, bool numeric) {
+    if (!numeric || d < 0 || !server->config.camera.back_and_forth) return d;
+    FwmOutput *out = server_active_output(server);
+    if (!out || out->desktop != d || out->prev_desktop < 0) return d;
+    return out->prev_desktop;
+}
+
+/* True when a view:/move_to_view: argument names a desktop by number rather
+ * than by direction. */
+static bool desktop_arg_is_number(const char *arg) {
+    return *arg == '-' ? isdigit((unsigned char)arg[1]) : isdigit((unsigned char)*arg);
 }
 
 static int resolve_desktop(FwmServer *server, const char *arg) {
@@ -789,6 +813,7 @@ void server_dispatch_action(FwmServer *server, const char *action) {
     } else if (strncmp(action, "view:", 5) == 0) {
         int seam = 0;
         int desktop = resolve_desktop_ex(server, action + 5, &seam);
+        desktop = back_and_forth(server, desktop, desktop_arg_is_number(action + 5));
         if (desktop >= 0) server_goto_desktop(server, desktop, seam);
     } else if (strcmp(action, "toggle_sun") == 0) {
         server->config.sun.enabled = !server->config.sun.enabled;

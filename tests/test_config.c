@@ -554,7 +554,7 @@ static void test_every_dispatchable_action_binds(void) {
         "wallpaper_picker", "screenshot", "screenshot_region",
         "output_off", "outputs_on", "toggle_sun", "sun_mode",
         "toggle_internal_output", "EXIT",
-        "view:3", "move_to:7", "move_to_view:next", "move_camera:-50",
+        "view:3", "view:back", "move_to:7", "move_to_view:next", "move_camera:-50",
         "tile_focus:l", "tile_move:d", "spawn:true", "mode:default",
         "sun_azimuth:+15", "sun_elevation:-5",
         "set:physics.gravity=981", "set:sun.blur+2", "set:sun.blur-2",
@@ -1333,6 +1333,26 @@ static void test_stats(void) {
     drop_config();
 }
 
+static void test_camera_back_and_forth(void) {
+    /* Default on, and both spellings of "off" reach the same field: the key is
+     * what makes super+1 twice a round trip, so a config that turns it off has
+     * to actually turn it off. */
+    CASE("[camera] back_and_forth defaults on and can be turned off");
+    FwmConfig cfg;
+    const char *p = write_config("[camera]\nwrap = true\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.camera.back_and_forth, 1);
+    CHECK_INT(cfg.camera.wrap, 1);
+    config_free(&cfg);
+    drop_config();
+
+    p = write_config("[camera]\nback_and_forth = false\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.camera.back_and_forth, 0);
+    config_free(&cfg);
+    drop_config();
+}
+
 int main(void) {
     test_missing_file();
     test_values_parse();
@@ -1359,5 +1379,6 @@ int main(void) {
     test_outputs();
     test_stats();
     test_startup();
+    test_camera_back_and_forth();
     return t_report("config");
 }

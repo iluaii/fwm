@@ -334,6 +334,7 @@ static void load_camera(toml_table_t *root, CameraConfig *c) {
     c->anim_ms = 350.0;
     c->free_speed = 14.0;
     c->wrap = 0;
+    c->back_and_forth = 1;
 
     toml_table_t *tbl = toml_table_in(root, "camera");
     if (!tbl) return;
@@ -342,6 +343,8 @@ static void load_camera(toml_table_t *root, CameraConfig *c) {
     LOAD_DOUBLE(tbl, "free_speed", c->free_speed);
     toml_datum_t w = toml_bool_in(tbl, "wrap");
     if (w.ok) c->wrap = w.u.b ? 1 : 0;
+    toml_datum_t bf = toml_bool_in(tbl, "back_and_forth");
+    if (bf.ok) c->back_and_forth = bf.u.b ? 1 : 0;
 }
 
 /* ── decor section ───────────────────────────────────────────────────── */

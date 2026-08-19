@@ -95,6 +95,10 @@ typedef struct FwmOutput {
     int manual_x, manual_y;
 
     int desktop;             /* which of the ten columns this monitor shows */
+    /* The column it showed before that, or -1 until it has moved: what
+     * view:back and [camera] back_and_forth return to. Per monitor, because on
+     * two screens "where I came from" was never the same place. */
+    int prev_desktop;
     int camera_x;            /* world x of this monitor's left edge */
     int target_camera_x;
     /* Desktop-switch slide: timed ease-in-out from cam_anim_from to

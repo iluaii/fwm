@@ -47,6 +47,7 @@ static const ConfigOption config_option_table[] = {
     { "camera.anim_ms",                 CFG_OPT_DOUBLE, offsetof(FwmConfig, camera.anim_ms),                  0.0, 10000.0,    "desktop-switch slide, ms" },
     { "camera.free_speed",              CFG_OPT_DOUBLE, offsetof(FwmConfig, camera.free_speed),               0.0,  1000.0,    "held move_camera chase rate, 1/s" },
     { "camera.wrap",                    CFG_OPT_INT,    offsetof(FwmConfig, camera.wrap),                     0.0,     1.0,    "the strip is a ring: stepping past the last desktop arrives on the first" },
+    { "camera.back_and_forth",          CFG_OPT_INT,    offsetof(FwmConfig, camera.back_and_forth),           0.0,     1.0,    "the bind for the desktop you are on returns to the one you came from" },
 
     { "decor.border_width",             CFG_OPT_INT,    offsetof(FwmConfig, decor.border_width),              0.0,    64.0,    "focus border, px; 0 disables" },
     { "decor.col_active",               CFG_OPT_COLOR,  offsetof(FwmConfig, decor.col_active),                0.0,     0.0,    "focused border colour" },

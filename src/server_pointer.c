@@ -650,6 +650,11 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         FwmOutput *to = tray_under_pointer(server, &tx, &ty);
         int d = to ? tray_desktop_hit(&to->tray_strip, tx, ty) : -1;
         if (d >= 0) {
+            /* Same rule the binds follow: clicking the indicator you are
+             * already on returns to the desktop you came from. */
+            if (server->config.camera.back_and_forth && to->desktop == d &&
+                to->prev_desktop >= 0)
+                d = to->prev_desktop;
             server_goto_desktop(server, d, 0);
             server->group_click = 1; /* swallow the matching release */
             return;

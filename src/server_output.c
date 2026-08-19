@@ -929,6 +929,9 @@ void server_output_show_desktop(FwmServer *server, FwmOutput *out, int d, int se
         other->swap_dy = other->swap_dy0;
 
         int back = out->desktop;
+        /* The trade moves both screens, so both gain a desktop to come back
+         * to: each remembers the one it is handing over. */
+        other->prev_desktop = other->desktop;
         other->desktop = back;
         /* Only the target moves: the monitor being traded with slides to its
          * new desktop exactly like the one that asked. Writing camera_x here
@@ -937,6 +940,7 @@ void server_output_show_desktop(FwmServer *server, FwmOutput *out, int d, int se
         other->cam_free = 0;
     }
 
+    out->prev_desktop = out->desktop;
     out->desktop = d;
     out->target_camera_x = d * server->screen_width;
     if (seam) {
@@ -1247,6 +1251,7 @@ static void output_leave_layout(FwmServer *server, FwmOutput *out) {
     wlr_output_layout_remove(server->output_layout, out->wlr_output);
     out->box = (struct wlr_box){0};
     out->desktop = -1;
+    out->prev_desktop = -1;
 }
 
 static void output_join_layout(FwmServer *server, FwmOutput *out) {
@@ -1623,6 +1628,7 @@ static void handle_new_output(struct wl_listener *listener, void *data) {
     /* -1 is "no desktop yet": the layout update below hands it the one
      * [[output]] asks for, or the lowest no other monitor is showing. */
     output->desktop = -1;
+    output->prev_desktop = -1;
 
     const ConfigOutput *cfg = config_find_output(&server->config, wlr_output->name);
     wlr_log(WLR_INFO, "output %s: %dx%d, scale %.2f%s", wlr_output->name,

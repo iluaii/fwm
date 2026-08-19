@@ -977,6 +977,7 @@ fit  = "pan"
 | `fake_fullscreen` / `real_fullscreen` | fullscreen where a single tile would sit, gaps and all / whole output |
 | `move_camera:<px>` | scroll the camera (repeats while held) |
 | `view:<0-9>` | jump to desktop; `view:next` / `view:prev` for the one beside it |
+| `view:back` | the desktop this screen showed before — the bind for the one you are on does this too, unless `[camera] back_and_forth` is off |
 | `move_to:<0-9>` | send the focused window to a desktop, camera stays (`next`/`prev` too) |
 | `move_to_view:<0-9>` | send it there and follow, keeping it focused (`next`/`prev` too) |
 | `pan_desktop` | **gestures only:** pan across the strip with your fingers, settling on a desktop when they lift |

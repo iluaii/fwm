@@ -302,10 +302,26 @@ pickup     = 0.28
 # The join is jumped rather than slid through: there is no picture of it to
 # slide through, since the desktops are one straight strip underneath.
 # Toggle at runtime with the `toggle_wrap` action, or `x` inside expo.
+#
+# back_and_forth makes the bind for the desktop you are ALREADY on send you to
+# the one you came from: super+6, super+1, super+1 is a round trip back to 6,
+# and so is clicking the tray's indicator twice. It is the fastest way between
+# two desktops you are working across, and it costs nothing when you are not —
+# a desktop you are not on is still just a destination.
+#
+# Only bare destinations do this: view:3, a click on the indicator. view:next,
+# view:prev, the wheel and a gesture are steps, and never resolve to where they
+# started. Each monitor remembers its own way back, since on two screens you
+# were never on the same desktop.
+#
+# view:back goes there outright, whatever desktop you are on now — bind it if
+# you would rather have a key of its own, or if you set this to false:
+#"super+grave"        = "view:back"
 [camera]
-anim_ms    = 350.0
-free_speed = 14.0
-wrap       = false
+anim_ms        = 350.0
+free_speed     = 14.0
+wrap           = false
+back_and_forth = true
 
 # ── monitors ────────────────────────────────────────────────────────────
 # Each monitor shows one of the ten desktops and switches on its own; a

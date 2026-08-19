@@ -183,6 +183,16 @@ typedef struct {
      * desktops are one continuous strip in world coordinates, so there is no
      * such thing as a picture of the join). */
     int wrap;
+    /* Pressing the bind for the desktop you are already on sends you to the one
+     * you came from, so super+1 super+1 is a round trip rather than a no-op.
+     *
+     * Only a bare destination does this — view:3, a click on the tray's
+     * indicator. next/prev and the wheel are steps and never resolve to where
+     * they started, and view:back names the same desktop outright, for when
+     * this is off or the round trip wants a key of its own. Per monitor: each
+     * screen remembers the desktop IT was showing, since on two screens they
+     * were never on the same one. */
+    int back_and_forth;
 } CameraConfig;
 
 /* ── decorations ─────────────────────────────────────────────────────── */
