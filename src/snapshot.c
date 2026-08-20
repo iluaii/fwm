@@ -31,12 +31,32 @@ struct snapshot_ctx {
     struct wlr_renderer *renderer;
     int origin_x, origin_y;      /* subtree point that lands on the buffer's top-left */
     double scale;
+    int dst_w, dst_h;            /* the buffer being drawn into */
 };
 
 static void snapshot_add_buffer(struct wlr_scene_buffer *scene_buffer,
                                 int sx, int sy, void *data) {
     struct snapshot_ctx *ctx = data;
     if (!scene_buffer->buffer) return;
+
+    /* Is any of it even on the buffer?
+     *
+     * for_each_buffer walks the WHOLE scene — every window on every desktop of
+     * the world strip, on every monitor — and the lens is a few hundred pixels
+     * square standing on one of them. Without this the pass takes a draw call
+     * per window in the session to put a handful of them on screen, and the
+     * ones it skips are skipped before their texture is imported rather than
+     * after. Measured from the buffer rather than the texture so that no
+     * import has to happen first; they are the same size. */
+    {
+        int bw = scene_buffer->dst_width  ? scene_buffer->dst_width  : scene_buffer->buffer->width;
+        int bh = scene_buffer->dst_height ? scene_buffer->dst_height : scene_buffer->buffer->height;
+        double k = ctx->scale;
+        double x0 = (sx - ctx->origin_x) * k, y0 = (sy - ctx->origin_y) * k;
+        double x1 = (sx + bw - ctx->origin_x) * k, y1 = (sy + bh - ctx->origin_y) * k;
+        if (ctx->dst_w > 0 && (x1 <= -1.0 || x0 >= ctx->dst_w + 1.0)) return;
+        if (ctx->dst_h > 0 && (y1 <= -1.0 || y0 >= ctx->dst_h + 1.0)) return;
+    }
 
     /* A buffer that belongs to a client surface already HAS a texture: wlroots
      * imported it when the client committed, and the scene draws the window
@@ -107,6 +127,7 @@ bool snapshot_subtree(FwmServer *server, struct wlr_buffer *dst,
     struct snapshot_ctx ctx = {
         .pass = pass, .renderer = server->wlr_renderer,
         .origin_x = origin_x, .origin_y = origin_y, .scale = scale,
+        .dst_w = dst->width, .dst_h = dst->height,
     };
     wlr_scene_node_for_each_buffer(node, snapshot_add_buffer, &ctx);
 
@@ -138,9 +159,9 @@ bool snapshot_lens(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
     FwmOutput *sout = out ? out : server_active_output(server);
     FwmWallpaper *wp = sout ? sout->wallpaper : NULL;
     for (int i = 0; i < wallpaper_layer_count(wp); i++) {
-        struct wlr_buffer *src = wallpaper_layer_buffer(wp, i);
-        if (!src) continue;
-        struct wlr_texture *tex = wlr_texture_from_buffer(server->wlr_renderer, src);
+        bool borrowed = false;
+        struct wlr_texture *tex =
+            wallpaper_layer_texture(wp, i, server->wlr_renderer, &borrowed);
         if (!tex) continue;
         int crop_w = sout && sout->box.width  > 0 ? sout->box.width  : server->screen_width;
         int crop_h = sout && sout->box.height > 0 ? sout->box.height : server->screen_height;
@@ -155,7 +176,7 @@ bool snapshot_lens(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
             .filter_mode = WLR_SCALE_FILTER_BILINEAR,
             .blend_mode = WLR_RENDER_BLEND_MODE_PREMULTIPLIED,
         });
-        wlr_texture_destroy(tex);
+        if (!borrowed) wlr_texture_destroy(tex);
     }
 
     /* Then everything the scene draws: windows, decorations, the grass, the
@@ -163,6 +184,7 @@ bool snapshot_lens(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
     struct snapshot_ctx ctx = {
         .pass = pass, .renderer = server->wlr_renderer,
         .origin_x = lx, .origin_y = ly, .scale = 1.0,
+        .dst_w = dst->width, .dst_h = dst->height,
     };
     wlr_scene_node_for_each_buffer(&server->scene->tree.node, snapshot_add_buffer, &ctx);
 

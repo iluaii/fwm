@@ -122,8 +122,6 @@ struct FwmStarDraw {
      * star_draw_update. */
     double buf_radius;
     int dest_side;
-    double bg_at_s;    /* when the desktop behind it was last photographed */
-    int bg_lx, bg_ly;  /* and from where */
     double world_half;  /* half-width the buffer stands for, in world px */
     double last_now_s;  /* the clock the caller last handed us */
 
@@ -869,28 +867,26 @@ static struct wlr_texture *star_draw_photograph(FwmStarDraw *d, const FwmStar *s
         if (!d->bg_buf) return NULL;
     }
 
-    /* The photograph is the expensive half — a whole render pass over the
-     * scene — while the shader itself is nearly free. Taking one per frame
-     * held the frame rate down and with it the disc, which is the animation
-     * everybody was looking at. So a hole sitting still samples the desktop at
-     * a rate of its own, and the picture is redrawn at the frame rate anyway.
+    /* One photograph per frame, and no rationing.
      *
-     * But only while it sits still. A photograph taken somewhere else is a
-     * picture of the wrong place, and bending THAT draws a ring of misplaced
-     * desktop around the hole — which is exactly what dragging one looked
-     * like. Moved at all, it re-photographs immediately. */
+     * It used to be rationed to 15Hz whenever the hole sat still, because the
+     * photograph was the expensive half — a render pass that imported the
+     * whole wallpaper afresh and then walked EVERY buffer in the scene, most
+     * of them on other desktops entirely. With both of those gone (see
+     * wallpaper_layer_texture and the cull in snapshot_add_buffer) it is a
+     * pass over the handful of buffers that actually stand under the lens, and
+     * the rationing costs more than it saves.
+     *
+     * What it cost is the whole reason this changed: the wallpaper behind a
+     * hole is a still picture, so nobody could see it being served four frames
+     * out of date — but a WINDOW behind one moves, and its bent image lagged a
+     * sixth of a second behind the unbent part of the same window standing
+     * beside it. Dragging a window past a hole showed it plainly. The lens has
+     * to see the desktop the frame it is drawn in. */
     /* Layout coordinates of the buffer's top-left: the same trip from world to
-     * screen every window makes. Needed before the test below, since where it
-     * would photograph from is half of what decides whether to bother. */
+     * screen every window makes. */
     int lx = (int)lround(star->wx - camera_x + origin_x - d->side / 2.0);
     int ly = (int)lround(star->wy + origin_y - d->side / 2.0);
-
-    double now = d->last_now_s;
-    bool moved = (lx != d->bg_lx) || (ly != d->bg_ly);
-    if (d->bg_tex && !moved && now - d->bg_at_s < 1.0 / 15.0) return d->bg_tex;
-    d->bg_at_s = now;
-    d->bg_lx = lx;
-    d->bg_ly = ly;
 
     /* Wallpaper included: photographed through the scene graph alone it came
      * back as windows over nothing, so the lens bent a film of windows and
@@ -901,10 +897,13 @@ static struct wlr_texture *star_draw_photograph(FwmStarDraw *d, const FwmStar *s
         return NULL;
     }
 
-    /* One texture per photograph: the buffer's contents changed, and a texture
-     * is a view of what the buffer held when it was made. */
-    if (d->bg_tex) wlr_texture_destroy(d->bg_tex);
-    d->bg_tex = wlr_texture_from_buffer(d->server->wlr_renderer, d->bg_buf);
+    /* One texture for all of them. The buffer is the renderer's own, made once
+     * and drawn into again and again, and a texture of it is a VIEW of that
+     * memory rather than a copy taken at the moment it was made — which is
+     * what render-to-texture is. Importing it afresh each photograph built and
+     * threw away an EGL image every frame for a picture that had not moved. */
+    if (!d->bg_tex)
+        d->bg_tex = wlr_texture_from_buffer(d->server->wlr_renderer, d->bg_buf);
     if (d->dbg && !d->bg_tex)
         wlr_log(WLR_INFO, "star: photographed the desktop but could not use it");
     return d->bg_tex;

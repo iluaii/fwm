@@ -18,6 +18,9 @@
 #include <stdbool.h>
 #include <wlr/util/box.h>
 #include <wlr/types/wlr_scene.h>
+
+struct wlr_renderer;
+struct wlr_texture;
 #include "config.h"
 
 typedef struct FwmWallpaper FwmWallpaper;
@@ -71,6 +74,23 @@ bool wallpaper_fade_tick(FwmWallpaper *wp, double dt);
  * standing on that desktop looks like. */
 int wallpaper_layer_count(FwmWallpaper *wp);
 struct wlr_buffer *wallpaper_layer_buffer(FwmWallpaper *wp, int i);
+
+/* That same copy as a texture, ready to draw, without paying for it twice.
+ *
+ * The copy lives in ordinary memory, so handing it to wlr_texture_from_buffer
+ * is an UPLOAD of the whole picture — a few megabytes for a pan layer — and
+ * throwing the texture away afterwards means paying for it again next time.
+ * Fine for the strip, which opens once; ruinous for the black hole's lens,
+ * which photographs the desktop behind it on every frame it moves.
+ *
+ * So a layer that never redraws keeps its texture: `*borrowed` comes back true
+ * and the caller must NOT destroy it. A video layer has no such luck — its
+ * card is the live buffer, recycled from a small pool, so the same pointer
+ * coming back is no promise that the pixels did — and it is imported fresh
+ * with `*borrowed` false, for the caller to destroy as before. */
+struct wlr_texture *wallpaper_layer_texture(FwmWallpaper *wp, int i,
+                                            struct wlr_renderer *renderer,
+                                            bool *borrowed);
 /* The part of that buffer a screen at `camera_x` is looking at, in the
  * buffer's own pixels — the caller never has to know it is a downscaled copy. */
 void wallpaper_layer_crop(FwmWallpaper *wp, int i, int camera_x,

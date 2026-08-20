@@ -24,6 +24,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <wlr/render/wlr_renderer.h>
+#include <wlr/render/wlr_texture.h>
+#include <wlr/types/wlr_buffer.h>
 #include <wlr/util/log.h>
 
 /* `fit = "pan"` with no explicit zoom pans ONLY images wide enough to stick
@@ -62,6 +65,15 @@ struct WallpaperRT {
      * points `card` straight at it with a scale of 1. */
     struct wlr_scene_buffer *card;
     double card_k;
+
+    /* The card as a texture, kept between the callers that ask for one. See
+     * wallpaper_layer_texture: the card is CPU-side, so every import is an
+     * upload of the whole picture, and the lens asks for it every frame. The
+     * buffer is locked for as long as we hold a texture of it, so the pointer
+     * we compare against cannot become a different buffer at the same
+     * address. */
+    struct wlr_texture *card_tex;
+    struct wlr_buffer  *card_tex_buf;
 };
 
 /* Resolution of that copy, as a fraction of the real layer. The strip never
@@ -393,6 +405,39 @@ struct wlr_buffer *wallpaper_layer_buffer(FwmWallpaper *wp, int i) {
     return cairo_overlay_buffer(wp->layers[i].card);
 }
 
+struct wlr_texture *wallpaper_layer_texture(FwmWallpaper *wp, int i,
+                                            struct wlr_renderer *renderer,
+                                            bool *borrowed) {
+    if (borrowed) *borrowed = false;
+    if (!wp || i < 0 || i >= wp->count || !renderer) return NULL;
+    struct wlr_buffer *src = cairo_overlay_buffer(wp->layers[i].card);
+    if (!src) return NULL;
+
+    /* A video layer's card changes under us; nothing to cache. */
+    if (wp->layers[i].video) return wlr_texture_from_buffer(renderer, src);
+
+    struct WallpaperRT *rt = &wp->layers[i];
+    if (rt->card_tex && rt->card_tex_buf == src) {
+        if (borrowed) *borrowed = true;
+        return rt->card_tex;
+    }
+    if (rt->card_tex) {
+        wlr_texture_destroy(rt->card_tex);
+        rt->card_tex = NULL;
+    }
+    if (rt->card_tex_buf) {
+        wlr_buffer_unlock(rt->card_tex_buf);
+        rt->card_tex_buf = NULL;
+    }
+    struct wlr_texture *tex = wlr_texture_from_buffer(renderer, src);
+    if (!tex) return NULL;
+    rt->card_tex = tex;
+    rt->card_tex_buf = src;
+    wlr_buffer_lock(src);
+    if (borrowed) *borrowed = true;
+    return tex;
+}
+
 void wallpaper_layer_crop(FwmWallpaper *wp, int i, int camera_x,
                           int screen_w, int screen_h, struct wlr_fbox *out) {
     double k = 1.0;
@@ -483,6 +528,8 @@ void wallpaper_destroy(FwmWallpaper *wp) {
         /* A video layer's card IS its buffer, and video_destroy took it. */
         if (wp->layers[i].card && !wp->layers[i].video)
             cairo_overlay_destroy(wp->layers[i].card);
+        if (wp->layers[i].card_tex) wlr_texture_destroy(wp->layers[i].card_tex);
+        if (wp->layers[i].card_tex_buf) wlr_buffer_unlock(wp->layers[i].card_tex_buf);
     }
     free(wp->layers);
     free(wp);
