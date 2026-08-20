@@ -112,6 +112,28 @@ bool star_collapse_now(FwmStar *star);
  * settles at whatever the remnant is. */
 double star_radius(const FwmStar *star, const StarConfig *cfg);
 
+/* How much room a black hole's picture needs, as a multiple of its own
+ * radius.
+ *
+ * A hole is not the black disc: the shadow alone is 2.6 radii across because
+ * light grazing it is swallowed too, the disc runs out to about 5.4, and the
+ * lensed desktop outside that has to be faded off before the edge of the
+ * canvas or the seam between the bent copy and the real thing behind it shows.
+ * Nine radii covers all three. Draw it into less and the disc is cut off in a
+ * straight line where the canvas ends, which is what a hole fed past the
+ * buffer it inherited from the star used to look like.
+ *
+ * The shader works the same figure out for itself from the canvas it is given
+ * (u_res over u_radius), so the two agree without being told about each
+ * other — but the caller has to size the node to match, or the picture is
+ * drawn for one framing and shown at another. */
+#define STAR_HOLE_BOX 9.0
+
+/* The widest a hole can ever be drawn for this config, in px: its radius at
+ * the mass ceiling, times the room above. What a canvas has to hold if no
+ * amount of feeding is to overflow it. */
+double star_hole_half(const StarConfig *cfg);
+
 /* How hard it shines, 1 being an ordinary day on the main sequence. A star
  * being squeezed gets BRIGHTER: the surface loses area as the square of the
  * radius but gains temperature faster, which is also why it goes blue. Zero

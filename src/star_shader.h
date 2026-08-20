@@ -688,12 +688,14 @@ static const char star_frag_src[] =
     "        float rs = max(u_radius, 1.0);\n"
     "        vec2 uv = px / rs;\n"
     "        float b = length(uv);\n"
-    /*     How many radii of canvas this hole was given. It varies with the
-           mass — a heavy hole is drawn bigger inside a buffer sized for the
-           star it used to be — so the disc is fitted to the room rather than
-           to a constant, and never runs off the edge of its own picture. */
+    /*     How many radii of canvas this hole was given — star_draw.c hands it
+           STAR_HOLE_BOX of them and sizes the node to match, so this is nine
+           unless the buffer hit its ceiling. The disc has to END before the
+           fade at the canvas edge begins, or its outer rim is cut off in a
+           straight line across the picture, which is what a hole drawn into a
+           canvas meant for the star it used to be always looked like. */
     "        float dmax = min(u_res.x, u_res.y) * 0.5 / rs;\n"
-    "        float r_out = clamp(dmax * 0.80, R_ISCO * 1.5, 16.0);\n"
+    "        float r_out = clamp(dmax * 0.60, R_ISCO * 1.25, 16.0);\n"
     "        float incl = clamp(u_incl, 0.012, 0.995);\n"
     "\n"
     "        float tt = u_time + u_angle * 0.2;\n"

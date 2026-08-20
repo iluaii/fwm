@@ -58,9 +58,13 @@
  * Its size on screen and the RESOLUTION it is painted at are different things,
  * and tying them together is how a big star came to cost a 6000x6000 buffer —
  * thirty-six megapixels a frame, redrawn continuously, which is a GPU pinned
- * at 100% for one decoration. Past this the picture is stretched instead:
- * a star is all soft gradients and turbulence, and stretching those is
- * invisible where stretching text or a window would not be. */
+ * at 100% for one decoration.
+ *
+ * Past this the picture stops growing: a star configured wider than this is
+ * drawn at this size and no larger, which is a size nobody has ever asked for
+ * on purpose. It is not stretched to fit — a black hole's photon ring is one
+ * pixel wide, and magnifying that turns the sharpest thing in the picture into
+ * the softest. */
 #define STAR_MAX_SIDE 1024
 
 /* The surface, as a fixed set of convection cells. Real granulation is a
@@ -123,6 +127,7 @@ struct FwmStarDraw {
     double buf_radius;
     int dest_side;
     double world_half;  /* half-width the buffer stands for, in world px */
+    double shown_half;  /* and what THIS frame's picture stands for: see below */
     double last_now_s;  /* the clock the caller last handed us */
 
     /* The GPU path, when the renderer allows it. Two buffers, used in turn:
@@ -688,7 +693,14 @@ FwmStarDraw *star_draw_create(struct FwmServer *server, struct FwmOutput *out,
     /* What the buffer REPRESENTS, in world units — the caller needs this to
      * size the quad it draws, since the buffer's own resolution may be capped
      * well below it. */
+    /* Big enough for both things this buffer ever holds: the burning star
+     * inside its corona, and the hole it may end as after being fed to its
+     * ceiling. The second is usually the smaller of the two and costs nothing;
+     * where it is not — a light star fed a lot of windows — the difference is
+     * the whole of why a fed hole used to have its disc cut off. */
     d->world_half = cfg->radius * STAR_GLOW;
+    double hole_half = star_hole_half(cfg);
+    if (hole_half > d->world_half) d->world_half = hole_half;
     d->glow_r = d->world_half;
     d->side   = (int)lround(d->world_half * 2.0);
     if (d->side < 8) d->side = 8;
@@ -754,6 +766,7 @@ FwmStarDraw *star_draw_create(struct FwmServer *server, struct FwmOutput *out,
     d->disc_tilt = -1.0;   /* no opinion until somebody has one */
     d->buf_radius = cfg->radius;
     d->dest_side = d->side;
+    d->shown_half = d->world_half;
     /* FWM_DEBUG_STAR=1 reports what this actually costs, once a second. */
     const char *dbg = getenv("FWM_DEBUG_STAR");
     d->dbg = dbg && *dbg && *dbg != '0';
@@ -777,6 +790,45 @@ void star_draw_destroy(FwmStarDraw *d) {
     free(d);
 }
 
+/* Re-cut the canvas to `side` pixels.
+ *
+ * The buffer a star is given is sized once and never touched again — it is the
+ * same picture at every size, so stretching it costs nothing anybody can see.
+ * A hole is the exception the rule was not written for: it GROWS, by swallowing
+ * windows, and its picture is a hairline ring that goes to mush the moment it
+ * is stretched. So when a hole outgrows the pixels it inherited, it is given
+ * more.
+ *
+ * Both frames and the photograph go together, since all three have to agree on
+ * what one pixel is. The scene keeps its own reference to whatever buffer it
+ * was last handed, so dropping ours here cannot pull the picture out from
+ * under it; the next frame hands over one of the new ones. Failure leaves
+ * everything as it was, which is a hole drawn a little soft rather than no
+ * hole at all. */
+static void star_recanvas(FwmStarDraw *d, int side) {
+    if (!d->use_gl || side < 8 || side == d->side) return;
+    struct wlr_buffer *next[2] = { NULL, NULL };
+    for (int i = 0; i < 2; i++) {
+        next[i] = snapshot_alloc(d->server, side, side);
+        if (!next[i]) {
+            for (int j = 0; j < i; j++) wlr_buffer_drop(next[j]);
+            return;
+        }
+    }
+    for (int i = 0; i < 2; i++) {
+        if (d->gpu[i]) wlr_buffer_drop(d->gpu[i]);
+        d->gpu[i] = next[i];
+    }
+    d->gpu_next = 0;
+    /* The photograph is taken at the canvas's own size; it is rebuilt on
+     * demand, so dropping it is the whole of resizing it. */
+    if (d->bg_tex) { wlr_texture_destroy(d->bg_tex); d->bg_tex = NULL; }
+    if (d->bg_buf) { wlr_buffer_drop(d->bg_buf); d->bg_buf = NULL; }
+    d->side   = side;
+    d->glow_r = side / 2.0;
+    d->drawn  = false;
+}
+
 void star_draw_set_visible(FwmStarDraw *d, bool visible) {
     if (d && d->buf) wlr_scene_node_set_enabled(&d->buf->node, visible);
 }
@@ -790,7 +842,11 @@ int star_draw_side(const FwmStarDraw *d) {
 }
 
 double star_draw_extent(const FwmStarDraw *d) {
-    return d ? d->world_half : 0.0;
+    if (!d) return 0.0;
+    /* What the last frame drawn actually stands for, which is the buffer's own
+     * box for everything except a hole. The orrery sizes its billboard from
+     * this, so a hole in the middle of the ring is the size its mass says. */
+    return d->shown_half > 0.0 ? d->shown_half : d->world_half;
 }
 
 void star_draw_set_lensing(FwmStarDraw *d, bool on) {
@@ -960,6 +1016,34 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
     if (d->world_half > 0.0)
         paint.radius = paint_radius * (d->glow_r / d->world_half);
 
+    /* How much world the picture stands for. A star is its glow box, which is
+     * what the buffer was sized for; a hole is nine of its own radii (see
+     * STAR_HOLE_BOX) and nothing more, so it is drawn filling the whole canvas
+     * whatever it weighs and the node is scaled to whatever that is worth on
+     * screen. Every pixel of the buffer goes on the hole that way, and the
+     * framing the shader computes is the framing it is shown at — the two
+     * things that a fed hole, drawn small in a corner of a star's canvas and
+     * stretched to a star's node, had neither of. */
+    double shown_half = d->world_half;
+    if (p.phase == STAR_HOLE && p.radius > 0.0) {
+        /* Enough pixels for the size it is actually shown at, up to the hole's
+         * own ceiling — and only in real steps, so a hole being fed does not
+         * reallocate three buffers a frame while the picture creeps outward. */
+        int want = (int)lround(p.radius * STAR_HOLE_BOX * 2.0);
+        if (want > STAR_MAX_SIDE) want = STAR_MAX_SIDE;
+        if (d->use_gl && (want > d->side * 5 / 4 || want * 5 / 4 < d->side))
+            star_recanvas(d, want);
+        paint.radius = d->glow_r / STAR_HOLE_BOX;
+        shown_half   = p.radius * STAR_HOLE_BOX;
+        /* Never magnified past the pixels it was drawn with: a hairline photon
+         * ring stretched over four screen pixels is a smear, and a hole that
+         * stops growing is the better of the two failures. This is the same
+         * ceiling a star meets — see STAR_MAX_SIDE — reached by the same
+         * route. */
+        if (shown_half > d->side / 2.0) shown_half = d->side / 2.0;
+    }
+    d->shown_half = shown_half;
+
     if (worth_repainting(d, &paint, now_s)) {
         double t0 = d->dbg ? now_ms() : 0.0;
         if (d->use_gl) {
@@ -1041,6 +1125,12 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
     if (k > 1.0) k = 1.0;
     if (k < 0.02) k = 0.02;
     int side = (int)lround(d->side * k);
+    /* A hole stands for its own box rather than the buffer's, so its node is
+     * that box in world pixels — bigger than the buffer for a heavy one, which
+     * is a picture stretched, and smaller for a light one, which is a picture
+     * drawn at more resolution than it is shown at. */
+    if (p.phase == STAR_HOLE && d->shown_half > 0.0)
+        side = (int)lround(d->shown_half * 2.0);
     if (side < 2) side = 2;
     if (!d->headless && side != d->dest_side) {
         wlr_scene_buffer_set_dest_size(d->buf, side, side);
@@ -1057,9 +1147,12 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
                                     (int)lround(star->wy + origin_y - side / 2.0));
 
     if (d->dbg && now_s - d->dbg_at_s >= 1.0) {
-        wlr_log(WLR_INFO, "star: %s r=%.0f  %d repaints/s, %.2f ms avg, %.2f ms worst, node %dpx",
+        wlr_log(WLR_INFO,
+                "star: %s r=%.0f  %d repaints/s, %.2f ms avg, %.2f ms worst, "
+                "canvas %dpx, node %dpx",
                 star_phase_name(star->phase), p.radius, d->dbg_repaints,
-                d->dbg_repaints ? d->dbg_ms / d->dbg_repaints : 0.0, d->dbg_worst, side);
+                d->dbg_repaints ? d->dbg_ms / d->dbg_repaints : 0.0, d->dbg_worst,
+                d->side, side);
         d->dbg_at_s = now_s;
         d->dbg_repaints = 0;
         d->dbg_ms = 0.0;

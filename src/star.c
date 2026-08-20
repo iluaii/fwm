@@ -283,6 +283,16 @@ double star_radius(const FwmStar *star, const StarConfig *cfg) {
     return end + (start - end) * pow(1.0 - t, 2.0 / 3.0);
 }
 
+double star_hole_half(const StarConfig *cfg) {
+    if (!cfg) return 0.0;
+    /* The ceiling, or a generous stand-in when there is none: an uncapped hole
+     * can be fed for ever, and a buffer cannot follow it there. Four times the
+     * TOV limit is a hole that has swallowed a screenful of windows. */
+    double ceiling = cfg->mass_max > 0.0 ? cfg->mass_max : STAR_TOV * 4.0;
+    if (ceiling < cfg->mass) ceiling = cfg->mass;
+    return remnant_radius_px(STAR_HOLE, ceiling, cfg) * STAR_HOLE_BOX;
+}
+
 double star_luminosity(const FwmStar *star, const StarConfig *cfg) {
     if (!star || !cfg) return 0.0;
     switch (star->phase) {
