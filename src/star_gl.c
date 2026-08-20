@@ -202,7 +202,12 @@ bool star_gl_render(struct wlr_renderer *renderer, struct wlr_buffer *dst,
      * Treating zero as unset — which is what this did — made the one position
      * the tilt control exists to reach the one position it could never reach,
      * silently substituting a wide-open disc for it. */
-    glUniform1f(prog.u_incl, (GLfloat)(p->disc_tilt >= 0.0 ? p->disc_tilt : 0.17));
+    /* 0.30 rather than dead edge-on. A disc with no thickness seen exactly in
+     * its own plane is a mathematical line, and that is what it drew: a
+     * hairline across the desktop, sharper than anything else in the picture
+     * and unmistakably a line rather than an object. Tipped a little, the same
+     * disc has a face as well as an edge, and the edge becomes a band. */
+    glUniform1f(prog.u_incl, (GLfloat)(p->disc_tilt >= 0.0 ? p->disc_tilt : 0.30));
     glUniform1f(prog.u_roll, (GLfloat)p->disc_roll);
     glUniform1f(prog.u_blast, (GLfloat)p->blast);
     glUniform1f(prog.u_birth, (GLfloat)(p->birth > 0.0 ? p->birth : 1.0));

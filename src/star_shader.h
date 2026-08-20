@@ -309,7 +309,7 @@ static const char star_frag_src[] =
     /*  Where the gas IS. Settled, that is everything from the last stable
         orbit out to the rim; while the disc is still forming it is a ring on
         its way down, and r_in is well outside the orbit it will end on. */
-    "    if (rc < min(r_in, 1.30) || rc > r_gas) return vec4(0.0);\n"
+    "    if (rc < 1.02 || rc > r_gas) return vec4(0.0);\n"
 
     "    float ang = atan(dot(P, B), dot(P, A));\n"
     "\n"
@@ -386,7 +386,10 @@ static const char star_frag_src[] =
         Which matters for one reason — a hard edge there is a circle, and the
         lens takes a circle and draws it back as a hairline ring across the
         black. */
-    "    float plunge = smoothstep(1.30, r_in * 1.02, rc);\n"
+    /*  The plunging gas fades towards the horizon rather than stopping at a
+        radius: any radius it stopped at would be a circle, and the lens draws
+        a circle back as a hairline. */
+    "    float plunge = smoothstep(1.02, r_in * 1.02, rc);\n"
     "    f = max(f, 0.22 * plunge * (1.0 - smoothstep(r_in * 0.6, r_in, rc)));\n"
     "    float temp = pow(R_ISCO / rc, 0.75) * pow(f, 0.25);\n"
     /*  And how much gas there is at all: thinning out towards the rim, where a
@@ -407,7 +410,7 @@ static const char star_frag_src[] =
     "                 + 0.10 * far_ok * pow(1.0 - smoothstep(r_out * 0.9, r_gas, rc), 1.6))\n"
     /*  and the inner edge, which is a soft one while the ring is still falling
         — gas on its way in has no sharp boundary, the disc it becomes does. */
-    "                 * smoothstep(min(r_in, 1.30), r_in * 1.06 + 0.10, rc);\n"
+    "                 * smoothstep(1.02, r_in * 1.06 + 0.10, rc);\n"
     "\n"
     /*  Doppler. The gas runs on a circular orbit, so its speed is fixed by the
         radius alone: v = sqrt(M/(r - 2M)), which with the horizon at 1 is
@@ -595,6 +598,19 @@ static const char star_frag_src[] =
     "        if (o.hit > 0.5 && dot(pos, vel) > 0.0 && rn > r_gas + 1.0) break;\n"
     "        if (rn > R_EYE * 1.6) break;\n"
     "    }\n"
+    /*  Out of steps and still down the well.
+    
+        A ray that grazes the photon sphere winds round it, and the closer it
+        passes the longer it takes to decide — some of them are still going
+        when the loop's last step runs out. Left as they were, they count as
+        neither caught nor escaped: the pixel takes whatever backdrop the ray
+        happened to have crossed on the way IN, so a bright desktop showed up
+        as a dotted circle inside the black, at exactly the impact parameter
+        where the winding starts to outlast the budget. On a dark wallpaper it
+        was invisible; on a light one it is a ring drawn inside a black hole.
+    
+        Anything still that deep after four hundred steps is not coming out. */
+    "    if (o.caught < 0.5 && length(pos) < 6.0) { o.caught = 1.0; o.hit = 0.0; }\n"
     "    return o;\n"
     "}\n"
     "\n"
@@ -912,7 +928,7 @@ static const char star_frag_src[] =
            expects the picture to end anyway. */
     "        float wide = 0.0;\n"
     "#ifdef GL_OES_standard_derivatives\n"
-    "        wide = smoothstep(0.35, 1.60, length(abs(dFdx(src)) + abs(dFdy(src))));\n"
+    "        wide = smoothstep(0.12, 0.75, length(abs(dFdx(src)) + abs(dFdy(src))));\n"
     "#endif\n"
     /*     How much work the lens did on this pixel: how far the light it shows
            came from, compared with where it appears to be. Near the shadow the
