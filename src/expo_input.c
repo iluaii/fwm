@@ -144,6 +144,35 @@ bool expo_handle_key(FwmServer *server, xkb_keysym_t sym) {
     case XKB_KEY_Z:
         expo_zoom_step(server);
         return true;
+    case XKB_KEY_minus:
+    case XKB_KEY_equal:
+    case XKB_KEY_plus:
+        /* The size of the thing in the middle. What looks right depends on the
+         * screen and on how far back the camera is, so it is a knob here
+         * rather than a number in a file. */
+        if (!e->orrery) return true;
+        expo_orrery_resize(server, sym == XKB_KEY_minus ? 1.0 / 1.15 : 1.15);
+        return true;
+    case XKB_KEY_comma:
+    case XKB_KEY_period:
+        /* Turn the disc's plane — the one that reads as rotating the object. */
+        if (!e->orrery) return true;
+        expo_orrery_roll(server, sym == XKB_KEY_comma ? -0.13 : 0.13);
+        return true;
+    case XKB_KEY_p:
+    case XKB_KEY_P:
+        /* Orbits on or off. With them off the orrery is a plain turning ring,
+         * which is a perfectly good thing to look at and much easier to aim a
+         * click at — hence a switch rather than a decision made for you. */
+        if (!e->orrery) return true;
+        expo_orbits_toggle(server);
+        return true;
+    case XKB_KEY_o:
+    case XKB_KEY_O:
+        /* The orrery. Closes the ring if it is open, because planets that stop
+         * at a wall are not planets. */
+        expo_orrery_toggle(server);
+        return true;
     case XKB_KEY_x:
     case XKB_KEY_X:
         /* Close the strip into a ring, or open it back into a line. The same

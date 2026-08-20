@@ -91,6 +91,7 @@ bool view_snapshot_into(FwmView *view, struct wlr_buffer *buf) {
      * of the window, not of which one had the keyboard when it was taken:
      * baking it in would leave expo's cards remembering an old focus. */
     shadow_set_enabled(view->shadow, false);
+    view->shadow_drawn = false; /* put back by the next view_shadow_update */
     view_dim_suspend(view);
 
     int lx = 0, ly = 0;

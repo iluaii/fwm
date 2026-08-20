@@ -490,6 +490,99 @@ max_hz      = 12000
 #
 # Each monitor grows its own patch, rooted on ITS bottom edge — on a
 # mixed-resolution setup the shorter screen's grass is not left floating.
+# A star standing on a desktop.
+#
+# The sun above is a DIRECTION: infinitely far away, so every window on screen
+# throws its shadow the same way. This is an object. It is somewhere, so the
+# shadows fan out from it — a window to its left throws left, a window to its
+# right throws right — and it is close, so the far side of the desktop is lit
+# less than the near side. Both are the same geometry, and `height` is the one
+# number that sets it: how far above the windows it hangs.
+#
+# It also ends. It burns through `lifetime_s` of fuel and then collapses, and
+# what is left depends on the MASS it holds at that moment — the same two
+# limits the sky uses. Under 1.44 solar masses an electron gas holds it up and
+# you get a white dwarf, an ember that lights the desktop faintly for the rest
+# of the session. Under 2.5 neutrons hold and you get a pulsar: tiny, blinding,
+# sweeping a beam round that lifts the shadows as it passes. Past that nothing
+# holds.
+#
+# And the mass is what you threw at it. Every window that passes within
+# `height` of the star hands over `mass_per_throw`, scaled by how hard it was
+# thrown against `throw_speed` — so a session spent flinging windows about ends
+# in a black hole and a quiet one ends in an ember. It is fed only while it
+# burns: a remnant has been decided, and a late throw cannot rewrite it.
+#
+# The collapse itself is free fall — most of the shrinking happens in the last
+# moment — and the star gets BRIGHTER and bluer on the way down, because the
+# surface loses area more slowly than it gains temperature. The flash at the
+# end is that runaway peaking, not a separate effect.
+#
+# The hole it may end as is the one phase that GROWS. Its radius is its mass —
+# that is what a Schwarzschild radius is — so anything it swallows makes it
+# visibly bigger, and it goes on taking for as long as it is there.
+#
+# What it swallows is windows, and ONLY where losing one is already allowed:
+# eating is gated on [physics] hp, the same switch that decides whether a
+# window can be destroyed by being thrown at another one. With breakable
+# windows off, a hole pulls windows in and holds them, and closes nothing. A
+# black hole is a fine thing to watch and a poor thing to lose an unsaved
+# editor to.
+#
+# Off by default. Nothing about a desktop needs a star on it.
+[star]
+enabled = false
+desktop = 0            # which desktop it stands on
+x       = 480.0        # px from that desktop's top-left
+y       = 260.0
+# How high above the plane the windows lie on. THE scale knob: it sets both how
+# fast the shadows lengthen away from the star and how fast its light falls
+# off, and it doubles as the reach within which a thrown window feeds it.
+height  = 620.0
+radius  = 90.0         # px across, while it is burning
+
+mass           = 1.10  # solar masses at ignition: an ember, if nothing is fed to it
+mass_max       = 6.0   # it may not be fed past this; 0 = no ceiling
+mass_per_throw = 0.06  # what one window thrown at throw_speed is worth
+throw_speed    = 1400.0 # px/s that figure is written for
+
+# How hard it pulls: px/s^2 at one `height` away, at one solar mass, inverse
+# square from there and clamped at the surface. Windows fall towards it, swing
+# past it and bounce off it. This is a FIELD, not a body in the solver — so a
+# TILED window ignores it completely, the same way it ignores every other
+# force. To watch windows orbit, put the star on a physics desktop.
+pull       = 260.0
+
+# What one solar mass WEIGHS, in the units the physics uses for windows — area
+# times density, so a plain 800x600 window comes to about 480000. Nothing
+# lighter than the star can move it: throw a terminal at one and the terminal
+# bounces off. Something heavier shoves it, and the two share the momentum the
+# way two bodies do, so a barely-heavier window nudges it and a giant one
+# launches it across the desktop.
+#
+# You can also pick it up: press on it and it follows the pointer, let go and
+# it keeps whatever speed your hand had. A star that has eaten well is heavier
+# and correspondingly harder to shift — which is the whole point of feeding it.
+weight     = 480000.0
+
+# The star at the centre of the ORRERY — expo's ring of desktops with `o`
+# pressed — as a fraction of the screen height. It is not the star from the
+# desktops and need not match it: what suits one desktop is not what suits the
+# middle of a circle of ten. In the orrery it bends a starfield rather than the
+# desktop, because the strip has hidden the world it is showing cards of, and
+# its disc opens and closes as you fly around the ring with alt+drag.
+orrery_size = 0.16
+
+lifetime_s = 14400.0   # four hours of fuel
+collapse_s = 2.2       # how long the squeeze takes
+pulsar_hz  = 2.4       # beam revolutions per second, once it is one
+
+# The shadows it throws. Their CHARACTER — blur, colour, whether they are drawn
+# under the window — stays [sun]'s: a shadow is a shadow whatever cast it.
+length     = 18.0      # px at 45 degrees, the reference length
+length_max = 90.0      # px it may never exceed
+opacity    = 0.5
+
 [grass]
 enabled = false
 # The size knob. Everything else scales against it, so raising this grows the
@@ -728,6 +821,16 @@ tap = true
 # Lock the screen. fwm implements ext-session-lock-v1; the lock screen itself
 # is drawn by an external client (hyprlock, swaylock), so this is a plain spawn.
 "super+shift+l"      = "spawn:hyprlock"
+# The star. `star_spawn` lights one where the POINTER is, on the desktop you
+# are looking at — no need to work out [star].x, and firing it again moves the
+# star and re-ignites it, so you can watch more than one lifetime per session.
+# It turns [star] on whether or not the section says enabled.
+"super+shift+y"      = "star_spawn"
+"super+shift+u"      = "star_off"
+# And the fuse: collapse it now instead of waiting out its fuel. What it ENDS
+# as is still the mass it was fed, not this key — so throwing a few more
+# windows at it first changes the ending.
+"super+shift+x"      = "star_collapse"
 # Tiling control (Hyprland-style; only active on tiling desktops)
 "super+Left"         = "tile_focus:l"
 "super+Right"        = "tile_focus:r"

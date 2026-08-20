@@ -358,6 +358,26 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
                         const struct timespec *nowp) {
     struct timespec now = *nowp;
     (void)now;
+
+    /* Carrying the star. It goes exactly where the hand goes, and the hand's
+     * speed is remembered so that letting go is a throw. */
+    if (server->star_drag) {
+        double wx, wy;
+        if (!server_screen_to_world(server, lx, ly, &wx, &wy)) return true;
+        double dt = 1.0 / PHYSICS_TICK_RATE;
+        double nvx = (wx - server->star_drag_x) / dt;
+        double nvy = (wy - server->star_drag_y) / dt;
+        /* Smoothed, or the throw takes its speed from the last single frame —
+         * which is often the one where the hand had already stopped. */
+        server->star_drag_vx = server->star_drag_vx * 0.7 + nvx * 0.3;
+        server->star_drag_vy = server->star_drag_vy * 0.7 + nvy * 0.3;
+        server->star.wx = wx;
+        server->star.wy = wy;
+        server->star_drag_x = wx;
+        server->star_drag_y = wy;
+        return true;
+    }
+
     if (server->interactive.action == FWM_ACTION_MOVE) {
         FwmView *view = server->interactive.view;
         if (!view) return true;   /* client exited mid-drag; see the resize arm */
@@ -689,6 +709,31 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
     struct timespec now = *nowp;
     (void)now;
     (void)button;
+
+    /* The star, before anything else on the desktop.
+     *
+     * Its own node refuses input — it has to, or it would swallow every click
+     * meant for the windows under it — so being able to pick it up has to be
+     * asked for here, by where the press landed rather than by what the scene
+     * says is there. Grabbing it takes precedence over the window behind it:
+     * if you are pointing at a star, you meant the star. */
+    if (server->star_running && server->config.star.enabled &&
+        server->star.phase != STAR_COLLAPSE) {
+        double sr = star_radius(&server->star, &server->config.star);
+        /* Aim at what is DRAWN: a hole's shadow is far bigger than its
+         * horizon, and nobody can be asked to hit the horizon. */
+        double reach = server->star.phase == STAR_HOLE ? sr * 2.6 : sr;
+        double dx = wx - server->star.wx, dy = wy - server->star.wy;
+        if (dx * dx + dy * dy <= reach * reach) {
+            star_grab(&server->star);
+            server->star_drag = 1;
+            server->star_drag_x = wx;
+            server->star_drag_y = wy;
+            server->star_drag_vx = 0.0;
+            server->star_drag_vy = 0.0;
+            return true;
+        }
+    }
         struct wlr_surface *surface = NULL;
         double sx, sy;
         FwmView *view = view_at(server, lx, ly, &surface, &sx, &sy);
@@ -904,6 +949,13 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
 
 /* The release: hand whatever the hand was doing to the simulation. */
 void server_drag_release(FwmServer *server, double lx, double ly) {
+    if (server->star_drag) {
+        /* Thrown, not placed: it leaves with whatever the hand was doing. */
+        star_release(&server->star, server->star_drag_vx, server->star_drag_vy);
+        server->star_drag = 0;
+        return;
+    }
+
         // Button release
         if (server->interactive.action == FWM_ACTION_MOVE) {
             FwmView *view = server->interactive.view;

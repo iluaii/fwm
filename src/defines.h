@@ -212,6 +212,15 @@
  * flourish than a consistency. */
 #define EXPO_SPIN_DECAY     2.4
 #define EXPO_SPIN_MIN       40.0
+
+/* The orrery: how fast the ring turns by itself, and where the camera sits to
+ * watch it. Slow — this is a thing to look at, not a carousel, and a desktop
+ * going past faster than you can read it is a blur rather than a planet. */
+#define EXPO_ORRERY_SPEED   90.0   /* strip px/s */
+/* Low, so the disc starts near edge-on — the Gargantua view. Climbing with
+ * the arrows or alt+drag opens it, and `,`/`.` tip the disc itself. */
+#define EXPO_ORRERY_TILT    0.30   /* radians, ~17 degrees above the ring */
+#define EXPO_ORRERY_DIST    1.55   /* pulled back, to get the whole ring in */
 /* Viewer distance from the front of the strip. Smaller is a wider lens: more
  * dramatic, and quicker to look wrong at the edges of the screen. */
 #define EXPO_CAM_DIST       2.2

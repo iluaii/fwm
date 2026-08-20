@@ -41,6 +41,7 @@
 #include "wallpaper.h"
 #include "cava.h"
 #include "grass.h"
+#include "star_draw.h"
 #include "sound.h"
 #include "ram.h"
 #include "group.h"
@@ -434,6 +435,28 @@ static int server_is_busy(FwmServer *server) {
     if (osd_busy(server->osd)) return 1;               /* a dial reading, timing out */
     if (volume_busy(server->volume)) return 1;         /* waiting on the mixer */
     if (cairo_overlay_animating()) return 1;
+    /* A star, if one is on a desktop somebody is looking at.
+     *
+     * It is driven entirely by our own clock — the surface boils, the loops
+     * rise, the collapse falls, the beam turns — and it damages nothing a
+     * client would schedule a frame for, so without this the loop dropped to
+     * the 200ms heartbeat and the whole thing advanced five times a second.
+     * Moving the pointer made it run properly, which is the tell: the frames
+     * were coming from the cursor, not from the star.
+     *
+     * Only while it is VISIBLE, and never for a hole: a star on a desktop you
+     * are not looking at, or one that has finished collapsing, has nothing to
+     * draw and must not hold the compositor awake. */
+    /* Including a hole. When this was written a hole was a still picture and
+     * excluding it was right; it is now the busiest thing on the desktop — an
+     * orbiting disc, a sheared far image, a flickering ring — and leaving it
+     * out meant all of that animated at the heartbeat. Same fault as before,
+     * one phase along. */
+    if (server->star_running) {
+        FwmOutput *so;
+        wl_list_for_each(so, &server->outputs, link)
+            if (so->enabled && so->desktop == server->config.star.desktop) return 1;
+    }
     if (server->modes_buffer && modes_menu_animating()) return 1;
     if (server->stats_buffer && stats_menu_animating()) return 1;
     /* Bars that are up must keep the tick at full rate: on the heartbeat they
@@ -616,6 +639,284 @@ void server_sun_apply(FwmServer *server) {
         view_shadow_update(view);
     }
 }
+
+/* ── the star ─────────────────────────────────────────────────────────── */
+
+/* Ignite, or put out, to match [star]. Returns true when there is a star to
+ * run this tick. */
+static bool star_settle(FwmServer *server) {
+    const StarConfig *cfg = &server->config.star;
+
+    if (!cfg->enabled) {
+        if (server->star_running) {
+            FwmOutput *o;
+            wl_list_for_each(o, &server->outputs, link) {
+                star_draw_destroy(o->star_draw);
+                o->star_draw = NULL;
+            }
+            server->star_running = false;
+            /* The shadows it was throwing are not its to keep: hand every
+             * window back to whatever the sun says. */
+            server_sun_apply(server);
+        }
+        return false;
+    }
+
+    if (!server->star_running) {
+        if (server->screen_width <= 0) return false; /* no world to stand in yet */
+        star_init(&server->star, cfg);
+        /* Its place in the world: the desktop it was given, plus where on that
+         * desktop it was put. Desktops are one strip in world coordinates, so
+         * this is the whole of "which desktop". */
+        int d = cfg->desktop;
+        if (d < 0) d = 0;
+        if (d >= FWM_DESKTOPS) d = FWM_DESKTOPS - 1;
+        server->star.wx = (double)d * server->screen_width + cfg->x;
+        server->star.wy = cfg->y;
+        server->star_running = true;
+        wlr_log(WLR_INFO, "star: ignited on desktop %d at %.0f,%.0f, %.2f solar masses",
+                d, cfg->x, cfg->y, server->star.mass);
+    }
+    return true;
+}
+
+void server_star_spawn(FwmServer *server) {
+    StarConfig *cfg = &server->config.star;
+
+    /* Under the pointer, on the desktop being looked at: a star is a thing
+     * with a place, and pointing at the place is the shortest way to say
+     * where. Firing it again moves it — and re-ignites it, so a session that
+     * has already watched one collapse can have another. */
+    FwmOutput *out = server_output_at(server, server->cursor->x, server->cursor->y);
+    if (!out) out = server_active_output(server);
+    if (!out || server->screen_width <= 0) return;
+
+    cfg->enabled = 1;
+    cfg->desktop = out->desktop;
+    cfg->x = server->cursor->x - out->box.x + out->camera_x
+             - (double)out->desktop * server->screen_width;
+    cfg->y = server->cursor->y - out->box.y;
+
+    /* Whatever was burning is gone, nodes and all: the next tick lights a new
+     * one where the pointer is. */
+    FwmOutput *o;
+    wl_list_for_each(o, &server->outputs, link) {
+        star_draw_destroy(o->star_draw);
+        o->star_draw = NULL;
+    }
+    server->star_running = false;
+    wlr_log(WLR_INFO, "star: spawning on desktop %d at %.0f,%.0f",
+            cfg->desktop, cfg->x, cfg->y);
+}
+
+void server_star_extinguish(FwmServer *server) {
+    server->config.star.enabled = 0; /* star_settle tears it down next tick */
+}
+
+/* What the star does to the windows around it.
+ *
+ * Not a Box2D body: a star is not a window, and giving the solver a fixture it
+ * must never move, resize or destroy would be a special case in every loop
+ * that walks the bodies. It is a FIELD instead — an acceleration added to the
+ * velocities before the step — which is both what gravity actually is and the
+ * only version of this that a tiled window can safely ignore.
+ *
+ * The surface is the exception, and it has to be handled here rather than left
+ * to the solver: a window that reaches the star with nothing in the way would
+ * pass straight through the middle of it, where the inverse square is at its
+ * most absurd, and come out the far side at a speed nothing else on the
+ * desktop can survive. So the surface pushes back — as a spring, never as a
+ * correction to the position. Writing the position while also pulling on it is
+ * how the first version of this made a window sit in the star and shake. */
+static void star_pull(FwmServer *server, double dt) {
+    const StarConfig *cfg = &server->config.star;
+    if (cfg->pull <= 0.0) return;
+
+    double r_surface = star_radius(&server->star, cfg);
+
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        PhysicsBody *b = physics_find_body(&server->physics, view->id);
+        if (!b || b->desktop_id != cfg->desktop) continue;
+        /* A tiled window is the layout's, not the star's; pinned and floating
+         * mean the same thing here they mean everywhere else. */
+        if (b->tiled || b->pinned || b->floating || b->fullscreen) continue;
+
+        double cx = b->x + b->width / 2.0, cy = b->y + b->height / 2.0;
+        double dx = server->star.wx - cx, dy = server->star.wy - cy;
+        double r2 = dx * dx + dy * dy;
+        double r  = sqrt(r2);
+        if (r < 1e-6) continue;
+
+        double in_x = dx / r, in_y = dy / r;       /* unit vector, inwards */
+        double closing = b->vx * in_x + b->vy * in_y; /* > 0 while arriving */
+        double vx = b->vx, vy = b->vy;
+
+        /* Where the surface starts, as far as a window is concerned. */
+        double clearance = r_surface + 0.25 * (b->width < b->height ? b->width : b->height);
+
+        /* Swallowed.
+         *
+         * A hole has no surface to rest on: what reaches it goes in. The
+         * window is asked to close and the hole gets heavier for it, which
+         * makes it visibly bigger — its radius IS its mass.
+         *
+         * Gated on [physics] hp, the same switch that already decides whether
+         * a window can be destroyed by being thrown at another one. With
+         * breakable windows off, nothing on this desktop can be lost by
+         * accident, so the hole simply cannot eat: a black hole is a lovely
+         * thing to watch and a terrible thing to lose an unsaved editor to.
+         * The dying flag and its grace period are the ones server_damage_one
+         * uses, so a window already on its way out is not asked twice. */
+        /* Inside the shadow — which is what is drawn, and therefore what a
+         * window looks like it has fallen into. */
+        if (server->star.phase == STAR_HOLE && r < r_surface * 2.6) {
+            if (server->config.physics.hp) {
+                double now = server_now_s();
+                if (!view->dying || now - view->dying_at >= HP_CLOSE_GRACE_S) {
+                    view->dying = 1;
+                    view->dying_at = now;
+                    star_feed(&server->star, cfg, cfg->throw_speed * 3.0);
+                    wlr_log(WLR_DEBUG, "star: hole swallowed window %u, now %.2f masses",
+                            view->id, server->star.mass);
+                    view_send_close(view);
+                }
+            }
+            /* Either way it keeps falling; there is nothing to bounce off. */
+            physics_set_velocity(&server->physics, view->id, vx, vy);
+            continue;
+        }
+
+        if (r_surface > 0.0 && r < clearance) {
+            /* Touching. NOT a teleport and not a bounce: the first version set
+             * the body's position back onto the surface every frame while
+             * still pulling it in, so the window was dragged inwards and
+             * shoved out again sixty times a second — it sat in the star and
+             * shook.
+             *
+             * A spring instead. Push grows with how far in it has got and the
+             * inward motion is damped away, so a window arrives, sinks a
+             * little, and settles against the surface the way it settles
+             * against the floor. Nothing is written to the position at all;
+             * the solver keeps ownership of where the window is. */
+            /* Newton's third law, with a means test. The window is being
+             * pushed out of the star; the star takes the other half of that
+             * — but only from something heavier than itself, so a terminal
+             * bounces off and a star does not drift every time a window
+             * brushes it. */
+            if (closing > 0.0)
+                star_push(&server->star, cfg, b->mass, in_x, in_y, closing);
+
+            double pen = (clearance - r) / clearance;      /* 0 at the surface */
+            double push = cfg->pull * server->star.mass * 2.0 * pen;
+            vx -= in_x * push * dt;
+            vy -= in_y * push * dt;
+            if (closing > 0.0) {
+                double damp = 6.0 * dt;
+                if (damp > 1.0) damp = 1.0;
+                vx -= in_x * closing * damp;
+                vy -= in_y * closing * damp;
+            }
+        } else {
+            /* Falling towards it. `pull` is the acceleration one `height`
+             * away, so the number that sets the light and the shadows sets the
+             * gravity too. */
+            double a = cfg->pull * server->star.mass * (cfg->height * cfg->height) / r2;
+            /* Terminal speed, or a window that fell from the far side of the
+             * desktop arrives faster than the solver can resolve and tunnels
+             * straight through the star. */
+            double amax = cfg->pull * 24.0;
+            if (a > amax) a = amax;
+            vx += in_x * a * dt;
+            vy += in_y * a * dt;
+        }
+
+        physics_set_velocity(&server->physics, view->id, vx, vy);
+    }
+}
+
+void server_star_sync(FwmServer *server, double dt) {
+    if (!star_settle(server)) return;
+
+    const StarConfig *cfg = &server->config.star;
+    FwmStarPhase was = server->star.phase;
+    star_tick(&server->star, cfg, dt);
+    if (server->star.phase != was)
+        wlr_log(WLR_INFO, "star: %s -> %s (%.2f solar masses)",
+                star_phase_name(was), star_phase_name(server->star.phase),
+                server->star.mass);
+
+    /* The picture, on each monitor that can see the desktop it stands on. */
+    double now = server_now_s();
+    int star_desktop = cfg->desktop;
+    FwmOutput *out;
+    wl_list_for_each(out, &server->outputs, link) {
+        if (!out->enabled) continue;
+        /* Not while the strip is up: expo hides the world it is showing cards
+         * of, and a star left running over the top of it sat on the screen
+         * through everything — including its own picture in the orrery. */
+        bool visible = (out->desktop == star_desktop) && !expo_active(server);
+        if (visible && !out->star_draw)
+            out->star_draw = star_draw_create(server, out, server->layer_background,
+                                             server->layer_overlay, cfg);
+        if (!out->star_draw) continue;
+        star_draw_set_visible(out->star_draw, visible);
+        if (visible)
+            star_draw_update(out->star_draw, &server->star, cfg, now,
+                             out->camera_x, out->box.x, out->box.y);
+    }
+
+    /* And what it does to them: the field it stands in the middle of. */
+    star_pull(server, dt);
+
+    /* What the windows are giving it. A throw that passes close enough hands
+     * over mass in proportion to how hard it was thrown, once per pass — which
+     * is what makes the ending an account of how the desktop was used rather
+     * than a number in the config. */
+    FwmView *fv;
+    wl_list_for_each(fv, &server->views, link) {
+        PhysicsBody *b = physics_find_body(&server->physics, fv->id);
+        if (!b || b->desktop_id != star_desktop) { fv->star_near = false; continue; }
+        double dx = b->x - server->star.wx, dy = b->y - server->star.wy;
+        bool near = dx * dx + dy * dy <= cfg->height * cfg->height;
+        if (near && !fv->star_near)
+            star_feed(&server->star, cfg, sqrt(b->vx * b->vx + b->vy * b->vy));
+        fv->star_near = near;
+    }
+
+    /* Its own motion, inside the desktop it stands on: desktops are one strip
+     * in world coordinates, so this desktop is one screen width along it. A
+     * margin keeps the whole body on screen rather than half off the edge. */
+    if (server->screen_width > 0) {
+        double margin = star_radius(&server->star, cfg) * 1.6;
+        double left = (double)star_desktop * server->screen_width;
+        star_move(&server->star, cfg, dt,
+                  left + margin, left + server->screen_width - margin,
+                  margin, (double)server->screen_height - margin);
+    }
+
+    /* And the shadows. Unlike the sun there is nothing to skip on a quiet
+     * tick: the light depends on where each window IS, so a window that moved
+     * needs a new answer from a star that did not. Only the windows on its own
+     * desktop are walked, and the work for each is star_light's arithmetic —
+     * shadow_update itself is the same nine nodes the sun already moves. */
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        PhysicsBody *b = physics_find_body(&server->physics, view->id);
+        if (b && b->desktop_id == star_desktop) view_shadow_update(view);
+    }
+}
+
+void server_star_collapse(FwmServer *server) {
+    if (!server->config.star.enabled || !server->star_running) {
+        wlr_log(WLR_INFO, "star_collapse: no star ([star] enabled = false, "
+                          "or nothing spawned yet)");
+        return;
+    }
+    if (!star_collapse_now(&server->star))
+        wlr_log(WLR_INFO, "star_collapse: it is already a black hole");
+}
+
 
 void server_sun_sync(FwmServer *server) {
     const SunConfig *cfg = &server->config.sun;
@@ -1527,6 +1828,11 @@ static int physics_tick_cb(void *data) {
      * frame is scheduled, so a shadow never lags the window it belongs to by a
      * frame. Costs nothing on the ticks where the sun has not moved. */
     server_sun_sync(server);
+
+    /* And the star, which is a light with a place in it. After the sun, so a
+     * window lit by both ends up with the stronger of the two rather than
+     * whichever was written last. */
+    server_star_sync(server, dt);
 
     /* And which monitor is showing which desktop, for the same reason and by
      * the same rule: only what changed goes out. */

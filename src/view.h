@@ -24,6 +24,7 @@
 
 #include "droplet.h"
 #include "wobble.h"
+#include "sun.h"
 
 struct FwmServer;
 struct FwmGroup;
@@ -144,6 +145,20 @@ typedef struct FwmView {
      *      place. Everything that blends is ours, so a client frame can never
      *      appear half-transparent. */
     int open_anim;
+    /* The light this window's shadow was last drawn for, and the size it was
+     * drawn at. A star's light depends on WHERE the window is, so unlike the
+     * sun there is no one answer to compare against for the whole screen —
+     * without this the tick moved nine scene nodes per window per frame, and
+     * damaged the screen under every shadow, for a light that had not
+     * perceptibly changed. */
+    FwmSunLight shadow_light;
+    int shadow_w, shadow_h;
+    bool shadow_drawn;
+
+    /* Inside the star's reach right now. A window feeds the star when it
+     * ARRIVES, once per pass — without this a window resting near it would
+     * hand over mass every frame for as long as it sat there. */
+    bool star_near;
     double open_t;
     int open_hold;
     double open_hold_ms;

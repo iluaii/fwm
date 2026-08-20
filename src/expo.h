@@ -103,4 +103,24 @@ void expo_destroy(struct FwmServer *server);
  * so it must go before that memory does. No-op for any other monitor. */
 void expo_output_gone(struct FwmServer *server, struct FwmOutput *out);
 
+/* The orrery: the ring of desktops turning by itself, seen from above, with a
+ * star in the middle. Toggled by `o` inside the strip. */
+void expo_orrery_toggle(struct FwmServer *server);
+
+/* One step further down the road for the star at the centre of the ring:
+ * burning to ember, ember to pulsar, pulsar to hole. What `star_collapse` does
+ * while the strip is up. */
+void expo_orrery_collapse(struct FwmServer *server);
+
+/* Its size, multiplicatively, and the tip of its disc out of the ring's plane.
+ * Both are driven from inside the strip: what looks right depends on the
+ * screen and the camera, which no config file knows. */
+void expo_orrery_resize(struct FwmServer *server, double factor);
+/* Turn the disc's plane. Tilt changes how squashed it looks; this changes
+ * which way round it lies, which is the one that reads as rotating it. */
+void expo_orrery_roll(struct FwmServer *server, double delta);
+
+/* Desktops on their own orbits, or back to one plain turning ring. */
+void expo_orbits_toggle(struct FwmServer *server);
+
 #endif /* FWM_EXPO_H */

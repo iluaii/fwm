@@ -247,5 +247,9 @@ void expo_sync_items(FwmExpo *e) {
             if (e->items[i].view == view) known = true;
         if (!known) expo_add_item(e, view);
     }
+
+    /* Which orbit a desktop rides is decided by how many windows are on it, so
+     * a window opening or closing moves it. */
+    if (e->orrery && e->orbits) expo_orbits_layout(e);
 }
 

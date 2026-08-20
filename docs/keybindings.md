@@ -105,6 +105,10 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `move_camera:<px>` | pan by that many px (negative = left); holdable |
 | `expo` | the desktop strip |
 | `toggle_wrap` | close the strip into a ring, or open it |
+| *(inside expo)* `o` | the orrery: the ring of desktops turns by itself, seen from above, with a star at its centre |
+| *(inside expo)* `star_collapse` | takes that star one step down the road — burning → ember → pulsar → black hole |
+| `star_spawn` / `star_off` | light a star under the pointer, on the desktop on screen / put it out |
+| `star_collapse` | collapse the `[star]` on its desktop now — dwarf, pulsar or hole, by the mass thrown into it |
 
 ### World
 

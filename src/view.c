@@ -308,6 +308,7 @@ void view_shadow_update(FwmView *view) {
     PhysicsBody *body = physics_find_body(&view->server->physics, view->id);
     if (body && body->fullscreen) {
         shadow_set_enabled(view->shadow, false);
+        view->shadow_drawn = false;
         return;
     }
     /* The effects that replace the window with a picture of itself (the spin,
@@ -316,13 +317,39 @@ void view_shadow_update(FwmView *view) {
      * longer standing in. They put it out for their duration. */
     if (view->spin_buf || view->jelly || view->squash_buf) {
         shadow_set_enabled(view->shadow, false);
+        view->shadow_drawn = false;
         return;
     }
 
     int w, h;
     view_border_box(view, &w, &h);
-    shadow_update(view->shadow, w, h, &view->server->config.sun,
-                  &view->server->sun_light);
+
+    /* Which light this window is standing in. The sun is one answer for the
+     * whole screen; a star is somewhere, so it has to be asked about THIS
+     * window — and when both are up, the stronger of the two wins rather than
+     * the one that ran last. Two shadows would need two sets of nodes, and a
+     * window with two shadows is a window nobody believes. */
+    const FwmSunLight *light = &view->server->sun_light;
+    FwmSunLight from_star;
+    if (view->server->star_running && body &&
+        body->desktop_id == view->server->config.star.desktop) {
+        star_light(&view->server->star, &view->server->config.star,
+                   body->x + w / 2.0, body->y + h / 2.0, &from_star);
+        if (from_star.alpha > light->alpha) light = &from_star;
+    }
+
+    /* Nothing to redraw if neither the light nor the window has moved. The
+     * star asks for this every tick by necessity; this is what keeps that from
+     * costing anything when the answer is the same. */
+    if (view->shadow_drawn && view->shadow_w == w && view->shadow_h == h &&
+        !sun_light_differs(&view->shadow_light, light))
+        return;
+
+    view->shadow_light = *light;
+    view->shadow_w = w;
+    view->shadow_h = h;
+    view->shadow_drawn = true;
+    shadow_update(view->shadow, w, h, &view->server->config.sun, light);
 }
 
 /* ── the unfocused dim ────────────────────────────────────────────────── */

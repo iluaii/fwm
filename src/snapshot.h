@@ -62,4 +62,20 @@ bool snapshot_subtree(struct FwmServer *server, struct wlr_buffer *dst,
 bool snapshot_world(struct FwmServer *server, struct FwmOutput *out,
                     struct wlr_buffer *dst);
 
+/* One WINDOW onto the desktop, at layout position (lx, ly), the size of `dst`:
+ * wallpaper first, then everything the scene graph draws over it.
+ *
+ * This is snapshot_world's trick — the wallpaper comes from the copy it keeps,
+ * because the layer on screen is a cairo overlay whose pixels the scene has
+ * already taken — applied to a piece rather than the whole screen. Without it
+ * a photograph of the desktop comes back with the windows in it and nothing
+ * behind them, which is exactly what a lens then bends: a film of windows over
+ * an unbent wallpaper.
+ *
+ * `hide` (may be NULL) is switched off for the duration, for the caller that
+ * must not photograph itself. */
+bool snapshot_lens(struct FwmServer *server, struct FwmOutput *out,
+                   struct wlr_buffer *dst, int lx, int ly,
+                   struct wlr_scene_node *hide);
+
 #endif /* FWM_SNAPSHOT_H */

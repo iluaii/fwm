@@ -33,6 +33,7 @@
 #include "physics.h"
 #include "bsp.h"
 #include "config.h"
+#include "star.h"
 #include "sun.h"
 #include "gestures.h"
 /* For TrayStrip: each monitor owns the geometry of the status strip drawn on
@@ -121,6 +122,7 @@ typedef struct FwmOutput {
      * its own bottom edge, which is where the floor of the desktop it shows
      * is. NULL whenever [grass] is off. */
     struct FwmGrass *grass;
+    struct FwmStarDraw *star_draw;
     /* Its own status strip, at the top of this monitor, and where that strip's
      * islands landed — hit-testing and the modes menu's anchor both read the
      * geometry of the strip they were aimed at, never another monitor's. */
@@ -406,6 +408,20 @@ typedef struct FwmServer {
      * of work nobody asked for. */
     FwmSunLight sun_light;
     double sun_checked_at;
+
+    /* The star, if [star] put one on a desktop. One of these for the session —
+     * it is an object in the world, not a property of a screen — while the
+     * PICTURE of it belongs to each monitor that can see its desktop
+     * (FwmOutput.star_draw). Its light is not cached the way the sun's is:
+     * every window gets a different answer, so there is nothing to cache. */
+    FwmStar star;
+    bool star_running;
+    /* The pointer has hold of it. Kept here rather than in the interactive
+     * struct because a star is not a view and none of that machinery — the
+     * layout, the tiling drop, the snap — means anything for it. */
+    int star_drag;
+    double star_drag_x, star_drag_y;   /* last pointer position, world px */
+    double star_drag_vx, star_drag_vy; /* what it will be thrown with */
 
     /* An override-redirect X11 surface currently holding the keyboard. It has
      * no view — that is what unmanaged means — so it cannot be focused_view,

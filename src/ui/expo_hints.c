@@ -51,9 +51,23 @@ static const struct hint flight_set[] = {
     { NULL, NULL },
 };
 
+/* The orrery has its own verbs, and none of the ones above apply to the thing
+ * in the middle of the ring. */
+static const struct hint orrery_set[] = {
+    { "Esc",              "leave" },
+    { "o",                "stop" },
+    { "- =",              "star size" },
+    { "Alt+drag",         "look round it" },
+    { ", .",              "turn the disc" },
+    { "p",                "orbits" },
+    { "Super+Shift+X",    "collapse" },
+    { NULL, NULL },
+};
+
 /* One shared state, because one strip means one panel. */
 static struct {
     bool flight;
+    bool orrery;
     bool valid;
 } g_state;
 
@@ -198,7 +212,11 @@ struct wlr_scene_buffer *expo_hints_show(struct wlr_scene_tree *parent,
     double wf = measure(flight_set, &h2);
     if (wf > w) w = wf;
     if (h2 > h) h = h2;
-    const struct hint *hints = flight ? flight_set : base;
+    double h3 = 0.0;
+    double wo = measure(orrery_set, &h3);
+    if (wo > w) w = wo;
+    if (h3 > h) h = h3;
+    const struct hint *hints = g_state.orrery ? orrery_set : (flight ? flight_set : base);
 
     struct wlr_scene_buffer *buf = cairo_overlay_create(parent, (int)w, (int)h);
     if (!buf) return NULL;
@@ -212,11 +230,22 @@ struct wlr_scene_buffer *expo_hints_show(struct wlr_scene_tree *parent,
     return buf;
 }
 
+void expo_hints_set_orrery(struct wlr_scene_buffer *buf, bool orrery) {
+    if (!buf || (g_state.valid && g_state.orrery == orrery)) return;
+    g_state.orrery = orrery;
+    g_state.valid = true;
+    const struct hint *hints = orrery ? orrery_set
+                                      : (g_state.flight ? flight_set : base);
+    cairo_overlay_update(buf, draw_hints, (void *)hints);
+}
+
 void expo_hints_set_flight(struct wlr_scene_buffer *buf, int screen_w,
                            int screen_h, bool flight) {
     if (!buf || (g_state.valid && g_state.flight == flight)) return;
     g_state.flight = flight;
     g_state.valid = true;
+    /* The orrery's own verbs win: none of the flight set applies to it. */
+    if (g_state.orrery) return;
 
     const struct hint *hints = flight ? flight_set : base;
     cairo_overlay_update(buf, draw_hints, (void *)hints);

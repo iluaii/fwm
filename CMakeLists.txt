@@ -107,6 +107,9 @@ set(SOURCES
     src/config_binds.c
     src/config_set.c
     src/theme.c
+    src/star.c
+    src/star_draw.c
+    src/star_gl.c
     src/sun.c
     src/shadow.c
     src/wallpaper.c
@@ -362,6 +365,15 @@ if(FWM_TESTS)
     # what it does only happens at dusk, and none of it can be watched on
     # demand. sun.c reaches no further than config.h's types, so the day is
     # walked here instead of waited for.
+    # A star's whole life, three endings deep. The fuel it ships with lasts
+    # four hours and the ending it reaches cannot be chosen from the outside —
+    # it is decided by what was thrown at it — so the lifetimes are walked here
+    # rather than sat through. star.c, like sun.c, reaches no further than
+    # config.h's types.
+    add_executable(test_star tests/test_star.c src/star.c)
+    target_include_directories(test_star PRIVATE src tests ${XKBCOMMON_INCLUDE_DIRS})
+    target_link_libraries(test_star PRIVATE m)
+
     add_executable(test_sun tests/test_sun.c src/sun.c)
     target_include_directories(test_sun PRIVATE src tests ${XKBCOMMON_INCLUDE_DIRS})
     target_link_libraries(test_sun PRIVATE m)
@@ -402,6 +414,7 @@ if(FWM_TESTS)
     add_test(NAME gestures   COMMAND test_gestures)
     add_test(NAME seam       COMMAND test_seam)
     add_test(NAME sun        COMMAND test_sun)
+    add_test(NAME star       COMMAND test_star)
     add_test(NAME ram        COMMAND test_ram)
     add_test(NAME wav        COMMAND test_wav)
     add_test(NAME stats      COMMAND test_stats)

@@ -976,6 +976,8 @@ fit  = "pan"
 | `toggle_floating` | physics ⇄ floating (windows stay put and overlap) |
 | `fake_fullscreen` / `real_fullscreen` | fullscreen where a single tile would sit, gaps and all / whole output |
 | `move_camera:<px>` | scroll the camera (repeats while held) |
+| `star_spawn` / `star_off` | light a star where the pointer is, on the desktop you are looking at / put it out |
+| `star_collapse` | collapse `[star]` now instead of waiting out its fuel; what it ends as is still the mass it was fed |
 | `view:<0-9>` | jump to desktop; `view:next` / `view:prev` for the one beside it |
 | `view:back` | the desktop this screen showed before — the bind for the one you are on does this too, unless `[camera] back_and_forth` is off |
 | `move_to:<0-9>` | send the focused window to a desktop, camera stays (`next`/`prev` too) |

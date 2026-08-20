@@ -13,6 +13,7 @@
  */
 
 #include "expo_internal.h"
+#include "star_draw.h"
 #include "server.h"
 #include "view.h"
 #include "snapshot.h"
@@ -85,6 +86,13 @@ static void expo_selftest(FwmExpo *e) {
 /* ── open and close ───────────────────────────────────────────────────── */
 
 static void expo_teardown(FwmServer *server) {
+    /* The orrery's star goes with the strip: it belongs to the view, not to
+     * the desktops, and there is nothing to keep it alive for. */
+    if (server->expo) {
+        star_draw_destroy(server->expo->orrery_draw);
+        server->expo->orrery_draw = NULL;
+    }
+
     FwmExpo *e = server->expo;
     if (!e) return;
     server->expo = NULL;    /* before anything else: nothing may re-enter here */
@@ -123,6 +131,9 @@ bool expo_live_active(FwmServer *server) {
 
 bool expo_animating(FwmServer *server) {
     FwmExpo *e = server->expo;
+    /* The orrery always counts as animating: the ring turns and the hole's
+     * disc turns with it, and neither shows up in the deltas below. */
+    if (e && e->orrery) return true;
     return e && (fabs(e->zoom - e->zoom_target) > 0.001
               || fabs(e->pan - e->pan_target) > 0.5
               || fabs(e->seam - e->seam_target) > 0.001
@@ -300,11 +311,216 @@ void expo_toggle(FwmServer *server) {
 /* The far zoom step is the looking-at-it step, and the only one the camera may
  * leave the canonical view in. Read from the TARGET, so the controls come
  * alive as soon as `z` is pressed rather than when the zoom finishes. */
+/* Turn the orrery on or off.
+ *
+ * On: the ring is closed (planets go round, they do not stop at a wall), the
+ * camera lifts above it and pulls back so the whole circle is in frame, and it
+ * starts turning. Off: the turning stops and the camera comes back down. The
+ * ring is left closed — that is a setting of the user's, not ours to undo.
+ */
+void expo_orrery_toggle(FwmServer *server) {
+    FwmExpo *e = server->expo;
+    if (!e) return;
+
+    e->orrery = !e->orrery;
+    if (e->orrery) {
+        /* The thing in the middle: a STAR, at the start of its life.
+         *
+         * Not a black hole from the outset — "star-black hole" is the whole
+         * road, not the destination: it burns, it collapses to a dwarf, the
+         * dwarf can be pushed to a pulsar and the pulsar to a hole, and each
+         * step is worth watching. star_collapse takes it one step further
+         * whenever you press it, here as anywhere else.
+         *
+         * Sized for the middle of a ring of ten desktops rather than for one
+         * of them, so it has its own config: the same numbers scaled up. */
+        e->orrery_cfg = server->config.star;
+        e->orrery_cfg.enabled = 1;
+        double size = server->config.star.orrery_size;
+        if (size <= 0.0) size = 0.16;
+        e->orrery_cfg.radius  = server->screen_height * size;
+        /* Light enough that the first collapse leaves an ember: the road down
+         * is then three presses long instead of one. */
+        e->orrery_cfg.mass    = 1.10;
+        /* It is on display, not on a clock: it does not burn out while you
+         * are looking at it. */
+        e->orrery_cfg.lifetime_s = 1e9;
+        if (e->orrery_scale <= 0.0) e->orrery_scale = 1.0;
+        /* Tipped out of the ring's plane, and left there.
+         *
+         * Lying flat in it, the disc is axially symmetric about the very axis
+         * you walk around — so every angle shows the identical picture, and no
+         * amount of steering changes anything. Tipped, it has a side and a
+         * face, and alt+drag is then enough on its own: sideways carries you
+         * round it, up and down lifts you over it. That is why the two keys
+         * that used to set this angle are gone — they did by hand, badly, what
+         * moving the camera does properly. */
+        e->orrery_tilt = 0.62;
+        e->orrery_cfg.radius *= e->orrery_scale;
+        star_init(&e->orrery_star, &e->orrery_cfg);
+        /* Turning, so the disc has a direction and the ring around it agrees
+         * with the desktops going the same way. */
+        star_spin(&e->orrery_star, 0.35);
+        /* No scene node: it is drawn inside expo's own 3D pass, sorted among
+         * the desktops by depth like anything else in the ring. */
+        if (!e->orrery_draw)
+            e->orrery_draw = star_draw_create(server, e->out, NULL, NULL,
+                                              &e->orrery_cfg);
+        /* Against stars, not against the desktop: the strip has hidden the
+         * world it is drawing cards of, so there is nothing behind the hole to
+         * photograph — and painting that nothing over the ring is exactly why
+         * the desktops disappeared the first time this ran. */
+        star_draw_set_lensing(e->orrery_draw, false);
+        /* Behind the cards. The desktops orbit AROUND it, so they have to pass
+         * in front of it — drawn on top it simply covered the ring, which is
+         * the whole of "I cannot see the desktops". A scene node is flat and
+         * cannot be half in front, so behind is the answer that is right for
+         * the near half of the ring and unnoticeable for the far half. */
+        /* Planets need a circle to go round. */
+        if (!server->config.camera.wrap)
+            server_dispatch_action(server, "toggle_wrap");
+        e->orbits = 1;
+        e->orbit_blend = 0.0;          /* they set off from the ring */
+        e->orbit_blend_target = 1.0;
+        expo_orbits_layout(e);
+        e->orrery_speed = EXPO_ORRERY_SPEED;
+        e->tilt_target = EXPO_ORRERY_TILT;
+        e->dist_target = EXPO_ORRERY_DIST;
+    } else {
+        e->spin = 0.0;
+        e->tilt_target = 0.0;
+        e->dist_target = 1.0;
+        star_draw_destroy(e->orrery_draw);
+        e->orrery_draw = NULL;
+    }
+    /* The panel at the bottom shows the verbs that apply, and inside the
+     * orrery none of the usual ones do. */
+    if (e->hints) {
+        expo_hints_set_orrery(e->hints, e->orrery);
+        e->hints_reveal_target = 1.0;
+        e->hints_timer = EXPO_HINT_SHOW_S;
+    }
+    wlr_log(WLR_INFO, "expo: orrery %s", e->orrery ? "running" : "stopped");
+    expo_canvas_dirty(e);
+}
+
+void expo_orrery_resize(FwmServer *server, double factor) {
+    FwmExpo *e = server->expo;
+    if (!e || !e->orrery || factor <= 0.0) return;
+
+    double scale = (e->orrery_scale > 0.0 ? e->orrery_scale : 1.0) * factor;
+    /* Room to make it a speck or to fill the ring, and no further: past that
+     * it is either invisible or it is the only thing on screen. */
+    if (scale < 0.15) scale = 0.15;
+    if (scale > 6.0)  scale = 6.0;
+    e->orrery_scale = scale;
+
+    /* The buffer is sized at creation, so a new size means a new one. The star
+     * itself — its phase, its mass, how far through a collapse it is — is
+     * untouched: only the picture is rebuilt. */
+    double base = server->config.star.orrery_size;
+    if (base <= 0.0) base = 0.16;
+    star_draw_destroy(e->orrery_draw);
+    e->orrery_cfg.radius = server->screen_height * base * scale;
+    e->orrery_draw = star_draw_create(server, e->out, NULL, NULL, &e->orrery_cfg);
+    star_draw_set_lensing(e->orrery_draw, false);
+    expo_canvas_dirty(e);
+}
+
+/* Where each desktop's orbit is, and therefore how fast it goes round.
+ *
+ * A desktop's distance from the axis comes from how many windows are on it: a
+ * busy desktop is a heavy planet and sits further out, an empty one has no
+ * business claiming an orbit at all and gets a random one. Kepler then does
+ * the rest — the rate falls as r^-1.5 — so the crowded desktops sail slowly
+ * round the outside while the quiet ones race past inside them.
+ *
+ * Re-run whenever the mode starts or the windows change, which is why the
+ * phases are only seeded for orbits that did not have one. */
+void expo_orbits_layout(FwmExpo *e) {
+    double lap = expo_lap(e);
+    unsigned seed = 0x2545f491u;
+
+    for (int d = 0; d < FWM_DESKTOPS; d++) {
+        int n = 0;
+        for (int i = 0; i < e->n_items; i++)
+            if (e->items[i].desktop == d) n++;
+
+        double r;
+        if (n == 0) {
+            /* Nothing on it: give it somewhere of its own rather than piling
+             * every empty desktop onto one track. */
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            r = 0.40 + 0.85 * ((seed & 0xffff) / 65535.0);
+        } else {
+            /* Grows quickly at first and then levels off: two windows should
+             * look different from none, twenty need not look different from
+             * twelve. */
+            r = 0.45 + 0.75 * (1.0 - exp(-n / 3.5));
+        }
+        e->orbit_r[d] = r;
+        if (e->orbit_phase[d] == 0.0)
+            e->orbit_phase[d] = fmod((d + 1) * lap * 0.382, lap);
+
+        /* The windows on it become its moons, spread round it and turning at
+         * their own rates — inner ones faster, as everything else here. */
+        int k = 0;
+        for (int i = 0; i < e->n_items; i++) {
+            ExpoItem *it = &e->items[i];
+            if (it->desktop != d) continue;
+            double frac = n > 1 ? (double)k / n : 0.0;
+            it->moon_a = frac * 2.0 * M_PI;
+            it->moon_r = 0.34 + 0.30 * frac;
+            it->moon_rate = 0.55 * pow(it->moon_r, -1.5);
+            k++;
+        }
+    }
+}
+
+void expo_orbits_toggle(FwmServer *server) {
+    FwmExpo *e = server->expo;
+    if (!e || !e->orrery) return;
+    e->orbits = !e->orbits;
+    if (e->orbits) expo_orbits_layout(e);
+    e->orbit_blend_target = e->orbits ? 1.0 : 0.0;
+    wlr_log(WLR_INFO, "orrery: orbits %s", e->orbits ? "on" : "off");
+    expo_canvas_dirty(e);
+}
+
+void expo_orrery_roll(FwmServer *server, double delta) {
+    FwmExpo *e = server->expo;
+    if (!e || !e->orrery) return;
+    e->orrery_roll += delta;
+    if (e->orrery_roll > 2.0 * M_PI)  e->orrery_roll -= 2.0 * M_PI;
+    if (e->orrery_roll < -2.0 * M_PI) e->orrery_roll += 2.0 * M_PI;
+    wlr_log(WLR_INFO, "orrery: disc rolled to %.2f rad", e->orrery_roll);
+    expo_canvas_dirty(e);
+}
+
+
+void expo_orrery_collapse(FwmServer *server) {
+    FwmExpo *e = server->expo;
+    if (!e || !e->orrery) {
+        wlr_log(WLR_INFO, "star_collapse: the orrery is not running (press o)");
+        return;
+    }
+    if (!star_collapse_now(&e->orrery_star))
+        wlr_log(WLR_INFO, "star_collapse: the orrery's star is already a hole");
+    else
+        wlr_log(WLR_INFO, "orrery: collapsing from %s",
+                star_phase_name(e->orrery_star.phase));
+}
+
 bool expo_can_orbit(FwmExpo *e) {
     /* Not on the fallback path: a scene node is an axis-aligned rectangle, and
      * a strip that cannot even be curved certainly cannot be flown around. */
-    return e->gl && !e->leaving
-        && e->zoom_target > (EXPO_ZOOM_NEAR + EXPO_ZOOM_FAR) / 2.0;
+    if (!e->gl || e->leaving) return false;
+    /* The orrery is nothing BUT looking: the whole mode is a thing to walk
+     * around. Gating it on the zoom step, which exists to stop you tilting a
+     * desktop you are working in, would keep resetting the camera to level and
+     * take the mode's one verb away from it. */
+    if (e->orrery) return true;
+    return e->zoom_target > (EXPO_ZOOM_NEAR + EXPO_ZOOM_FAR) / 2.0;
 }
 
 /* Back to level, from anywhere. Everything that means "act on a desktop"
@@ -438,6 +654,87 @@ void expo_tick(FwmServer *server, double dt) {
      * same throw the windows themselves get. Stopped by grabbing it again, by
      * anything that asks for a desktop, and by running into the ends of a strip
      * that is not a ring (expo_clamp_pan). */
+    /* The orrery drives the ring instead of the hand. Fed through `spin`
+     * rather than moved directly, so everything that already stops a coasting
+     * ring — grabbing it, asking for a desktop, the ends of an open strip —
+     * stops this too without knowing it exists. */
+    /* The centre of the system. It lives at the middle of the screen because
+     * that is where the middle of the ring projects to — the camera always
+     * looks at the centre of the circle, so no projection is needed to place
+     * it, only to size it. */
+    if (e->orrery && e->orrery_draw && e->out) {
+        expo_canvas_dirty(e);
+        star_tick(&e->orrery_star, &e->orrery_cfg, dt);
+        e->orrery_star.wx = e->out->box.width / 2.0;
+        e->orrery_star.wy = e->out->box.height / 2.0;
+        /* The strip's own clock, which is what everything else here animates
+         * against. */
+        /* How open the disc looks: the angle between the disc's own normal
+         * and the direction you are looking from. Both vectors, not two
+         * numbers added together.
+         *
+         * This is what makes it an object in the world instead of a picture.
+         * A disc lying flat in the ring's plane is axially symmetric, so
+         * walking round the ring genuinely does not change it — that part was
+         * never wrong. But a TIPPED disc must change: from one side you see
+         * its face, from a quarter turn away you see its edge. The azimuth of
+         * the camera has to be in the arithmetic for that, and it was not,
+         * which is why tipping it and then turning the ring did nothing at
+         * all.
+         *
+         *   n = the disc's normal, tipped by `orrery_tilt` towards azimuth 0
+         *   d = the line of sight, from camera azimuth `az` and height `tilt`
+         *   open = |n . d|
+         *
+         * At orrery_tilt = 0 this reduces to |sin(tilt)| — the old formula,
+         * which is the check that the general case is right. */
+        double r_ring = expo_radius(e);
+        double az = r_ring > 0.0 ? e->pan / r_ring : 0.0;
+        double b = e->orrery_tilt;              /* tip of the disc */
+        double th = e->tilt;                    /* how high the camera is */
+        double open = fabs(sin(b) * cos(th) * cos(az) + cos(b) * sin(th));
+        star_draw_set_disc_tilt(e->orrery_draw, open);
+        star_draw_set_disc_roll(e->orrery_draw, e->orrery_roll);
+        star_draw_update(e->orrery_draw, &e->orrery_star, &e->orrery_cfg,
+                         e->clock, 0, 0, 0);
+    }
+
+    /* The orbits themselves. Kepler: the further out, the slower — that is
+     * the one rule that makes a set of circles read as a system rather than as
+     * a record player. Period goes as r^(3/2), so the angular rate goes as
+     * r^(-3/2).
+     *
+     * `pan` still turns the whole thing, so flying round with alt+drag works
+     * exactly as it does elsewhere; this is on top of it. */
+    if (e->orrery) {
+        /* Easing between the ring and the orbits. Slow enough to read as the
+         * desktops moving out and settling, quick enough not to be a wait. */
+        double bgap = e->orbit_blend_target - e->orbit_blend;
+        if (fabs(bgap) > 0.001) e->orbit_blend += bgap * (1.0 - exp(-2.2 * dt));
+        else                    e->orbit_blend = e->orbit_blend_target;
+    }
+
+    if (e->orrery && e->orbits) {
+        double lap = expo_lap(e);
+        for (int i = 0; i < e->n_items; i++) {
+            ExpoItem *it = &e->items[i];
+            it->moon_a += it->moon_rate * dt;
+            if (it->moon_a > 2.0 * M_PI) it->moon_a -= 2.0 * M_PI;
+        }
+        for (int d = 0; d < FWM_DESKTOPS; d++) {
+            double k = e->orbit_r[d] > 0.05 ? e->orbit_r[d] : 0.05;
+            e->orbit_phase[d] += e->orrery_speed * pow(k, -1.5) * dt;
+            if (lap > 0.0) e->orbit_phase[d] = fmod(e->orbit_phase[d], lap);
+        }
+        expo_canvas_dirty(e);
+    }
+
+    /* The ring itself no longer turns in the orrery: the desktops carry their
+     * own way round now, each at its own rate, so driving the whole strip on
+     * top of that would spin everything twice. `pan` is left to the hand,
+     * which is what alt+drag steers.
+     */
+
     if (!e->orbiting && fabs(e->spin) > EXPO_SPIN_MIN) {
         double before = e->pan_target;
         e->pan_target += e->spin * dt;

@@ -39,6 +39,9 @@ struct wlr_scene_buffer *expo_hints_show(struct wlr_scene_tree *parent,
 
 /* Redraw for a change of zoom step. Cheap and idempotent: it only redraws when
  * the set actually changed. */
+/* Swap the panel for the orrery's verbs, and back. */
+void expo_hints_set_orrery(struct wlr_scene_buffer *buf, bool orrery);
+
 void expo_hints_set_flight(struct wlr_scene_buffer *buf, int screen_w,
                            int screen_h, bool flight);
 

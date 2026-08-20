@@ -13,6 +13,7 @@
  */
 
 #include "expo_internal.h"
+#include "star_draw.h"
 #include "layer.h"
 #include "snapshot.h"
 #include "wallpaper.h"
@@ -99,11 +100,28 @@ static void expo_draw_item(FwmExpo *e, ExpoItem *it, double scale) {
     ExpoPt a, b;
     expo_facet_ends(e, it->desktop, &a, &b);
     double sw = server->screen_width;
-    double s0 = (it->wx - (double)it->desktop * sw) / sw;
-    double s1 = (it->wx + it->w - (double)it->desktop * sw) / sw;
+    double wx = it->wx, wy = it->wy;
+
+    /* Moons. In the orrery a window is not where it lies on its desktop, it is
+     * going round it — so the drawn position is displaced onto its own little
+     * orbit while `wx`/`wy` stay exactly where they were. That separation is
+     * the point: dragging a window, dropping it on another desktop and the hit
+     * test all still work against the real position, and only the picture is
+     * in orbit. */
+    if (e->orrery && e->orbits && it != e->drag) {
+        double cx = (double)it->desktop * sw + sw / 2.0;
+        double cy = server->screen_height / 2.0;
+        double rx = sw * 0.34 * it->moon_r;
+        double ry = server->screen_height * 0.34 * it->moon_r;
+        wx = cx + cos(it->moon_a) * rx - it->w / 2.0;
+        wy = cy + sin(it->moon_a) * ry - it->h / 2.0;
+    }
+
+    double s0 = (wx - (double)it->desktop * sw) / sw;
+    double s1 = (wx + it->w - (double)it->desktop * sw) / sw;
 
     struct scene3d_vert q[4], frame[4];
-    expo_quad(e, a, b, s0, s1, it->wy, it->wy + it->h, 0.0, 1.0, q);
+    expo_quad(e, a, b, s0, s1, wy, wy + it->h, 0.0, 1.0, q);
     if (!expo_quad_visible(e, q)) return;
 
     if (e->hover == it) {
@@ -207,6 +225,12 @@ void expo_canvas_dirty(FwmExpo *e) {
 
 /* True when the picture would come out identical to the one already on screen. */
 static bool expo_canvas_current(FwmExpo *e) {
+    /* The orrery is never current: its hole has an accretion disc turning in
+     * it, and a canvas redrawn only when the camera moves would show a still
+     * photograph of one. Everything else here is a picture that genuinely does
+     * not change until something moves it. */
+    if (e->orrery) return false;
+
     FwmServer *server = e->server;
     bool same = e->drawn_zoom == e->zoom
              && e->drawn_seam == e->seam
@@ -234,6 +258,73 @@ static bool expo_canvas_current(FwmExpo *e) {
     e->drawn_drag = e->drag;
     if (e->drag) { e->drawn_drag_x = e->drag->wx; e->drawn_drag_y = e->drag->wy; }
     return false;
+}
+
+/* ── the orrery's hole ────────────────────────────────────────────────── */
+
+/* The axis of the ring, in the ring's own coordinates.
+ *
+ * Two traps, both of which put the star somewhere that looked deliberate and
+ * was not:
+ *
+ *   - y is already centred by expo_ring_point (`wy - screen_height/2`), so the
+ *     middle of a desktop is y = 0. Passing half a screen here dropped the
+ *     star a half-screen below the ring.
+ *
+ *   - the origin is not the axis. expo_ring_point puts u = 0 — the middle of
+ *     the desktop facing you — at (0, 0, 0), and builds the circle as
+ *     z = r*cos(phi) - r, so the CENTRE of that circle is a full radius behind
+ *     it, at z = -r. Using the origin pinned the star to the front desktop
+ *     instead of to the middle of the ring, which is exactly where it kept
+ *     appearing.
+ */
+static ExpoPt orrery_centre(FwmExpo *e) {
+    return (ExpoPt){ 0.0, 0.0, -expo_radius(e) };
+}
+
+double expo_orrery_depth(FwmExpo *e) {
+    if (!e || !e->orrery || !e->orrery_draw) return 0.0;
+    return expo_project(e, orrery_centre(e), 0.0f, 0.0f).w;
+}
+
+void expo_draw_orrery(FwmExpo *e) {
+    if (!e || !e->orrery || !e->orrery_draw) return;
+    struct wlr_texture *tex = star_draw_texture(e->orrery_draw);
+    /* World units, not buffer pixels: the canvas is capped, so past a certain
+     * size the two stop being the same number. */
+    double half = star_draw_extent(e->orrery_draw);
+    if (!tex || half <= 0.0) return;
+
+    /* A billboard standing at the centre of the ring: a flat square that
+     * always faces the camera. For a star that is not an approximation — it
+     * looks the same from every side — and it is what lets the thing be sorted
+     * among the desktops by depth instead of being pasted over or under all of
+     * them, which is the whole difference between an object inside the ring
+     * and a picture behind it. */
+    ExpoPt c = orrery_centre(e);
+    struct scene3d_vert mid = expo_project(e, c, 0.0f, 0.0f);
+    if (mid.w <= 0.0f) return;
+
+    /* How many screen pixels one ring-unit is worth at this depth, measured
+     * from the projection itself so it agrees with the cards whatever the
+     * camera is doing. */
+    struct scene3d_vert probe =
+        expo_project(e, (ExpoPt){ c.x + 100.0, c.y, c.z }, 0.0f, 0.0f);
+    double px_per_unit = fabs(probe.x - mid.x) / 100.0;
+    if (px_per_unit <= 1e-4) return;
+    double r = half * px_per_unit;
+
+    static const float uv[4][2] = { {0,0}, {0,1}, {1,0}, {1,1} };
+    static const double ox[4] = { -1, -1, 1, 1 }, oy[4] = { -1, 1, -1, 1 };
+    struct scene3d_vert q[4];
+    for (int i = 0; i < 4; i++) {
+        q[i] = mid;
+        q[i].x = (float)(mid.x + ox[i] * r);
+        q[i].y = (float)(mid.y + oy[i] * r);
+        q[i].u = uv[i][0];
+        q[i].v = uv[i][1];
+    }
+    scene3d_quad(tex, q, 1.0f);
 }
 
 static void expo_draw_gl(FwmExpo *e) {
@@ -279,8 +370,24 @@ static void expo_draw_gl(FwmExpo *e) {
             expo_draw_inner(e, d, q);
     }
 
-    for (int i = 0; i < FWM_DESKTOPS; i++)
+    /* The orrery's hole, sorted in among the desktops by depth.
+     *
+     * It is an object standing in the MIDDLE of the ring, so half the ring is
+     * in front of it and half behind — which a scene node cannot express (it
+     * is flat and the graph has no depth) and this pass can, because every
+     * vertex here carries a real view depth. So it is drawn at the point in
+     * the far-to-near order where its own depth falls: the far desktops go
+     * down first, then the hole, then the near ones pass in front of it. */
+    double hole_w = expo_orrery_depth(e);
+    bool hole_drawn = (hole_w <= 0.0);
+    for (int i = 0; i < FWM_DESKTOPS; i++) {
+        if (!hole_drawn && key[order[i]] < hole_w) {
+            expo_draw_orrery(e);
+            hole_drawn = true;
+        }
         expo_draw_card(e, order[i], looking_at, open, scale);
+    }
+    if (!hole_drawn) expo_draw_orrery(e);
 
     /* The window in hand is above everything, wherever it is being carried. */
     if (e->drag) expo_draw_item(e, e->drag, scale);

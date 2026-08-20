@@ -412,6 +412,13 @@ void server_dispatch_action(FwmServer *server, const char *action) {
      * closing it, and jumping to a desktop, which is how super+1..0 stays the
      * fastest way across ten of them instead of a lot of scrolling. */
     if (expo_active(server)) {
+        /* Inside the strip, the fuse belongs to the star in the middle of the
+         * ring rather than to the one on a desktop: that is the star you are
+         * looking at, and the one whose collapse the orrery exists to show. */
+        if (strcmp(action, "star_collapse") == 0) {
+            expo_orrery_collapse(server);
+            return;
+        }
         if (strncmp(action, "view:", 5) == 0) {
             int d = resolve_desktop(server, action + 5);
             if (d >= 0) expo_goto_desktop(server, d);
@@ -815,6 +822,15 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         int desktop = resolve_desktop_ex(server, action + 5, &seam);
         desktop = back_and_forth(server, desktop, desktop_arg_is_number(action + 5));
         if (desktop >= 0) server_goto_desktop(server, desktop, seam);
+    } else if (strcmp(action, "star_spawn") == 0) {
+        server_star_spawn(server);
+    } else if (strcmp(action, "star_off") == 0) {
+        server_star_extinguish(server);
+    } else if (strcmp(action, "star_collapse") == 0) {
+        /* The fuse. A star gets through its fuel in hours, and the ending is
+         * the part worth watching, so there has to be a way to say "now" —
+         * what it ENDS as is still the mass it was fed, not this key. */
+        server_star_collapse(server);
     } else if (strcmp(action, "toggle_sun") == 0) {
         server->config.sun.enabled = !server->config.sun.enabled;
         server_sun_apply(server);

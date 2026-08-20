@@ -93,6 +93,26 @@ void server_sun_sync(FwmServer *server);
  * The path a config reload and the sun_* actions take, so that turning [sun]
  * on or off, or nudging it by a key, lands on screen in the same frame. */
 void server_sun_apply(FwmServer *server);
+/* The star: ignite it or put it out to match [star], advance its life by `dt`,
+ * draw it on every monitor looking at its desktop, and push the light at the
+ * windows while it is moving. Called from the tick, next to the sun.
+ *
+ * Unlike the sun this cannot skip the windows on a quiet tick: a burning star
+ * holds still, but its light depends on WHERE each window is, so a window that
+ * moved needs a new answer even when the star did not move at all. The walk is
+ * therefore driven by the same thing that moves windows — the tick — and the
+ * work per window is the arithmetic in star_light, not nine scene nodes. */
+void server_star_sync(FwmServer *server, double dt);
+/* Light the fuse: the `star_collapse` action, and the only way to see the end
+ * of a star before its fuel runs out. Does nothing if there is no star, or if
+ * it has already collapsed. */
+void server_star_collapse(FwmServer *server);
+/* Light a star where the pointer is, on the desktop being looked at, and put
+ * out whatever was burning before it. The `star_spawn` action: a star is a
+ * thing with a place, and pointing at the place beats editing [star].x. */
+void server_star_spawn(FwmServer *server);
+/* Put it out. The `star_off` action. */
+void server_star_extinguish(FwmServer *server);
 void server_reclaim_memory(void);
 FwmView *server_find_view(FwmServer *server, uint32_t id);
 void server_camera_settled(FwmServer *server);

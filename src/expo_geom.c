@@ -204,10 +204,35 @@ double expo_offset(FwmExpo *e, double wx, int desktop) {
 }
 
 /* The two ends of a desktop's facet, in ring space. */
+/* A ring point moved onto its desktop's own orbit.
+ *
+ * The ring is a circle of radius r whose centre sits at (0, y, -r) — see
+ * expo_ring_point. So moving a point to a different orbit is a scale about
+ * that centre and nothing more: the direction from the axis is what says where
+ * round the orbit you are, and the length is which orbit. */
+static ExpoPt orbit_scale(FwmExpo *e, ExpoPt p, int desktop) {
+    double r = expo_radius(e);
+    /* Eased in: 1.0 is the shared ring, orbit_r[d] is where this desktop ends
+     * up, and the blend walks between them. */
+    double k = 1.0 + (e->orbit_r[desktop] - 1.0) * e->orbit_blend;
+    if (r <= 0.0 || k <= 0.0 || k == 1.0) return p;
+    ExpoPt c = { 0.0, p.y, -r };
+    return (ExpoPt){ c.x + (p.x - c.x) * k, p.y, c.z + (p.z - c.z) * k };
+}
+
 void expo_facet_ends(FwmExpo *e, int desktop, ExpoPt *a, ExpoPt *b) {
     double sw = e->server->screen_width;
-    *a = expo_ring_point(e, expo_offset(e, (double)desktop * sw, desktop), 0);
-    *b = expo_ring_point(e, expo_offset(e, ((double)desktop + 1.0) * sw, desktop), 0);
+    /* In the orrery each desktop carries its own way round — planets do not
+     * keep formation — and rides its own orbit. Everything downstream (the
+     * depth sort, the hit test, where a dragged window lands) reads the facet
+     * through this one function, so this is the only place that has to know. */
+    double phase = e->orrery ? e->orbit_phase[desktop] * e->orbit_blend : 0.0;
+    *a = expo_ring_point(e, expo_offset(e, (double)desktop * sw, desktop) + phase, 0);
+    *b = expo_ring_point(e, expo_offset(e, ((double)desktop + 1.0) * sw, desktop) + phase, 0);
+    if (e->orrery && e->orbit_blend > 0.0) {
+        *a = orbit_scale(e, *a, desktop);
+        *b = orbit_scale(e, *b, desktop);
+    }
 }
 
 /* A world point on a desktop → the screen. Through the FACET, not the arc: a

@@ -19,6 +19,7 @@
 #include "server.h"
 #include "view.h"
 #include "rotate.h"
+#include "star.h"
 #include "defines.h"
 #include <time.h>
 #include <wlr/types/wlr_scene.h>
@@ -48,6 +49,11 @@ typedef struct {
     struct wlr_texture *tex;         /* curved path only */
     struct wlr_buffer *buf;          /* our lock on the snapshot */
     double wx, wy;                   /* world position, in real (1:1) px */
+    /* Moon duty, in the orrery: where this window is round its desktop and how
+     * far out. Kept apart from wx/wy because those are where the window IS —
+     * what a drag reads and where a drop lands — while this is only where it
+     * is drawn. */
+    double moon_a, moon_r, moon_rate;
     int w, h;                        /* world size */
     int desktop;
 } ExpoItem;
@@ -100,6 +106,42 @@ struct FwmExpo {
     int orbiting;                    /* middle button, or alt+left, held */
     double orbit_x, orbit_y;         /* cursor at the last orbit sample */
     double spin;                     /* strip px/s still to coast, after a throw */
+    /* Orrery mode: the ring turns by itself, seen from above, with a star in
+     * the middle of it.
+     *
+     * Everything it needs already existed — the desktops have been a ring
+     * since `toggle_wrap`, the camera has been able to lift off it since the
+     * tilt went in, and the ring has been able to coast since it could be
+     * thrown. This adds the one thing missing: something driving it, so the
+     * desktops go round instead of waiting to be pushed. */
+    int orrery;
+    double orrery_speed;             /* strip px/s the ring is driven at */
+    /* What sits in the middle of the ring. Its own object, not the one on the
+     * desktops: the orrery is a thing to look AT, and it should have a star in
+     * it whether or not [star] put one on a desktop. Config of its own too,
+     * because the size that suits a desktop is not the size that suits the
+     * centre of a circle of ten of them. */
+    FwmStar orrery_star;
+    StarConfig orrery_cfg;
+    struct FwmStarDraw *orrery_draw;
+    /* Its size, as a multiplier on [star] orrery_size, and how far its disc is
+     * tilted out of the ring's plane. Both are the user's to set from inside
+     * the strip: what looks right depends on the monitor and on how far back
+     * the camera is, and neither is knowable from a config file. */
+    double orrery_scale;
+    double orrery_tilt;
+    double orrery_roll;   /* which way the disc's plane is turned, radians */
+    /* Orbits: where each desktop is round its own one, in strip px, and how
+     * far out that orbit is as a fraction of the ring's radius. Planets do not
+     * share a track — that is the difference between an orrery and a
+     * carousel. */
+    double orbit_phase[FWM_DESKTOPS];
+    double orbit_r[FWM_DESKTOPS];
+    int orbits;           /* desktops ride their own orbits, rather than a ring */
+    /* How far along that change is, 0..1. Desktops leaving one shared ring for
+     * ten separate orbits is a big rearrangement, and done in one frame it
+     * reads as a glitch rather than as a manoeuvre. */
+    double orbit_blend, orbit_blend_target;
     double clock;                    /* seconds the strip has been open */
     double orbit_dt;                 /* seconds since the last orbit sample */
     struct timespec orbit_time;
@@ -193,6 +235,16 @@ void expo_sync_items(FwmExpo *e);
 void expo_live_pass(FwmExpo *e, double now);
 
 /* ── expo_draw.c ──────────────────────────────────────────────────────── */
+/* The orrery's hole: its view depth (0 when there is none), and drawing it as
+ * a billboard at the centre of the ring. Both live in expo_draw.c, and the
+ * depth is separate so the card loop can sort it in without drawing it. */
+double expo_orrery_depth(FwmExpo *e);
+void expo_draw_orrery(FwmExpo *e);
+
+/* Work out which orbit each desktop rides and where its windows sit round it.
+ * Driven by how many windows a desktop has. */
+void expo_orbits_layout(FwmExpo *e);
+
 void expo_layout(FwmExpo *e);
 void expo_canvas_dirty(FwmExpo *e);
 void expo_set_world_visible(FwmServer *server, FwmOutput *out, bool visible);

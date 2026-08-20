@@ -287,6 +287,73 @@ typedef struct {
     int    under_window;
 } SunConfig;
 
+/* ── star ────────────────────────────────────────────────────────────── */
+
+/*
+ * A star standing on a desktop: a light with a place in the world, and a life.
+ *
+ * The sun is a direction. This is an object — it is somewhere, so the shadows
+ * fan out from it instead of all pointing the same way, and it is close, so
+ * the far side of the screen is lit less than the near one. It also ENDS: it
+ * spends fuel while it burns, takes mass from the windows thrown past it, and
+ * when the fuel runs out the mass decides what is left. Under 1.44 solar
+ * masses an ember, under 2.5 a pulsar, over that a black hole. Those two
+ * numbers are physics and live in star.c; everything here is the dial.
+ *
+ * It does not replace [sun]. Both can be up, and a window then throws the
+ * shadow of whichever is throwing more light on it.
+ */
+typedef struct {
+    int    enabled;
+    int    desktop;        /* which desktop it stands on */
+    double x, y;           /* px from that desktop's top-left */
+    /* How high above the plane the windows lie on. This is the ONE scale in
+     * here: it sets how fast the shadows lengthen away from the star and how
+     * fast its light falls off, because both are the same geometry. */
+    double height;
+
+    double radius;         /* px across, on the main sequence */
+    double mass;           /* solar masses at ignition */
+    double mass_max;       /* it may not be fed past this; 0 = no ceiling */
+    /* What one thrown window is worth, and the speed that figure is written
+     * for: a window going twice as fast hands over twice as much. */
+    double mass_per_throw;
+    double throw_speed;    /* px/s */
+
+    /* How hard it pulls, as the acceleration in px/s^2 it applies one
+     * `height` away from itself, at one solar mass. Inverse square from there,
+     * clamped at the surface. 0 = a light with no weight to it.
+     *
+     * It is a field, not a body in the solver: a tiled window ignores it the
+     * way it ignores every other force, and nothing that walks the bodies has
+     * to learn about a fixture it must never move or destroy. */
+    double pull;
+
+    /* What one solar mass weighs, in the units the physics uses for windows
+     * (which are area times density, so a plain 800x600 window comes to about
+     * 480000). Nothing lighter than the star can move it: throw a terminal at
+     * a star and the terminal bounces. Raise this and the star becomes
+     * furniture; lower it and it can be knocked about like anything else. */
+    double weight;
+
+    /* The hole at the centre of the orrery — expo's ring of desktops with `o`
+     * pressed — as a fraction of the screen's height. It is not the star from
+     * the desktops and does not have to match it: what suits one desktop is
+     * not what suits the middle of a circle of ten. 0 leaves it out. */
+    double orrery_size;
+
+    double lifetime_s;     /* seconds of fuel, from ignition */
+    double collapse_s;     /* how long the squeeze takes */
+    double pulsar_hz;      /* beam revolutions per second, once it is one */
+
+    /* The shadows it throws. Their CHARACTER — blur, colour, whether they are
+     * drawn under the window — stays [sun]'s: a shadow is a shadow whatever
+     * cast it, and two sets of those keys would be two answers to one question. */
+    double length;         /* px at 45 degrees, the reference length */
+    double length_max;     /* px it may never exceed */
+    double opacity;        /* 0..1 at full strength */
+} StarConfig;
+
 /* ── input ───────────────────────────────────────────────────────────── */
 
 /*
@@ -1115,6 +1182,7 @@ typedef struct {
     CameraConfig    camera;
     DecorConfig     decor;
     SunConfig       sun;
+    StarConfig      star;
     InputConfig     input;
     FocusConfig     focus;
     EffectsConfig   effects;

@@ -113,6 +113,64 @@ bool snapshot_subtree(FwmServer *server, struct wlr_buffer *dst,
     return wlr_render_pass_submit(pass);
 }
 
+bool snapshot_lens(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
+                   int lx, int ly, struct wlr_scene_node *hide) {
+    if (!server->wlr_renderer || !dst) return false;
+
+    if (hide) wlr_scene_node_set_enabled(hide, false);
+
+    struct wlr_render_pass *pass =
+        wlr_renderer_begin_buffer_pass(server->wlr_renderer, dst, NULL);
+    if (!pass) {
+        if (hide) wlr_scene_node_set_enabled(hide, true);
+        return false;
+    }
+
+    wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
+        .box = { .x = 0, .y = 0, .width = dst->width, .height = dst->height },
+        .color = { .r = 0, .g = 0, .b = 0, .a = 0 },
+        .blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+    });
+
+    /* The wallpaper, from its own copy — see snapshot_world for why the layer
+     * on screen is no use. Drawn as the WHOLE screen, shifted so that the
+     * piece this buffer covers lands on it; the pass clips the rest. */
+    FwmOutput *sout = out ? out : server_active_output(server);
+    FwmWallpaper *wp = sout ? sout->wallpaper : NULL;
+    for (int i = 0; i < wallpaper_layer_count(wp); i++) {
+        struct wlr_buffer *src = wallpaper_layer_buffer(wp, i);
+        if (!src) continue;
+        struct wlr_texture *tex = wlr_texture_from_buffer(server->wlr_renderer, src);
+        if (!tex) continue;
+        int crop_w = sout && sout->box.width  > 0 ? sout->box.width  : server->screen_width;
+        int crop_h = sout && sout->box.height > 0 ? sout->box.height : server->screen_height;
+        struct wlr_fbox crop;
+        wallpaper_layer_crop(wp, i, sout ? sout->camera_x : 0, crop_w, crop_h, &crop);
+        wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
+            .texture = tex,
+            .src_box = crop,
+            .dst_box = { .x = (sout ? sout->box.x : 0) - lx,
+                         .y = (sout ? sout->box.y : 0) - ly,
+                         .width = crop_w, .height = crop_h },
+            .filter_mode = WLR_SCALE_FILTER_BILINEAR,
+            .blend_mode = WLR_RENDER_BLEND_MODE_PREMULTIPLIED,
+        });
+        wlr_texture_destroy(tex);
+    }
+
+    /* Then everything the scene draws: windows, decorations, the grass, the
+     * star itself if it is not the one asking. */
+    struct snapshot_ctx ctx = {
+        .pass = pass, .renderer = server->wlr_renderer,
+        .origin_x = lx, .origin_y = ly, .scale = 1.0,
+    };
+    wlr_scene_node_for_each_buffer(&server->scene->tree.node, snapshot_add_buffer, &ctx);
+
+    bool ok = wlr_render_pass_submit(pass);
+    if (hide) wlr_scene_node_set_enabled(hide, true);
+    return ok;
+}
+
 bool snapshot_world(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst) {
     if (!server->wlr_renderer || !dst) return false;
 

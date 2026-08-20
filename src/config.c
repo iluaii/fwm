@@ -86,6 +86,7 @@ int action_is_known(const char *a) {
         "expo", "toggle_wrap", "modes_menu", "stats_menu", FWM_RADIAL_ACTION,
         FWM_MIXER_ACTION,
         "toggle_sun", "sun_mode",
+        "star_spawn", "star_off", "star_collapse",
         "screenshot", "screenshot_region",
         "output_off", "toggle_internal_output", "outputs_on", NULL
     };
@@ -345,6 +346,63 @@ static void load_camera(toml_table_t *root, CameraConfig *c) {
     if (w.ok) c->wrap = w.u.b ? 1 : 0;
     toml_datum_t bf = toml_bool_in(tbl, "back_and_forth");
     if (bf.ok) c->back_and_forth = bf.u.b ? 1 : 0;
+}
+
+/* ── star section ────────────────────────────────────────────────────── */
+
+static void load_star(toml_table_t *root, StarConfig *c) {
+    c->enabled        = 0;   /* nothing about a desktop needs a star in it */
+    c->desktop        = 0;
+    c->x              = 480.0;
+    c->y              = 260.0;
+    c->height         = 620.0;
+    c->radius         = 90.0;
+    c->mass           = 1.10;  /* an ember, until something is thrown at it */
+    c->mass_max       = 6.0;
+    c->mass_per_throw = 0.06;
+    c->throw_speed    = 1400.0;
+    c->pull           = 260.0;
+    c->weight         = 480000.0;
+    c->orrery_size    = 0.16;
+    c->lifetime_s     = 4.0 * 3600.0;
+    c->collapse_s     = 2.2;
+    c->pulsar_hz      = 2.4;
+    c->length         = 18.0;
+    c->length_max     = 90.0;
+    c->opacity        = 0.5;
+
+    /* Called with no document at all to seed the defaults, before the file is
+     * read and again when there is no file to read. */
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "star");
+    if (!tbl) return;
+
+    toml_datum_t e = toml_bool_in(tbl, "enabled");
+    if (e.ok) c->enabled = e.u.b ? 1 : 0;
+    toml_datum_t d = toml_int_in(tbl, "desktop");
+    if (d.ok) c->desktop = (int)d.u.i;
+    LOAD_DOUBLE(tbl, "x", c->x);
+    LOAD_DOUBLE(tbl, "y", c->y);
+    LOAD_DOUBLE(tbl, "height", c->height);
+    LOAD_DOUBLE(tbl, "radius", c->radius);
+    LOAD_DOUBLE(tbl, "mass", c->mass);
+    LOAD_DOUBLE(tbl, "mass_max", c->mass_max);
+    LOAD_DOUBLE(tbl, "mass_per_throw", c->mass_per_throw);
+    LOAD_DOUBLE(tbl, "throw_speed", c->throw_speed);
+    LOAD_DOUBLE(tbl, "pull", c->pull);
+    LOAD_DOUBLE(tbl, "weight", c->weight);
+    LOAD_DOUBLE(tbl, "orrery_size", c->orrery_size);
+    LOAD_DOUBLE(tbl, "lifetime_s", c->lifetime_s);
+    LOAD_DOUBLE(tbl, "collapse_s", c->collapse_s);
+    LOAD_DOUBLE(tbl, "pulsar_hz", c->pulsar_hz);
+    LOAD_DOUBLE(tbl, "length", c->length);
+    LOAD_DOUBLE(tbl, "length_max", c->length_max);
+    LOAD_DOUBLE(tbl, "opacity", c->opacity);
+
+    if (c->height < 1.0)      c->height = 1.0;
+    if (c->radius < 1.0)      c->radius = 1.0;
+    if (c->collapse_s < 0.1)  c->collapse_s = 0.1;
+    if (c->lifetime_s < 1.0)  c->lifetime_s = 1.0;
 }
 
 /* ── decor section ───────────────────────────────────────────────────── */
@@ -1633,6 +1691,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_stats(NULL, cfg);
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
     load_sun(NULL, cfg);     /* likewise: a sun in the sky before anything is read */
+    load_star(NULL, &cfg->star);
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -1664,6 +1723,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_camera(root, &cfg->camera);
     load_decor(root, cfg);
     load_sun(root, cfg);
+    load_star(root, &cfg->star);
     load_input(root, cfg);
     load_focus(root, &cfg->focus, cfg);
     load_effects(root, &cfg->effects);

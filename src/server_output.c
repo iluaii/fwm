@@ -36,6 +36,7 @@
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "grass.h"
+#include "star_draw.h"
 #include "expo.h"
 #include "group.h"
 #include "shadow.h"
@@ -424,6 +425,8 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
     if (output->wallpaper_prev) wallpaper_destroy(output->wallpaper_prev);
     if (output->wallpaper) wallpaper_destroy(output->wallpaper);
     if (output->grass) grass_destroy(output->grass);
+    star_draw_destroy(output->star_draw);
+    output->star_draw = NULL;
     if (output->tray_buffer) cairo_overlay_destroy(output->tray_buffer);
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->destroy.link);
@@ -1041,6 +1044,7 @@ static void output_build_wallpaper(FwmOutput *out) {
     /* Grass stands in the same tree and must stay above the wallpaper, which
      * has just been added on top of it. */
     if (out->grass) grass_raise(out->grass);
+    if (out->star_draw) star_draw_raise(out->star_draw);
 }
 
 /* This monitor's grass, along the bottom of it. */
@@ -1048,6 +1052,8 @@ static void output_build_grass(FwmOutput *out) {
     FwmServer *server = out->server;
     if (out->grass) {
         grass_destroy(out->grass);
+        star_draw_destroy(out->star_draw);
+        out->star_draw = NULL;
         out->grass = NULL;
     }
     if (out->box.width <= 0 || out->box.height <= 0) return;
