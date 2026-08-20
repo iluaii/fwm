@@ -214,148 +214,253 @@ static const char star_frag_src[] =
     "    return c;\n"
     "}\n"
     "\n"
-    /* The disc, sampled by where you are IN it: how far out, and how far round.
-     * Both images of it — the near face and the one lensing wraps around the
-     * shadow — are this same function fed different coordinates, which is the
-     * only way they can plausibly be the same disc. */
-    /* A supermassive hole's disc reaches far further out than the shadow is
-       wide — in the Gargantua stills it runs clean off both sides of the frame
-       — so this is much larger than the tidy ring a first guess produces. */
-    "const float DISC_IN = 3.0;\n"
-    "const float DISC_OUT = 11.0;\n"
-    "vec3 disc_at(float rad, float ang, float t, float flip) {\n"
-    "    if (rad < DISC_IN || rad > DISC_OUT) return vec3(0.0);\n"
-    /*  Differential rotation, but SHEARED rather than spun.
-    
-        The gas orbits faster on the inside, and the honest way to say so is to
-        advance the sampling angle by omega*t. Done at full strength that winds
-        the inner disc through several turns while the outer barely moves, so
-        two neighbouring radii sample the noise field at completely unrelated
-        places and the texture tears into concentric rings — the "beams of
-        light" look, which is a sampling artefact and not gas at all.
-    
-        So the shear is kept gentle and the angle is fed through cos/sin, which
-        keeps neighbouring radii neighbouring and lets the noise itself supply
-        the structure. */
-    /*  Softened from r^-1.5 to r^-0.9. The exponent is what tears the texture
-        into rings: at the true Kepler value the inner edge laps the outer one
-        many times over and neighbouring radii sample unrelated noise. Dropping
-        the SPEED instead, which is what the last attempt did, cured the rings
-        by making the disc almost stationary. Flattening the exponent keeps the
-        inside visibly faster than the outside — which is the whole point —
-        while keeping neighbours neighbours. */
-    "    float omega = 3.4 / pow(rad, 0.9);\n"
-    "    float phi = ang + t * omega * flip;\n"
-    "    vec2 sp = vec2(cos(phi), sin(phi)) * rad;\n"
+    /* ---- the disc, and the light that leaves it ------------------------
+     *
+     * Everything below works in Schwarzschild units with the horizon at r = 1,
+     * which is what u_radius is: the shader's whole coordinate system is the
+     * hole's own radius, so no conversion is needed anywhere. In those units
+     * the photon sphere is at 1.5, the shadow an unlit observer sees is
+     * 3*sqrt(3)/2 = 2.598 across, and the innermost stable orbit — the inner
+     * edge of any disc — is at 3. Those three numbers are not chosen, they
+     * fall out of the metric, and having them fall out is the difference
+     * between a picture of a black hole and a black hole. */
+    "const float R_ISCO = 3.0;\n"
+    /* How far out the gas reaches. A real disc runs for thousands of radii;
+       what decides this is the canvas, which is only a few radii wide, and a
+       disc drawn past its edge is a disc cut off with scissors. Fed in from
+       main so it can follow whatever room this hole was given. */
     "\n"
-    /*  Gas, in three sizes. A big soft field for where the disc is thick and
-        where it is thin, a middle one dragged along the flow for the streaks,
-        and a fine one for the grain — none of them alone reads as matter. */
-    "    float body = turbulence(sp * 0.42, t * 0.9);\n"
-    "    float flow = turbulence(sp * 1.15 + vec2(phi * 0.8, 0.0), t * 1.6);\n"
-    "    float grain = turbulence(sp * 3.1, t * 2.4);\n"
-    "    float dens = body * 0.55 + flow * 0.35 + grain * 0.18;\n"
-    /*  Clumped, not smooth: raising it to a power thins the quiet regions and
+    /* Where the disc lies. incl is how far it is tipped out of edge-on (0 =
+       seen exactly in its plane, 1 = seen from directly above) and roll is
+       which way that tip is turned in the frame, so the same two numbers the
+       orrery's camera already supplies still say what they said. */
+    "vec3 disc_normal(float incl, float roll) {\n"
+    "    float e = asin(clamp(incl, 0.0, 1.0));\n"
+    "    vec3 n = vec3(0.0, cos(e), sin(e));\n"
+    "    float c = cos(roll), s = sin(roll);\n"
+    "    return vec3(n.x * c - n.y * s, n.x * s + n.y * c, n.z);\n"
+    "}\n"
+    "\n"
+    /* Blackbody-ish colour for a temperature given as a fraction of the
+       hottest gas in the picture. Not a fit to Planck's law — the eye is being
+       asked whether this is hot metal or a hot star, and the answer is carried
+       by the sequence dull red, orange, white, blue-white. */
+    "vec3 disc_heat(float t) {\n"
+    "    t = clamp(t, 0.0, 1.4);\n"
+    "    vec3 c = mix(vec3(0.55, 0.12, 0.02), vec3(1.00, 0.45, 0.08), smoothstep(0.0, 0.35, t));\n"
+    "    c = mix(c, vec3(1.00, 0.83, 0.45), smoothstep(0.30, 0.62, t));\n"
+    "    c = mix(c, vec3(1.00, 0.98, 0.92), smoothstep(0.58, 0.90, t));\n"
+    "    c = mix(c, vec3(0.78, 0.87, 1.00), smoothstep(0.95, 1.35, t));\n"
+    "    return c;\n"
+    "}\n"
+    "\n"
+    /* What the gas at one point of the disc sends towards us.
+     *
+     * P is where the photon crossed the disc's plane, dirv is the direction it
+     * was travelling as it crossed — and since the whole march runs BACKWARDS
+     * from the eye, the light itself went the other way, which is what makes
+     * the Doppler term below have the sign it has.
+     *
+     * Three things decide the brightness, and all three are physics rather
+     * than taste:
+     *
+     *   the temperature — a thin accretion disc runs as r^-3/4 with a factor
+     *     that goes to zero at the inner edge (there is no gas below the last
+     *     stable orbit to be heated by), so the disc is not brightest at its
+     *     rim but in a band just outside it;
+     *   the Doppler shift — the gas is orbiting at a good fraction of c, so
+     *     the side coming towards us is brighter, bluer and thinner, and the
+     *     receding side dimmer and redder. This is THE thing that tells a
+     *     photograph of a disc from a painting of one;
+     *   the gravitational shift — light climbing out of the well loses energy,
+     *     which reddens and dims the inner disc just where the Doppler term is
+     *     shouting loudest.
+     *
+     * The three multiply into one factor, and brightness goes as its cube:
+     * specific intensity over frequency cubed is what is conserved along a ray,
+     * so a shift of g multiplies what arrives by g^3. */
+    "vec4 disc_emit(vec3 P, vec3 dirv, vec3 N, vec3 A, vec3 B, float t, float r_out) {\n"
+    "    float rc = length(P);\n"
+    "    if (rc < R_ISCO || rc > r_out) return vec4(0.0);\n"
+
+    "    float ang = atan(dot(P, B), dot(P, A));\n"
+    "\n"
+    /*  The texture of the gas. Sampled in the disc's own turning frame, with
+        the shear kept gentler than Kepler's law: at the true exponent the
+        inner edge laps the outer many times over, neighbouring radii sample
+        unrelated noise, and the disc tears into concentric rings — a sampling
+        artefact that reads as beams of light. */
+    "    float phi = ang + t * (2.2 / pow(rc, 0.9));\n"
+    "    vec2 sp = vec2(cos(phi), sin(phi)) * rc;\n"
+    "    float body  = turbulence(sp * 0.55, t * 0.6);\n"
+    "    float flow  = turbulence(sp * 1.60 + vec2(phi * 0.9, 0.0), t * 1.1);\n"
+    "    float fine  = turbulence(sp * 5.60 + vec2(phi * 2.3, 0.0), t * 1.8);\n"
+    /*  Clumped hard: raising the sum to a power thins the quiet regions and
         leaves the bright filaments standing, which is what hot gas looks like
         and what an evenly lit ring never does. */
-    "    dens = clamp(pow(clamp(dens * 1.35, 0.0, 2.0), 1.7), 0.0, 2.2);\n"
+    "    float dens  = clamp(pow(clamp(body * 0.62 + flow * 0.54 + fine * 0.38, 0.0, 2.0), 2.2), 0.0, 2.6);\n"
     "\n"
-    /*  How much disc there is at this radius: fades in off the innermost
-        stable orbit and thins out towards the rim, with the falloff steeper
-        than linear because there is simply less gas further out. */
-    "    float edge = smoothstep(DISC_IN, DISC_IN * 1.22, rad) *\n"
-    "                 pow((1.0 - smoothstep(DISC_OUT * 0.55, DISC_OUT, rad)), 1.4);\n"
+    /*  Shakura-Sunyaev: T goes as r^-3/4, damped by (1 - sqrt(r_in/r))^1/4 so
+        the gas fades to nothing at the last stable orbit instead of being
+        brightest where it is about to fall in. */
+    "    float f = max(0.0, 1.0 - sqrt(R_ISCO / rc));\n"
+    "    float temp = pow(R_ISCO / rc, 0.75) * pow(f, 0.25);\n"
+    /*  And how much gas there is at all: thinning out towards the rim, where a
+        real disc simply runs out of the matter that was fed to it. */
+    "    float amount = pow(1.0 - smoothstep(r_out * 0.45, r_out, rc), 1.3);\n"
     "\n"
-    /*  Temperature: the inner disc is white-hot, the rim is a dull ember. A
-        real one runs roughly as r^-3/4; the exact law matters less than the
-        fact that the range is huge, which is what gives the picture its depth. */
-    "    float temp = pow(clamp(DISC_IN / rad, 0.0, 1.0), 0.75);\n"
-    "    vec3 col = mix(vec3(1.00, 0.28, 0.06),\n"
-    "                   vec3(1.00, 0.72, 0.34), smoothstep(0.15, 0.55, temp));\n"
-    "    col = mix(col, vec3(1.00, 0.96, 0.90), smoothstep(0.55, 0.95, temp));\n"
+    /*  Doppler. The gas runs on a circular orbit, so its speed is fixed by the
+        radius alone: v = sqrt(M/(r - 2M)), which with the horizon at 1 is
+        sqrt(0.5/(r - 1)) — 0.5c at the inner edge, and still 0.25c far out. */
+    "    vec3 vhat = normalize(cross(N, P));\n"
+    "    float beta = clamp(sqrt(0.5 / max(rc - 1.0, 0.35)), 0.0, 0.85);\n"
+    "    float gam = 1.0 / sqrt(1.0 - beta * beta);\n"
+    /*  The photon's direction of travel towards us is the reverse of the one
+        the march was going in. */
+    "    vec3 nhat = -normalize(dirv);\n"
+    "    float dopp = 1.0 / (gam * (1.0 - beta * dot(vhat, nhat)));\n"
+    /*  Climbing out of the well: sqrt(1 - 1/r), which is where the inner disc
+        loses back some of what the Doppler term gave it. */
+    "    float grav = sqrt(max(0.0, 1.0 - 1.0 / rc));\n"
+    "    float g = clamp(dopp * grav, 0.05, 3.5);\n"
     "\n"
-    /*  Relativistic beaming: the side coming towards you is brighter and
-        bluer, the receding side dimmer and redder. The most recognisable thing
-        about a photographed disc — one of even brightness reads as paint. */
-    "    float beta = 0.46 / sqrt(rad / DISC_IN);\n"
-    "    float toward = -sin(ang) * flip;\n"
-    "    float boost = clamp(pow(max(0.0, 1.0 + beta * toward), 3.4), 0.0, 7.0);\n"
-    "    col *= boost;\n"
-    "    col = mix(col, col * vec3(0.88, 0.95, 1.18), clamp(toward, 0.0, 1.0) * 0.45);\n"
-    "\n"
-    /*  Brightness rides the density, and the disc is BRIGHT: a hair of ambient
-        so the thin parts are still gas rather than holes, and a long way up
-        from there. */
-    "    return col * (0.12 + 2.6 * dens) * edge * temp;\n"
+    /*  Colour follows the shifted temperature — the approaching side is not
+        just brighter, it is BLUER, and that is half of what makes it read as
+        something moving. */
+    "    vec3 col = disc_heat(temp * 1.35 * (0.5 + 0.8 * g));\n"
+    /*  And how much it BLOCKS. The gas is thin but it is not glass: where it
+        is thick enough to shine it is also thick enough to hide what is behind
+        it, and without that the desktop showing through the disc washes the
+        disc out completely — a black hole over a bright window had a bright
+        window's colours and none of its own. */
+    "    float opacity = dens * amount * 1.5;\n"
+    "    return vec4(col * (0.18 + 2.1 * dens) * temp * amount * pow(g, 2.4), opacity);\n"
     "}\n"
     "\n"
-    /* Only the half of the disc that is IN FRONT of the hole.
+    /* ---- the ray ---------------------------------------------------------
      *
-     * The disc's plane passes through the centre, so half of it lies between
-     * you and the shadow and half lies behind. Over the shadow only the near
-     * half may be drawn — the far half is hidden by the hole itself. Drawing
-     * all of it painted the entire disc across the shadow, which is what
-     * "I can see the disc through it" was: not transparency, the wrong half.
+     * A photon's path near a black hole is not a bent straight line and cannot
+     * be faked with one: light that passes close enough goes round the back
+     * and comes out again, so the sky behind the hole appears TWICE — once
+     * around the outside, once as a thin ring hugging the shadow — and the
+     * disc appears three times, its top face over the hole, its far underside
+     * lifted into an arch above it, and a hairline of both at the photon ring.
+     * A one-line deflection formula produces none of that. It produces a
+     * smear, which is what stood here.
      *
-     * Which half is near is decided in the disc's own frame, so it follows the
-     * roll: the near side is simply the one below the disc's mid-line from
-     * where you are standing. */
-    "float disc_front_mask(vec2 uv) {\n"
-    "    float cr = cos(-u_roll), sr = sin(-u_roll);\n"
-    "    vec2 p = vec2(uv.x * cr - uv.y * sr, uv.x * sr + uv.y * cr);\n"
-    /*  Softened, so the join is not a knife edge across the shadow. */
-    "    return smoothstep(-0.06, 0.06, p.y);\n"
-    "}\n"
+     * So this integrates the real thing, backwards from the eye. In these
+     * units (horizon at r = 1, and thus M = 1/2) a null geodesic obeys
+     *
+     *     d2r/dl2 = -3 M h^2 r / |r|^5 = -1.5 h^2 r / |r|^5
+     *
+     * with h the angular momentum of the ray, which is conserved and is
+     * exactly the impact parameter it started with. That is one cross product
+     * and one multiply-add per step, and a hundred and sixty steps of it are
+     * cheaper than the two texture samples this shader was already doing.
+     *
+     * The step is proportional to r: coarse where nothing is happening, fine
+     * where the path is actually bending. */
+    "const float R_EYE = 30.0;\n"       /* how far off the camera stands, in radii */
+    "const float R_SKY = 3.0;\n"       /* and how far behind the hole the desktop hangs */
     "\n"
-    "vec3 disc_near(vec2 uv, float t, float incl) {\n"
-    /*  Into the disc's own frame first, then squash. Squashing in screen
-        coordinates is what held the long axis horizontal. */
-    "    float cr = cos(-u_roll), sr = sin(-u_roll);\n"
-    "    vec2 p = vec2(uv.x * cr - uv.y * sr, uv.x * sr + uv.y * cr);\n"
-    "    float y = p.y / max(incl, 0.06);\n"
-    "    return disc_at(length(vec2(p.x, y)), atan(y, p.x), t, 1.0);\n"
-    "}\n"
+    /* Everything the march found, so main can compose it in one place. */
+    "struct Ray {\n"
+    "    vec3 glow;    \n"   /* what the disc put into this pixel */
+    "    vec2 src;     \n"   /* where on the backdrop the ray came from */
+    "    float hit;    \n"   /* 1 if it reached the backdrop at all */
+    "    float veil;   \n"   /* how much of it the gas hides, 0..1 */
+    "    float caught; \n"   /* 1 if it fell in */
+    "};\n"
     "\n"
-    /* The far face, wrapped around the shadow.
-     *
-     * Light leaving the underside of the disc behind the hole is bent right
-     * over the top of it and arrives as a band hugging the photon ring. So
-     * this maps the RADIUS ON SCREEN just outside the shadow onto the radius
-     * in the disc — the far side is not somewhere else on screen, it is
-     * smeared into a ring around the shadow. That is the arch, and it is the
-     * one feature no unbent rendering can produce. */
-    "vec3 disc_far(vec2 uv, float b, float shadow, float t, float incl) {\n"
-    /*  The far image is CROWDED against the ring, not spread over the sky:
-        light from the whole far half of the disc arrives in a narrow band just
-        outside the shadow. Mapping it gently spread that band across the
-        entire frame and turned the picture into concentric rings — a target,
-        not a black hole. */
-    "    float rad = DISC_IN + (b - shadow) * 4.5;\n"
-    /*  In the disc's frame too, so the arch rides round with it instead of
-        staying stubbornly above and below. */
-    "    float cr = cos(-u_roll), sr = sin(-u_roll);\n"
-    "    vec2 p = vec2(uv.x * cr - uv.y * sr, uv.x * sr + uv.y * cr);\n"
-    "    float ang = atan(p.y, p.x);\n"
-    /*  Compressed against the ring: the closer to the shadow, the more of the
-        disc is squeezed into each pixel, so it brightens as it tightens. */
-    "    float squeeze = 1.0 / (1.0 + (b - shadow) * 1.10);\n"
-    /*  And it fades out well before the edge of the frame: past a couple of
-        shadow radii there is no more far side left to see. */
-    "    float band = (1.0 - smoothstep(shadow * 1.02, shadow * 1.9, b));\n"
-    /*  WHERE round the shadow it shows, and how strongly.
+    "Ray trace(vec2 uv, float incl, float roll, float t, float r_out) {\n"
+    "    Ray o;\n"
+    "    o.glow = vec3(0.0); o.src = uv; o.hit = 0.0; o.caught = 0.0; o.veil = 0.0;\n"
+    "\n"
+    "    vec3 N = disc_normal(incl, roll);\n"
+    /*  A frame for the disc's own plane, so a crossing can be given an angle.
+        Degenerate exactly face-on, where any pair will do. */
+    "    vec3 A = abs(N.z) > 0.999 ? vec3(1.0, 0.0, 0.0) : normalize(cross(N, vec3(0.0, 0.0, 1.0)));\n"
+    "    vec3 B = cross(N, A);\n"
+    "\n"
+    "    vec3 pos = vec3(uv, R_EYE);\n"
+    "    vec3 vel = vec3(0.0, 0.0, -1.0);\n"
+    "    float h2 = dot(uv, uv);\n"
+    "    float side = dot(pos, N);\n"
+    "    float behind = pos.z + R_SKY;\n"   /* the backdrop plane, as a signed distance */
+    "\n"
+    "    for (int i = 0; i < 420; i++) {\n"
+    "        float r = length(pos);\n"
+    /*      Fine where the path is bending hardest, and coarse where it is a
+            straight line in all but name. A ray that grazes the photon sphere
+            winds most of the way round the hole, and a step too coarse to
+            resolve that winding is what turns the hairline ring into a faint
+            outline; a ray twenty radii out is going nowhere interesting and
+            paying per step for the privilege. */
+    "        float dt = r > 8.0 ? 0.30 * r\n"
+    "                           : clamp(0.042 * r, 0.014, 1.6) * (r < 3.2 ? 0.5 : 1.0);\n"
+    "        vec3 acc = -1.5 * h2 * pos / pow(r, 5.0);\n"
+    "        vec3 nvel = vel + acc * dt;\n"
+    "        vec3 npos = pos + nvel * dt;\n"
+    "\n"
+    /*      Through the gas.
     
-        Seen edge-on, the far half of the disc is bent up over the shadow and
-        down under it, and hands over to the near disc at the sides: an ARCH,
-        not a hoop. Drawn as an even ring at every angle — which is what this
-        did — it becomes a bright doughnut facing the viewer that never changes
-        however the disc is tipped. That ring was the thing staring back, and
-        no amount of tilting could have touched it.
+            The disc has thickness — it is not a sheet of paper, and one drawn
+            as a plane vanishes exactly edge-on, which is the angle most of it
+            is seen at. But integrating that thickness step by step means
+            evaluating the noise dozens of times for every ray that skims along
+            the disc, and that is where thirty times the old shader's entire
+            cost went.
     
-        It also fades as the disc opens: looking down on a disc there is no
-        "far half lifted over the top", there is only more disc. */
-    "    float updown = pow(abs(sin(ang)), 0.7);\n"
-    "    float arch = mix(0.10, 1.0, updown) * (1.0 - 0.85 * incl);\n"
-    "    return disc_at(rad, ang, t, -1.0) * (0.75 + 1.6 * squeeze) * band * arch;\n"
+            So the gas is sampled once, where the ray crosses the mid-plane,
+            and multiplied by how far through the disc that ray actually
+            travelled: a head-on crossing gets one thickness, a grazing one
+            gets several, and the limb brightening that produces is the same
+            thing that makes the edge of a real disc its brightest part. The
+            cap is for the ray that crosses at nearly zero degrees, which would
+            otherwise be handed an unbounded amount of gas.
+    
+            Optically thin, so a ray that crosses twice picks up both — which
+            is how the far side of the disc comes to be visible above the near
+            one, and how a ray that winds around the photon sphere collects the
+            hairline ring. Front to back, so gas met earlier dims what is
+            behind it. */
+    "        float nside = dot(npos, N);\n"
+    "        if (side * nside < 0.0) {\n"
+    "            float f = side / (side - nside);\n"
+    "            vec3 P = pos + (npos - pos) * f;\n"
+    "            float thick = 0.14 + 0.055 * length(P);\n"
+    "            float ct = abs(dot(normalize(nvel), N));\n"
+    "            float path = thick * clamp(1.0 / max(ct, 0.05), 1.0, 9.0);\n"
+    "            vec4 em = disc_emit(P, nvel, N, A, B, t, r_out);\n"
+    "            o.glow += em.rgb * path * 5.5 * (1.0 - o.veil);\n"
+    "            o.veil = clamp(o.veil + em.a * path * 3.0, 0.0, 1.0);\n"
+    "        }\n"
+    "        side = nside;\n"
+    "\n"
+    /*      And through the backdrop: the desktop is a flat thing a fixed way
+            behind the hole, so the first crossing of that plane is where this
+            pixel's picture of it comes from. Bent rays reach it further out
+            than they appear to, which is the whole of the lensing. */
+    "        float nbehind = npos.z + R_SKY;\n"
+    "        if (o.hit < 0.5 && behind > 0.0 && nbehind <= 0.0) {\n"
+    "            float f = behind / (behind - nbehind);\n"
+    "            vec3 P = pos + (npos - pos) * f;\n"
+    "            o.src = P.xy;\n"
+    "            o.hit = 1.0;\n"
+    "        }\n"
+    "        behind = nbehind;\n"
+    "\n"
+    "        pos = npos; vel = nvel;\n"
+    "        float rn = length(pos);\n"
+    "        if (rn < 1.0) { o.caught = 1.0; break; }\n"
+    /*      Done: past the gas, past the backdrop, and on its way out. There is
+            nothing further along this ray for the picture to gain, and
+            marching it to some arbitrary far radius was most of what the
+            tracer cost. */
+    "        if (dot(pos, vel) > 0.0 && rn > r_out + 1.0) break;\n"
+    "        if (rn > R_EYE * 1.6) break;\n"
+    "    }\n"
+    "    return o;\n"
     "}\n"
     "\n"
     /* A note on smoothstep: every use below runs LOW edge first.
@@ -576,119 +681,90 @@ static const char star_frag_src[] =
     "\n"
     /* ---- the pulsar's beams ------------------------------------------- */
     /* A hole is drawn by its surroundings and nothing else — no surface, no
-     * corona, none of the above applies. */
+     * corona, none of the above applies. Every pixel of it is one photon run
+     * backwards from the eye until it either falls in, reaches the disc, or
+     * gets out to the desktop behind; see trace() above. */
     "    if (u_phase > 2.5) {\n"
     "        float rs = max(u_radius, 1.0);\n"
     "        vec2 uv = px / rs;\n"
     "        float b = length(uv);\n"
-    "        float shadow = 2.6;\n"
-    /*     How far the disc is tilted out of edge-on. Down to a hair: at zero
-           it is exactly edge-on and infinitely thin, so the floor only keeps
-           the divide below finite — it is not a refusal to lie flat. */
-    "        float incl = clamp(u_incl, 0.012, 0.98);\n"
-    "        vec3 acc = vec3(0.0);\n"
+    /*     How many radii of canvas this hole was given. It varies with the
+           mass — a heavy hole is drawn bigger inside a buffer sized for the
+           star it used to be — so the disc is fitted to the room rather than
+           to a constant, and never runs off the edge of its own picture. */
+    "        float dmax = min(u_res.x, u_res.y) * 0.5 / rs;\n"
+    "        float r_out = clamp(dmax * 0.80, R_ISCO * 1.5, 16.0);\n"
+    "        float incl = clamp(u_incl, 0.012, 0.995);\n"
     "\n"
-    /*     The background, bent — the arithmetic is in bend() above, shared
-           with the pulsar. Two backgrounds go through it: the desktop, when a
-           snapshot of it was taken, and the procedural sky when it was not.
-           The desktop is the interesting one — it is what makes this lensing
-           rather than decoration. */
-    /*     Faded out towards the edge of the canvas, together with the node's
-           own alpha below. Where the node is only partly opaque the bent copy and
-           the untouched original are both visible, and if the bending is still
-           strong there they are visibly different pictures — the window
-           appears twice, one straight and one curved. Bending that reaches
-           zero exactly where the coverage does makes the two identical, so the
-           seam cannot be seen. */
-    "        float dmax0 = min(u_res.x, u_res.y) * 0.5 / rs;\n"
-    "        float reach = (1.0 - smoothstep(dmax0 * 0.55, dmax0 * 0.98, b));\n"
-    "        vec2 dir = bend(uv, b, u_lens, reach);\n"
-    "        float seen = smoothstep(shadow * 0.99, shadow * 1.06, b);\n"
+    "        float tt = u_time + u_angle * 0.2;\n"
+    "        Ray ray = trace(uv, incl, u_roll, tt, r_out);\n"
+    "        vec3 acc = ray.glow;\n"
+    /*     The hairline ring is one pixel wide and it is the sharpest feature
+           in the picture, so it is the one that aliases. Three more rays
+           through the same pixel, only in the narrow band where the ring can
+           be, cost nothing anywhere else in the frame. */
+    "        if (b > 2.20 && b < 3.30) {\n"
+    "            float q = 0.35 / rs;\n"
+    "            acc = (acc + trace(uv + vec2( q,  q), incl, u_roll, tt, r_out).glow\n"
+    "                       + trace(uv + vec2(-q,  q), incl, u_roll, tt, r_out).glow\n"
+    "                       + trace(uv + vec2( q, -q), incl, u_roll, tt, r_out).glow) * 0.25;\n"
+    "        }\n"
     "        float lensed = 0.0;\n"
-    "        if (u_has_bg > 0.5) {\n"
-    /*         Back to buffer coordinates: the bent direction is in units of
-               the Schwarzschild radius, centred on the hole. */
-    "            vec2 bguv = (dir * rs + u_res * 0.5) / u_res;\n"
-    "            bguv = u_bg_rect.xy + bguv * u_bg_rect.zw;\n"
-    "            vec2 clamped = clamp(bguv, vec2(0.002), vec2(0.998));\n"
-    /*         Off the edge of the photograph there is nothing to bend, so the
-               lensing fades out rather than smearing the border pixel. */
-    "            float inside = step(length(bguv - clamped), 0.0001);\n"
-    "            vec4 bg = bg_texel(clamped);\n"
-    "            acc += bg.rgb * seen * mix(0.35, 1.0, inside);\n"
-    /*         How much of this pixel is the bent picture. It has to be a
-               REPLACEMENT, not an overlay: drawn semi-transparent, the lensed
-               copy lay over the unbent original and you saw both at once — a
-               film of curved windows floating over straight ones. Opaque
-               everywhere the lens reaches, falling off only at the edge of the
-               photograph and at the edge of the canvas. */
-    /*         Weighted by what was actually there — an empty patch of the
-               orrery's ring bends to nothing rather than to black. The shadow
-               is unaffected: it is made opaque further down, where it belongs,
-               because a hole you can see through is the one failure that
-               ruins the whole thing. */
-    "            lensed = seen * mix(0.0, 1.0, inside) * bg.a;\n"
-    "        } else {\n"
-    "            acc += sky(dir) * seen;\n"
+    "\n"
+    /*     The backdrop, seen from wherever the ray actually came from.
+    
+           Faded back to the straight-line answer at the edge of the canvas:
+           out there the node's own alpha is fading too, and where a partly
+           transparent bent copy lies over the untouched original the window
+           underneath appears twice. Bending that dies exactly where the
+           coverage does makes the two the same picture. */
+    "        float reach = (1.0 - smoothstep(dmax * 0.55, dmax * 0.98, b));\n"
+    "        vec2 src = mix(uv, ray.src, reach);\n"
+    "        if (ray.caught < 0.5 && ray.hit > 0.5) {\n"
+    "            if (u_has_bg > 0.5) {\n"
+    "                vec2 bguv = (src * rs + u_res * 0.5) / u_res;\n"
+    "                bguv = u_bg_rect.xy + bguv * u_bg_rect.zw;\n"
+    "                vec2 clamped = clamp(bguv, vec2(0.002), vec2(0.998));\n"
+    /*             Off the edge of the photograph there is nothing to show, so
+                   what the lens does there fades out instead of smearing the
+                   border pixel across the frame. */
+    "                float inside = step(length(bguv - clamped), 0.0001);\n"
+    "                vec4 bg = bg_texel(clamped);\n"
+    "                acc += bg.rgb * mix(0.30, 1.0, inside) * (1.0 - ray.veil);\n"
+    /*             Where the desktop was re-drawn bent, this pixel IS the
+                   desktop and has to cover what lies underneath completely:
+                   drawn semi-transparent it would sit as a film of curved
+                   windows over the straight ones. Weighted by what was
+                   actually there, so an empty patch bends to nothing rather
+                   than to black. */
+    "                lensed = inside * bg.a;\n"
+    "            } else {\n"
+    "                acc += sky(src) * (1.0 - ray.veil);\n"
+    "            }\n"
     "        }\n"
     "\n"
-    /*     The far side, lifted over the top and dropped under the bottom by
-           the same bending — the arch that makes the picture unmistakable.
-           It is the same disc seen at a steeper angle, mirrored, and it is
-           masked out inside the shadow: light coming round the back appears
-           AROUND the hole, never across it. Drawn before the near side, which
-           passes in front of it. */
-    "        float outside = smoothstep(shadow * 0.99, shadow * 1.04, b);\n"
-    "        acc += disc_far(uv, b, shadow, u_time, incl) * outside;\n"
+    /*     The glow the whole thing sits in. Gas this hot lights the dust
+           around it, and without a little of that the object is a bright shape
+           pasted on black rather than something enormous a long way off. Kept
+           small, tied to the disc's own reach, and never inside the shadow:
+           nothing comes out of there. */
+    "        float aura = exp(-pow(max(0.0, b - 2.6) / max(r_out * 0.55, 1.0), 1.3));\n"
+    "        acc += vec3(1.00, 0.66, 0.32) * aura * 0.16 * (1.0 - ray.caught);\n"
     "\n"
-    /*     The photon ring: light that orbited and escaped. Thin, and brighter
-           than anything else in the frame. */
-    /*     A hairline, not a hoop. It is the brightest thing in the frame and
-           it should be, but it is also THIN — light that orbited once and got
-           out — and a wide white band around the shadow reads as a lamp rather
-           than as a horizon. */
-    "        float ring = exp(-pow(abs(b - shadow) * 26.0, 1.4));\n"
-    "        acc += vec3(1.0, 0.95, 0.84) * ring * 5.5;\n"
-    "\n"
-    /*     And the near side, in front of the shadow. */
-    "        acc += disc_near(uv, u_time + u_angle * 0.35, incl);\n"
-    "\n"
-    /*     Nothing escapes from inside, so whatever was accumulated there goes
-           out — except the disc in FRONT of it, which is between you and the
-           hole and is not falling in. */
-    "        float inside = (1.0 - smoothstep(shadow * 0.96, shadow * 1.02, b));\n"
-    "        vec3 front = disc_near(uv, u_time, incl) * disc_front_mask(uv);\n"
-    "        acc = mix(acc, front, inside);\n"
-    "\n"
-    /*     The glow the whole thing sits in. A disc this hot lights the dust
-           around it, and without that the object is a bright shape pasted on
-           black instead of something enormous a long way off. Sampled from the
-           disc itself so it follows the tilt and the beaming rather than being
-           a symmetrical halo painted on afterwards. */
-    "        float aura = exp(-pow(max(0.0, b - shadow) * 0.16, 1.25));\n"
-    /*     Never inside the shadow. Nothing comes out of there — a hole with a
-           warm glow in the middle of it is a hole with a light on. */
-    "        acc += vec3(1.00, 0.72, 0.40) * aura * 0.30 *\n"
-    "               (0.35 + 0.65 * clamp(incl, 0.0, 1.0)) * (1.0 - inside);\n"
-    "\n"
-    /*     Tone-mapped gently, so the bright half of the disc keeps climbing
-           instead of clipping to a flat white slab. */
-    "        acc = acc / (1.0 + acc * 0.26);\n"
-    "        acc = pow(max(acc, vec3(0.0)), vec3(0.85));\n"
+    /*     Tone-mapped gently, so the approaching side of the disc keeps
+           climbing instead of clipping to a flat white slab — the highlight
+           rolls off the way a camera's does, which is where the white core
+           with colour surviving around it comes from. */
+    "        acc = acc / (1.0 + acc * 0.30);\n"
+    "        acc = pow(max(acc, vec3(0.0)), vec3(0.88));\n"
     "        float a = clamp(max(acc.r, max(acc.g, acc.b)) * 1.4, 0.0, 1.0);\n"
-    /*     Wherever the desktop was re-drawn bent, this pixel IS the desktop
-           and must cover what is underneath it completely. */
     "        a = max(a, lensed);\n"
-    /*     The shadow itself is opaque black, not transparent: you must not see
-           the wallpaper through a black hole. */
-    /*     Belt and braces: inside the shadow the pixel is opaque, full stop.
-           Derived from the arithmetic it was at the mercy of whatever the
-           driver did with the terms feeding it, and a black hole you can see
-           the desktop through is the one failure that ruins the whole thing.
-           Nothing escapes from in there, so nothing needs computing. */
-    "        if (b < shadow * 0.985) a = 1.0;\n"
-    "        else a = max(a, inside);\n"
-    "        float rim2 = (1.0 - smoothstep(dmax0 * 0.70, dmax0, b));\n"
+    /*     The shadow is opaque black, full stop. Derived from the arithmetic
+           it was at the mercy of whatever the driver made of the terms feeding
+           it, and a black hole you can see the wallpaper through is the one
+           failure that ruins the whole picture. */
+    "        a = max(a, ray.caught);\n"
+    "        float rim2 = (1.0 - smoothstep(dmax * 0.70, dmax, b));\n"
     "        vec3 out3 = acc * a * rim2;\n"
     "        gl_FragColor = vec4(out3.b, out3.g, out3.r, a * rim2);\n"
     "        return;\n"
