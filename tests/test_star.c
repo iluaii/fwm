@@ -756,6 +756,41 @@ static void test_what_bends_light(void) {
     CHECK(star_compactness(&s, &c) == 1.0);
 }
 
+static void test_the_disc_forms(void) {
+    /* A hole arrives out of the collapse with nothing around it. What becomes
+     * the disc is the part of the envelope that failed to escape, and it takes
+     * seconds to come down — so the picture has something to animate rather
+     * than a disc that is simply there from the first frame. */
+    CASE("a hole's disc falls in rather than arriving");
+    StarConfig c = base();
+    FwmStar s;
+    star_init(&s, &c);
+
+    /* Nothing that is not a hole is ever mid-formation. */
+    CHECK(star_disc_form(&s, &c) == 1.0);
+
+    s.mass = 6.0;
+    star_collapse_now(&s);
+    for (int i = 0; i < 2000 && s.phase == STAR_COLLAPSE; i++) star_tick(&s, &c, 1.0 / 60.0);
+    CHECK_INT(s.phase, STAR_HOLE);
+
+    /* Born with none of it. */
+    CHECK(star_disc_form(&s, &c) < 0.05);
+    star_tick(&s, &c, 0.5);
+    double early = star_disc_form(&s, &c);
+    CHECK(early > 0.0 && early < 1.0);
+    star_tick(&s, &c, 0.5);
+    CHECK(star_disc_form(&s, &c) > early);
+
+    /* Settled, and it stays settled — including after a meal, which makes the
+     * hole bigger without making it new. */
+    star_tick(&s, &c, 6.0);
+    CHECK(star_disc_form(&s, &c) == 1.0);
+    star_feed(&s, &c, c.throw_speed * 3.0);
+    star_tick(&s, &c, 1.0 / 60.0);
+    CHECK(star_disc_form(&s, &c) == 1.0);
+}
+
 int main(void) {
     test_mass_decides_the_ending();
     test_fuel_and_the_fuse();
@@ -774,6 +809,7 @@ int main(void) {
     test_it_spins();
     test_the_supernova();
     test_ignition();
+    test_the_disc_forms();
     test_the_beam_is_on_a_cone();
     test_pulsar_sweeps();
     test_what_bends_light();

@@ -49,7 +49,7 @@
 struct opts {
     int side;
     double radius, time, lum, phase, beam, angle, incl, roll, lens;
-    double blast, birth, aim;
+    double blast, birth, aim, form;
     float color[3];
     const char *out;
     const char *bg;      /* PNG-free: a raw BGRA dump to stand in for the desktop */
@@ -64,7 +64,7 @@ static void usage(void) {
            "  --phase P     0 burning, 1 collapsing, 2 pulsar, 3 hole (default 3)\n"
            "  --time T      seconds (default 3)\n"
            "  --lum L, --incl I, --roll R, --lens K, --angle A, --beam B,\n"
-           "  --blast X, --birth X, --aim X, --color r,g,b\n"
+           "  --blast X, --birth X, --aim X, --form X, --color r,g,b\n"
            "  --bg FILE     raw BGRA, side x side, as the desktop behind a hole\n"
            "  --raw FILE    also dump the premultiplied RGBA result, alpha and all\n"
            "  -o FILE       output PNG (default star.png)\n");
@@ -141,7 +141,7 @@ static GLuint compile(GLenum type, const char *src) {
 
 int main(int argc, char **argv) {
     struct opts o = { .side = 522, .radius = 39.0, .time = 3.0, .lum = 1.0,
-                      .phase = 3.0, .incl = 0.17, .lens = 1.0, .birth = 1.0,
+                      .phase = 3.0, .incl = 0.17, .lens = 1.0, .birth = 1.0, .form = 1.0,
                       .color = { 1.0f, 0.85f, 0.6f }, .out = "star.png" };
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -152,7 +152,7 @@ int main(int argc, char **argv) {
         NUM("--lum", lum) NUM("--phase", phase) NUM("--beam", beam)
         NUM("--angle", angle) NUM("--incl", incl) NUM("--roll", roll)
         NUM("--lens", lens) NUM("--blast", blast) NUM("--birth", birth)
-        NUM("--aim", aim)
+        NUM("--aim", aim) NUM("--form", form)
 #undef NUM
         if (!strcmp(a, "--color") && v) {
             sscanf(v, "%f,%f,%f", &o.color[0], &o.color[1], &o.color[2]); i++; continue;
@@ -236,6 +236,7 @@ int main(int argc, char **argv) {
     U1("u_phase", o.phase); U1("u_beam", o.beam); U1("u_angle", o.angle);
     U1("u_incl", o.incl); U1("u_roll", o.roll); U1("u_lens", o.lens);
     U1("u_blast", o.blast); U1("u_birth", o.birth); U1("u_aim", o.aim);
+    U1("u_form", o.form);
     U1("u_has_bg", has_bg ? 1.0 : 0.0);
     glUniform3f(glGetUniformLocation(prog, "u_color"), o.color[0], o.color[1], o.color[2]);
     glUniform4f(glGetUniformLocation(prog, "u_bg_rect"), 0.0f, 0.0f, 1.0f, 1.0f);

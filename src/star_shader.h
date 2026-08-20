@@ -87,6 +87,10 @@ static const char star_frag_src[] =
     "uniform float u_birth;\n"
     /* How head-on the pulsar's beam is this instant, 0..1: the pulse. */
     "uniform float u_aim;\n"
+    /* How far a hole's disc has formed, 0..1. A hole arrives with nothing
+     * around it and the gas comes down onto it; see star_disc_form. 1 for
+     * everything that is not a hole, and for a hole that has settled. */
+    "uniform float u_form;\n"
     "\n"
     /* ---- red and blue, and the one place they are put back ------------
      *
@@ -299,9 +303,13 @@ static const char star_frag_src[] =
      * The three multiply into one factor, and brightness goes as its cube:
      * specific intensity over frequency cubed is what is conserved along a ray,
      * so a shift of g multiplies what arrives by g^3. */
-    "vec4 disc_emit(vec3 P, vec3 dirv, vec3 N, vec3 A, vec3 B, float t, float r_out) {\n"
+    "vec4 disc_emit(vec3 P, vec3 dirv, vec3 N, vec3 A, vec3 B, float t,\n"
+    "               float r_in, float r_out) {\n"
     "    float rc = length(P);\n"
-    "    if (rc < R_ISCO || rc > r_out) return vec4(0.0);\n"
+    /*  Where the gas IS. Settled, that is everything from the last stable
+        orbit out to the rim; while the disc is still forming it is a ring on
+        its way down, and r_in is well outside the orbit it will end on. */
+    "    if (rc < r_in || rc > r_out) return vec4(0.0);\n"
 
     "    float ang = atan(dot(P, B), dot(P, A));\n"
     "\n"
@@ -372,11 +380,14 @@ static const char star_frag_src[] =
     /*  Shakura-Sunyaev: T goes as r^-3/4, damped by (1 - sqrt(r_in/r))^1/4 so
         the gas fades to nothing at the last stable orbit instead of being
         brightest where it is about to fall in. */
-    "    float f = max(0.0, 1.0 - sqrt(R_ISCO / rc));\n"
+    "    float f = max(0.0, 1.0 - sqrt(min(r_in, R_ISCO) / rc));\n"
     "    float temp = pow(R_ISCO / rc, 0.75) * pow(f, 0.25);\n"
     /*  And how much gas there is at all: thinning out towards the rim, where a
         real disc simply runs out of the matter that was fed to it. */
-    "    float amount = pow(1.0 - smoothstep(r_out * 0.45, r_out, rc), 1.3);\n"
+    "    float amount = pow(1.0 - smoothstep(r_out * 0.45, r_out, rc), 1.3)\n"
+    /*  and the inner edge, which is a soft one while the ring is still falling
+        — gas on its way in has no sharp boundary, the disc it becomes does. */
+    "                 * smoothstep(r_in, r_in * 1.10 + 0.15, rc);\n"
     "\n"
     /*  Doppler. The gas runs on a circular orbit, so its speed is fixed by the
         radius alone: v = sqrt(M/(r - 2M)), which with the horizon at 1 is
@@ -441,7 +452,12 @@ static const char star_frag_src[] =
     "    float caught; \n"   /* 1 if it fell in */
     "};\n"
     "\n"
-    "Ray trace(vec2 uv, float incl, float roll, float t, float r_out) {\n"
+    "Ray trace(vec2 uv, float incl, float roll, float t, float r_in, float r_out) {\n"
+    /*  How much light there is in the gas at all. Falling material is cold and
+        dark: what heats a disc is the friction of one orbit rubbing against
+        the next, and until it is a disc there are no orbits to rub. So it
+        arrives as a dim ring, and lights as it settles. */
+    "    float lit = mix(0.14, 1.0, smoothstep(0.06, 0.80, u_form));\n"
     "    Ray o;\n"
     "    o.glow = vec3(0.0); o.src = uv; o.hit = 0.0; o.caught = 0.0; o.veil = 0.0;\n"
     "\n"
@@ -497,11 +513,16 @@ static const char star_frag_src[] =
     "        if (side * nside < 0.0) {\n"
     "            float f = side / (side - nside);\n"
     "            vec3 P = pos + (npos - pos) * f;\n"
-    "            float thick = 0.14 + 0.055 * length(P);\n"
+    /*      Thicker while it is falling: gas that has not settled yet is a
+            ragged shell rather than a disc, and it thins as it grinds into
+            one. u_form is 1 for a hole that has arrived, and for everything
+            that is not a hole at all. */
+    "            float thick = (0.14 + 0.055 * length(P))\n"
+    "                        * mix(2.6, 1.0, smoothstep(0.15, 0.95, u_form));\n"
     "            float ct = abs(dot(normalize(nvel), N));\n"
     "            float path = thick * clamp(1.0 / max(ct, 0.09), 1.0, 6.0);\n"
-    "            vec4 em = disc_emit(P, nvel, N, A, B, t, r_out);\n"
-    "            o.glow += em.rgb * path * 5.5 * (1.0 - o.veil);\n"
+    "            vec4 em = disc_emit(P, nvel, N, A, B, t, r_in, r_out);\n"
+    "            o.glow += em.rgb * path * 5.5 * lit * (1.0 - o.veil);\n"
     "            o.veil = clamp(o.veil + em.a * path * 3.0, 0.0, 1.0);\n"
     "        }\n"
     "        side = nside;\n"
@@ -772,11 +793,28 @@ static const char star_frag_src[] =
            line across the picture, which is what a hole fed past its buffer
            used to look like. */
     "        float dmax = min(u_res.x, u_res.y) * 0.5 / rs;\n"
-    "        float r_out = clamp(dmax * 0.60, R_ISCO * 1.25, 16.0);\n"
+    "        float r_settled = clamp(dmax * 0.60, R_ISCO * 1.25, 16.0);\n"
+    /*     Where the gas is right now.
+    
+           Settled, it runs from the last stable orbit out to r_settled. A hole
+           that has just appeared has none: what becomes the disc is the part
+           of the star's envelope that failed to escape, and it starts as a
+           wide ring near the edge of the picture and comes down. Both edges
+           fall, the inner one first and faster, so the ring arrives at the
+           orbit it cannot cross and then spreads back out into a disc —
+           which is the shape of the real thing: matter grinds inward, piles up
+           at the innermost stable orbit, and what is behind it fans out.
+    
+           Squared, so it falls the way anything falls: slowly at first, and
+           then all at once. */
+    "        float fall = u_form * u_form;\n"
+    "        float r_in  = mix(dmax * 0.62, R_ISCO, smoothstep(0.0, 0.72, fall));\n"
+    "        float r_out = mix(dmax * 0.74, r_settled, smoothstep(0.12, 1.0, fall));\n"
+    "        r_out = max(r_out, r_in * 1.04);\n"
     "        float incl = clamp(u_incl, 0.012, 0.995);\n"
     "\n"
     "        float tt = u_time + u_angle * 0.2;\n"
-    "        Ray ray = trace(uv, incl, u_roll, tt, r_out);\n"
+    "        Ray ray = trace(uv, incl, u_roll, tt, r_in, r_out);\n"
     "        vec3 acc = ray.glow;\n"
     "        vec3 back = vec3(0.0);\n"
     /*     The hairline ring is one pixel wide and it is the sharpest feature
@@ -785,9 +823,9 @@ static const char star_frag_src[] =
            be, cost nothing anywhere else in the frame. */
     "        if (b > 2.20 && b < 3.30) {\n"
     "            float q = 0.35 / rs;\n"
-    "            acc = (acc + trace(uv + vec2( q,  q), incl, u_roll, tt, r_out).glow\n"
-    "                       + trace(uv + vec2(-q,  q), incl, u_roll, tt, r_out).glow\n"
-    "                       + trace(uv + vec2( q, -q), incl, u_roll, tt, r_out).glow) * 0.25;\n"
+    "            acc = (acc + trace(uv + vec2( q,  q), incl, u_roll, tt, r_in, r_out).glow\n"
+    "                       + trace(uv + vec2(-q,  q), incl, u_roll, tt, r_in, r_out).glow\n"
+    "                       + trace(uv + vec2( q, -q), incl, u_roll, tt, r_in, r_out).glow) * 0.25;\n"
     "        }\n"
     "        float lensed = 0.0;\n"
     "\n"
@@ -875,6 +913,34 @@ static const char star_frag_src[] =
            that nobody has seen before, which is the windows themselves bent
            round the shadow. Whatever glow there is here is light that came
            from somewhere, and it is already in the disc. */
+    /*     The envelope, still on its way out.
+    
+           A hole is drawn by an early return, so for as long as there has been
+           one it has been the only remnant that arrived without its own
+           supernova: the shell that a dwarf and a pulsar are born inside was
+           computed for it, and then never reached. That is most of why it
+           appeared out of nothing. It expands and fades over the same seconds
+           the fallback is coming down in — one envelope, the half that got
+           away and the half that did not — and it passes IN FRONT of the
+           shadow as well as around it, which is where half of a shell you are
+           standing outside of is. */
+    "        if (u_blast > 0.0) {\n"
+    /*         Sized to the canvas rather than to a constant. The shell that
+               other remnants are born inside expands in units of the star's
+               own radius, and a hole's radius is a fraction of that — the same
+               figure would run off the edge of the picture while it was still
+               at its brightest, and be cut off in a circle. This reaches the
+               rim just as it fades, where the node's own edge takes it. */
+    "            float far = 0.6 + (dmax * 0.95 - 0.6) * u_blast * u_blast;\n"
+    "            float thk = (0.35 + 2.4 * u_blast) * max(dmax / 9.0, 0.4);\n"
+    "            float ring = exp(-pow(abs(b - far) / thk, 2.0));\n"
+    "            float rag = 0.55 + 0.75 * turbulence(vec2(ang * 2.2, b * 0.5), u_time * 0.7);\n"
+    "            float fade = pow(1.0 - u_blast, 1.6);\n"
+    "            vec3 hot = mix(vec3(1.0, 0.55, 0.18), vec3(1.0, 0.98, 0.95),\n"
+    "                           clamp(1.0 - u_blast * 1.8, 0.0, 1.0));\n"
+    "            acc += hot * ring * rag * fade * 5.5;\n"
+    "        }\n"
+    "\n"
     /*     Tone-mapped gently, so the approaching side of the disc keeps
            climbing instead of clipping to a flat white slab — the highlight
            rolls off the way a camera's does, which is where the white core

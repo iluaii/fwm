@@ -1068,6 +1068,7 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
                                ? d->ring_tex : 0,
                 .blast     = star_blast(star, cfg),
                 .birth     = star_ignition(star, cfg),
+                .form      = star_disc_form(star, cfg),
             };
             memcpy(gp.color, paint.color, sizeof(gp.color));
             if (gp.background_gl) memcpy(gp.bg_rect, d->ring_rect, sizeof(gp.bg_rect));

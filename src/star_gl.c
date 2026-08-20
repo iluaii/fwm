@@ -39,7 +39,7 @@ static struct {
     GLint attr_pos;
     GLint u_res, u_time, u_radius, u_color, u_lum, u_phase, u_beam;
     GLint u_bg, u_has_bg, u_angle, u_incl, u_roll, u_blast, u_birth, u_aim;
-    GLint u_lens, u_bg_rect;
+    GLint u_lens, u_bg_rect, u_form;
     bool tried;
     bool ok;
     struct wlr_renderer *owner;
@@ -123,6 +123,7 @@ static bool program_ready(struct wlr_renderer *renderer) {
     prog.u_birth  = glGetUniformLocation(id, "u_birth");
     prog.u_aim    = glGetUniformLocation(id, "u_aim");
     prog.u_lens   = glGetUniformLocation(id, "u_lens");
+    prog.u_form   = glGetUniformLocation(id, "u_form");
     prog.u_bg_rect = glGetUniformLocation(id, "u_bg_rect");
     prog.ok = true;
     wlr_log(WLR_INFO, "star: shader ready");
@@ -207,6 +208,10 @@ bool star_gl_render(struct wlr_renderer *renderer, struct wlr_buffer *dst,
     glUniform1f(prog.u_birth, (GLfloat)(p->birth > 0.0 ? p->birth : 1.0));
     glUniform1f(prog.u_aim, (GLfloat)p->beam_aim);
     glUniform1f(prog.u_lens, (GLfloat)p->lens);
+    /* Zero is a real value here: it is the instant a hole appears, with
+     * nothing around it yet. Negative is the way to say nothing about it, the
+     * same convention disc_tilt uses above. */
+    glUniform1f(prog.u_form, (GLfloat)(p->form >= 0.0 ? p->form : 1.0));
 
     /* The desktop, for a hole to bend. Only 2D textures: a client buffer that
      * arrived as an external image would need its own sampler type, and the

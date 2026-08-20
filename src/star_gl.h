@@ -61,6 +61,11 @@ typedef struct {
     double lens;
     double blast;     /* supernova shell, 0..1; see star_blast */
     double birth;     /* ignition, 0..1; see star_ignition */
+    /* How far a hole's disc has settled out of the fallback, 0..1; see
+     * star_disc_form. 1 for everything else, and a hole arrives at 0 — so
+     * unlike the rest of these, zero MEANS something. Negative says nothing
+     * and is taken as settled. */
+    double form;
     double beam_aim;  /* 0..1, how head-on the pulsar's beam is */
     /* The desktop behind it, photographed this frame, for a hole to bend.
      * NULL means there is none and the shader falls back to its own sky. */

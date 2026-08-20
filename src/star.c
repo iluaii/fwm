@@ -293,6 +293,19 @@ double star_hole_half(const StarConfig *cfg) {
     return remnant_radius_px(STAR_HOLE, ceiling, cfg) * STAR_HOLE_BOX;
 }
 
+/* How long the fallback takes to settle into a disc. Longer than the blast it
+ * follows (STAR_BLAST_S), so the shell is still on its way out while the ring
+ * is coming down — which is what the two are: one envelope, the half that got
+ * away and the half that did not. */
+#define STAR_DISC_S 3.6
+
+double star_disc_form(const FwmStar *star, const StarConfig *cfg) {
+    (void)cfg;
+    if (!star || star->phase != STAR_HOLE) return 1.0;
+    if (star->phase_s >= STAR_DISC_S) return 1.0;
+    return star->phase_s / STAR_DISC_S;
+}
+
 double star_luminosity(const FwmStar *star, const StarConfig *cfg) {
     if (!star || !cfg) return 0.0;
     switch (star->phase) {

@@ -134,6 +134,23 @@ double star_radius(const FwmStar *star, const StarConfig *cfg);
  * amount of feeding is to overflow it. */
 double star_hole_half(const StarConfig *cfg);
 
+/* How far the hole's disc has formed, 0..1, and 1 for anything that is not a
+ * hole.
+ *
+ * A hole arrives out of the flash at the end of the collapse with nothing
+ * around it. What becomes the disc is the part of the star that missed: the
+ * envelope thrown off by the collapse does not all escape, and what falls back
+ * has too much angular momentum to go straight in, so it settles into a ring
+ * and grinds its way inward until it is orbiting as close as anything can. THE
+ * disc is the end of that, not the beginning — and turning up with one already
+ * spinning is the one part of a star's whole life that looked like a switch
+ * being thrown.
+ *
+ * So this drives the fall: the gas starts as a wide, cool, ragged ring near
+ * the edge of the picture and comes down onto the last stable orbit, spreading
+ * into a disc and lighting as it goes. */
+double star_disc_form(const FwmStar *star, const StarConfig *cfg);
+
 /* How hard it shines, 1 being an ordinary day on the main sequence. A star
  * being squeezed gets BRIGHTER: the surface loses area as the square of the
  * radius but gains temperature faster, which is also why it goes blue. Zero
