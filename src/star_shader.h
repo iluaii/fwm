@@ -800,6 +800,22 @@ static const char star_frag_src[] =
            coverage does makes the two the same picture. */
     "        float reach = (1.0 - smoothstep(dmax * 0.45, dmax * 0.85, b));\n"
     "        vec2 src = mix(uv, ray.src, reach);\n"
+    /*     How much work the lens did on this pixel: how far the light it shows
+           came from, compared with where it appears to be. Near the shadow the
+           answer is radii, at the edge of the canvas it is nothing — and it is
+           what decides whether this pixel may be see-through. Anywhere the
+           lens moved the picture, the pixel belongs to the hole and has to
+           cover what is underneath, because what is underneath is the same
+           desktop drawn straight. */
+    "        float bent = smoothstep(0.08, 0.40, length(src - uv));\n"
+    /*     A ray that neither fell in nor ever reached the desktop went round
+           the back and left sideways or came out towards the eye. There is
+           nothing behind it to show and nothing in front either: it is black.
+           It must not be TRANSPARENT black, though — that is a window seen
+           unbent through the gap between the shadow and the disc, which is
+           precisely where these rays live. */
+    "        float lost = (1.0 - ray.hit) * (1.0 - ray.caught);\n"
+    "        float offpage = 0.0;\n"
     "        if (ray.caught < 0.5 && ray.hit > 0.5) {\n"
     "            if (u_has_bg > 0.5) {\n"
     "                vec2 bguv = (src * rs + u_res * 0.5) / u_res;\n"
@@ -809,6 +825,7 @@ static const char star_frag_src[] =
                    what the lens does there fades out instead of smearing the
                    border pixel across the frame. */
     "                float inside = step(length(bguv - clamped), 0.0001);\n"
+    "                offpage = 1.0 - inside;\n"
     "                vec4 bg = bg_texel(clamped);\n"
     /*             Just outside the shadow the lens squeezes the whole of the
                    desktop into a band a few pixels wide. One sample of a
@@ -874,6 +891,16 @@ static const char star_frag_src[] =
     "        acc += back;\n"
     "        float a = clamp(max(acc.r, max(acc.g, acc.b)) * 1.4, 0.0, 1.0);\n"
     "        a = max(a, lensed);\n"
+    /*     And opaque wherever the lens did the work, whether or not it found
+           anything to show there. Off the edge of the photograph near the
+           shadow, and along every path that never reached the desktop at all,
+           the honest picture is black — but it has to be a black that covers,
+           or the window behind the hole shows through the gap between the
+           shadow and the disc exactly as if there were no hole at all. Out at
+           the rim, where the lens moves nothing, this is zero and the desktop
+           comes through untouched, which is what keeps the node's edge
+           invisible. */
+    "        a = max(a, max(lost, offpage * bent));\n"
     /*     The shadow is opaque black, full stop. Derived from the arithmetic
            it was at the mercy of whatever the driver made of the terms feeding
            it, and a black hole you can see the wallpaper through is the one

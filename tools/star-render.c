@@ -53,6 +53,7 @@ struct opts {
     float color[3];
     const char *out;
     const char *bg;      /* PNG-free: a raw BGRA dump to stand in for the desktop */
+    const char *raw;     /* where to dump the premultiplied RGBA, for checking alpha */
 };
 
 static void usage(void) {
@@ -65,6 +66,7 @@ static void usage(void) {
            "  --lum L, --incl I, --roll R, --lens K, --angle A, --beam B,\n"
            "  --blast X, --birth X, --aim X, --color r,g,b\n"
            "  --bg FILE     raw BGRA, side x side, as the desktop behind a hole\n"
+           "  --raw FILE    also dump the premultiplied RGBA result, alpha and all\n"
            "  -o FILE       output PNG (default star.png)\n");
 }
 
@@ -156,6 +158,7 @@ int main(int argc, char **argv) {
             sscanf(v, "%f,%f,%f", &o.color[0], &o.color[1], &o.color[2]); i++; continue;
         }
         if (!strcmp(a, "--bg") && v) { o.bg = v; i++; continue; }
+        if (!strcmp(a, "--raw") && v) { o.raw = v; i++; continue; }
         if (!strcmp(a, "-o") && v) { o.out = v; i++; continue; }
         o.out = a;
     }
@@ -255,6 +258,12 @@ int main(int argc, char **argv) {
      * over the black the viewer will put behind it. Composited over black is
      * exactly what the premultiplied value already is, so this writes it as
      * it stands. */
+    /* The alpha matters as much as the colour: a hole that leaves a pixel
+     * transparent is a hole you can see the unbent desktop through. */
+    if (o.raw) {
+        FILE *f = fopen(o.raw, "wb");
+        if (f) { fwrite(px, 1, (size_t)o.side * o.side * 4, f); fclose(f); }
+    }
     if (!write_png(o.out, px, o.side, o.side)) {
         fprintf(stderr, "could not write %s\n", o.out); return 1;
     }
