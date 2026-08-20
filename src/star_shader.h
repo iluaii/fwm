@@ -83,6 +83,34 @@ static const char star_frag_src[] =
     /* How head-on the pulsar's beam is this instant, 0..1: the pulse. */
     "uniform float u_aim;\n"
     "\n"
+    /* ---- red and blue, and the one place they are put back ------------
+     *
+     * The buffer this shader draws into is ARGB8888, which on a little-endian
+     * machine is the bytes B, G, R, A in that order — the format the scene
+     * graph, cairo and every other surface in fwm speak. GL knows nothing
+     * about that: it puts the first component of gl_FragColor in the first
+     * byte. So a shader that writes what it calls red has written the byte the
+     * scene reads as blue, and everything painted from a constant in here came
+     * out the other way round: an ordinary yellow star was displayed a cold
+     * blue, an ember's orange a flat cyan, and a black hole's warm ring the
+     * pale blue-white it has always been.
+     *
+     * It went unnoticed for as long as it did because the one thing that
+     * LOOKED right is the one thing that passes straight through — the
+     * photograph of the desktop a compact star bends. That is a buffer in the
+     * same format, so its blue arrived in the shader's red, went back out
+     * through red, and landed in blue again: two errors, cancelling exactly,
+     * and the only part of the picture anyone could check against something.
+     *
+     * Both are undone in one place each: the background is put right where it
+     * is sampled, so everything in between is honest RGB, and the whole frame
+     * is swapped back on the way out. Nothing else in the shader has to know,
+     * and tools/star-render.c does the same on the way to its PNG. */
+    "vec4 bg_texel(vec2 uv) {\n"
+    "    vec4 t = texture2D(u_bg, uv);\n"
+    "    return vec4(t.b, t.g, t.r, t.a);\n"
+    "}\n"
+    "\n"
     /* ---- value noise. Cheap, and enough: what sells a star's surface is the
        SPECTRUM (structure at every scale), not the quality of one octave. --- */
     "float hash(vec2 p) {\n"
@@ -460,7 +488,7 @@ static const char star_frag_src[] =
            more obvious. So the background's OWN coverage comes through, and
            empty stays empty: what is behind expo shows through the lens
            exactly as it does beside it. */
-    "        vec4 bgs = u_has_bg > 0.5 ? texture2D(u_bg, cl0) : vec4(0.0);\n"
+    "        vec4 bgs = u_has_bg > 0.5 ? bg_texel(cl0) : vec4(0.0);\n"
     "        lens_pre = bgs.rgb * cover;\n"
     "        lens_a   = bgs.a   * cover;\n"
     "    }\n"
@@ -586,7 +614,7 @@ static const char star_frag_src[] =
     /*         Off the edge of the photograph there is nothing to bend, so the
                lensing fades out rather than smearing the border pixel. */
     "            float inside = step(length(bguv - clamped), 0.0001);\n"
-    "            vec4 bg = texture2D(u_bg, clamped);\n"
+    "            vec4 bg = bg_texel(clamped);\n"
     "            acc += bg.rgb * seen * mix(0.35, 1.0, inside);\n"
     /*         How much of this pixel is the bent picture. It has to be a
                REPLACEMENT, not an overlay: drawn semi-transparent, the lensed
@@ -661,7 +689,8 @@ static const char star_frag_src[] =
     "        if (b < shadow * 0.985) a = 1.0;\n"
     "        else a = max(a, inside);\n"
     "        float rim2 = (1.0 - smoothstep(dmax0 * 0.70, dmax0, b));\n"
-    "        gl_FragColor = vec4(acc * a * rim2, a * rim2);\n"
+    "        vec3 out3 = acc * a * rim2;\n"
+    "        gl_FragColor = vec4(out3.b, out3.g, out3.r, a * rim2);\n"
     "        return;\n"
     "    }\n"
     "\n"
@@ -748,7 +777,8 @@ static const char star_frag_src[] =
        drawn over identical there, and the buffer's border invisible. With
        nothing bent (lens_a 0) this is exactly the line it replaces. */
     "    float la = lens_a * rim;\n"
-    "    gl_FragColor = vec4(col * alpha + lens_pre * rim * (1.0 - alpha),\n"
+    "    vec3 out3 = col * alpha + lens_pre * rim * (1.0 - alpha);\n"
+    "    gl_FragColor = vec4(out3.b, out3.g, out3.r,\n"
     "                        alpha + la * (1.0 - alpha));\n"  /* premultiplied */
     "}\n";
 
