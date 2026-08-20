@@ -505,6 +505,36 @@ bool scene3d_quad_solid(const float rgba[4], const struct scene3d_vert v[4]) {
     return true;
 }
 
+static struct {
+    GLuint tex;
+    int w, h;
+} capture;
+
+unsigned scene3d_capture(void) {
+    if (!pass.open || pass.dw <= 0 || pass.dh <= 0) return 0;
+    if (!capture.tex) {
+        glGenTextures(1, &capture.tex);
+        if (!capture.tex) return 0;
+        capture.w = capture.h = 0;
+    }
+    glBindTexture(GL_TEXTURE_2D, capture.tex);
+    if (capture.w != pass.dw || capture.h != pass.dh) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, pass.dw, pass.dh, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        capture.w = pass.dw;
+        capture.h = pass.dh;
+    }
+    /* Straight off the framebuffer that is bound right now — no readback, no
+     * allocation after the first frame. */
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, pass.dw, pass.dh);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return capture.tex;
+}
+
 void scene3d_end(void) {
     if (!pass.open) return;
     glDisable(GL_BLEND);
@@ -515,6 +545,8 @@ void scene3d_end(void) {
 
 void rotate_shutdown(struct wlr_renderer *renderer) {
     if (!renderer || !rotate_supported(renderer)) return;
+    capture.tex = 0;   /* the context it lived in is going; forgetting is the job */
+    capture.w = capture.h = 0;
 
     struct program *all[] = { &prog_2d, &prog_ext,
                               &prog3d_2d, &prog3d_ext, &prog3d_solid };

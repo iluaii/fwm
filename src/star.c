@@ -218,6 +218,51 @@ static double collapse_start(const FwmStar *star, const StarConfig *cfg) {
     return start < end ? end : start;
 }
 
+/* Radii in kilometres, which is the only place in this file that leaves the
+ * screen's units — and it has to, because compactness is a ratio of two real
+ * lengths and drawing a neutron star at thirty pixels does not make it thirty
+ * pixels wide. The relations are the usual ones: a neutron star is much the
+ * same size whatever it weighs, a white dwarf gets SMALLER as it gets heavier
+ * (that is the electron gas, and it is why there is a Chandrasekhar limit at
+ * all), and a main-sequence star runs a little under linear in mass. */
+#define KM_PER_SOLAR_MASS 2.953   /* the Schwarzschild radius of one sun */
+#define KM_NEUTRON        11.5
+#define KM_DWARF_AT_ONE   8770.0  /* scaled by m^(-1/3) from here */
+#define KM_SUN            696000.0
+
+double star_compactness(const FwmStar *star, const StarConfig *cfg) {
+    if (!star) return 0.0;
+    /* At a horizon the two lengths are the same length. */
+    if (star->phase == STAR_HOLE) return 1.0;
+
+    double m = star->mass > 0.05 ? star->mass : 0.05;
+    double rs = KM_PER_SOLAR_MASS * m;
+    double R;
+    if (star->phase == STAR_NEUTRON)   R = KM_NEUTRON;
+    else if (star->phase == STAR_DWARF) R = KM_DWARF_AT_ONE / cbrt(m);
+    else                                R = KM_SUN * pow(m, 0.8);
+
+    /* Mid-fall it is neither the star it was nor the remnant it will be, and
+     * the drawing already knows how far down it has got. Reusing that keeps
+     * the lens exactly in step with the picture, which is the only way the
+     * moment it switches on does not read as a switch being thrown. */
+    if (star->phase == STAR_COLLAPSE && cfg && cfg->radius > 0.0) {
+        R *= clamp01(star_radius(star, cfg) / cfg->radius);
+        if (R < KM_NEUTRON) R = KM_NEUTRON;
+    }
+
+    double c = R > 0.0 ? rs / R : 0.0;
+    return c > 1.0 ? 1.0 : c;
+}
+
+/* Below this there is nothing to see: a pulsar is 0.36 and the next thing
+ * down, a white dwarf, is 0.0003. */
+#define STAR_LENS_MIN 0.02
+
+bool star_lenses(const FwmStar *star, const StarConfig *cfg) {
+    return star_compactness(star, cfg) >= STAR_LENS_MIN;
+}
+
 double star_radius(const FwmStar *star, const StarConfig *cfg) {
     if (!star || !cfg) return 0.0;
     double r0 = cfg->radius;

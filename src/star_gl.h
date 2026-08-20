@@ -55,12 +55,24 @@ typedef struct {
     /* Which way round the disc's plane lies, radians. Separate from the tilt:
      * one is how squashed it looks, the other is which way it is turned. */
     double disc_roll;
+    /* How hard it bends what is behind it, 0..1; see star_compactness. 1 at a
+     * horizon, about a third of that for a pulsar, nothing for anything you
+     * could land on. */
+    double lens;
     double blast;     /* supernova shell, 0..1; see star_blast */
     double birth;     /* ignition, 0..1; see star_ignition */
     double beam_aim;  /* 0..1, how head-on the pulsar's beam is */
     /* The desktop behind it, photographed this frame, for a hole to bend.
      * NULL means there is none and the shader falls back to its own sky. */
     struct wlr_texture *background;
+    /* The same job done by a texture that is not a wlr_texture: the orrery's
+     * ring, captured mid-pass by scene3d_capture. Ignored when `background` is
+     * set. */
+    unsigned background_gl;
+    /* Where this star's canvas sits inside that background, as u0,v0,du,dv in
+     * the background's own texture coordinates. All zero means "the background
+     * IS the canvas", which is the photograph case and the default. */
+    float bg_rect[4];
 } StarGlParams;
 
 /* Draw into `dst`, which is cleared first. The result is premultiplied, ready

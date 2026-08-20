@@ -142,6 +142,8 @@ struct FwmStarDraw {
     int gpu_next;
     bool use_gl;
     bool lens_scene;   /* bend the desktop behind it, rather than a starfield */
+    unsigned ring_tex;    /* what expo captured for it to bend; see star_draw_set_ring */
+    float ring_rect[4];
     double disc_tilt;  /* 0 edge-on .. 1 face-on; negative = no opinion */
     double disc_roll;  /* which way the disc's plane is turned, radians */
     bool headless;     /* no scene node: the caller draws the texture itself */
@@ -795,6 +797,16 @@ void star_draw_set_lensing(FwmStarDraw *d, bool on) {
     if (d) d->lens_scene = on;
 }
 
+void star_draw_set_ring(FwmStarDraw *d, unsigned tex,
+                        float u0, float v0, float du, float dv) {
+    if (!d) return;
+    d->ring_tex = tex;
+    d->ring_rect[0] = u0;
+    d->ring_rect[1] = v0;
+    d->ring_rect[2] = du;
+    d->ring_rect[3] = dv;
+}
+
 void star_draw_set_disc_roll(FwmStarDraw *d, double roll) {
     if (d) d->disc_roll = roll;
 }
@@ -936,6 +948,12 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
     double paint_radius = collapsing ? (d->buf_radius > 0.0 ? d->buf_radius : cfg->radius)
                                      : p.radius;
 
+    /* Does this thing bend what is behind it hard enough to be worth the
+     * photograph? A hole always; a pulsar too, which is the whole of what a
+     * neutron star's compactness buys it. */
+    double compact = star_compactness(star, cfg);
+    bool lensing = d->lens_scene && star_lenses(star, cfg);
+
     struct star_paint paint = p;
     paint.radius = paint_radius;
     /* When the canvas is capped, everything is drawn at the same fraction. */
@@ -946,7 +964,7 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
         double t0 = d->dbg ? now_ms() : 0.0;
         if (d->use_gl) {
             struct wlr_texture *bg = NULL;
-            if (paint.phase == STAR_HOLE && d->lens_scene)
+            if (lensing)
                 bg = star_draw_photograph(d, star, camera_x, origin_x, origin_y);
             StarGlParams gp = {
                 .time_s    = now_s,
@@ -959,10 +977,16 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
                 .angle     = star->angle,
                 .disc_tilt = d->disc_tilt,
                 .disc_roll = d->disc_roll,
+                .lens      = compact,
+                /* Nothing to photograph, but expo may have handed us the ring
+                 * this star is standing in the middle of. */
+                .background_gl = (!lensing && star_lenses(star, cfg))
+                               ? d->ring_tex : 0,
                 .blast     = star_blast(star, cfg),
                 .birth     = star_ignition(star, cfg),
             };
             memcpy(gp.color, paint.color, sizeof(gp.color));
+            if (gp.background_gl) memcpy(gp.bg_rect, d->ring_rect, sizeof(gp.bg_rect));
             /* A pulsar's beam is on a cone, so where it LOOKS like it points
              * is not its rotation phase — see star_pulse. */
             if (paint.phase == STAR_NEUTRON)
@@ -999,10 +1023,12 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
         }
     }
 
-    /* A hole bends what is behind it, so it must be drawn over the windows;
-     * a star is an object in the world and belongs under them. The node moves
-     * across when the phase changes, and only then. */
-    bool want_front = (p.phase == STAR_HOLE);
+    /* Anything that bends what is behind it must be drawn OVER the windows,
+     * for the plain reason that you cannot bend a picture that is painted on
+     * top of you. Everything else is an object in the world and belongs under
+     * them, which is where a burning star stays. The node moves across when
+     * the answer changes, and only then. */
+    bool want_front = lensing;
     if (!d->headless && want_front != d->in_front && d->front != d->behind) {
         wlr_scene_node_reparent(&d->buf->node, want_front ? d->front : d->behind);
         d->in_front = want_front;

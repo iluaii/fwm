@@ -75,6 +75,31 @@ void star_draw_set_visible(FwmStarDraw *draw, bool visible);
  * picture when it is the thing being looked at. */
 void star_draw_set_lensing(FwmStarDraw *draw, bool on);
 
+/* What the star is standing in FRONT of, when that is not a desktop.
+ *
+ * The orrery's star has no desktop behind it — the strip has hidden the world
+ * it is drawing cards of — and it therefore bent nothing at all: the
+ * procedural sky it falls back on is a scatter of points, and moving points
+ * does not read as space bending. What is really behind it is the far half of
+ * the ring, and that exists only inside expo's own 3D pass.
+ *
+ * So expo captures the pass mid-flight (scene3d_capture) and hands the texture
+ * here, with `u0,v0,du,dv` saying where this star's canvas lands on it. The
+ * capture is taken BEFORE the star is drawn, so it can never contain the star:
+ * no feedback, at the cost of the picture being one frame old, which on a ring
+ * that takes seconds to turn is not visible.
+ *
+ * The rectangle is in ordinary screen orientation, v measured from the TOP,
+ * and that is worth stating because it looks like it should not be. Both ends
+ * of the trip live in the same convention: scene3d maps screen y=0 to the
+ * bottom of clip space (see scene3d_fill), so the capture's first row is the
+ * top of the screen, and the star's canvas is written from its own fragment
+ * coordinates into a buffer whose first row expo then draws at the top of the
+ * billboard. Two identical conventions, nothing to cancel. Flipping v "to be
+ * safe" mirrors the ring inside the lens. Pass tex 0 to stop using one. */
+void star_draw_set_ring(FwmStarDraw *draw, unsigned tex,
+                        float u0, float v0, float du, float dv);
+
 /* How open the accretion disc is drawn, 0 edge-on .. 1 face-on. The orrery
  * feeds the camera's own tilt in here so that flying around the ring takes the
  * hole with it. */

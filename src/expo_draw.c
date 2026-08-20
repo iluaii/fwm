@@ -14,6 +14,8 @@
 
 #include "expo_internal.h"
 #include "star_draw.h"
+#include "star.h"
+#include "rotate.h"
 #include "layer.h"
 #include "snapshot.h"
 #include "wallpaper.h"
@@ -313,6 +315,31 @@ void expo_draw_orrery(FwmExpo *e) {
     double px_per_unit = fabs(probe.x - mid.x) / 100.0;
     if (px_per_unit <= 1e-4) return;
     double r = half * px_per_unit;
+
+    /* Hand the star what it is standing in front of.
+     *
+     * Everything drawn into this pass so far is the backdrop and the FAR half
+     * of the ring — which is exactly what is behind a star in the middle of it,
+     * and the only thing in the strip with continuous structure to bend. The
+     * near half has not been drawn yet and must not be: it passes in FRONT.
+     *
+     * Taken here, one call before the star's own quad, so the copy can never
+     * contain the star. The canvas it will be sampled from is rendered next
+     * frame, which makes the bent picture one frame old — invisible on a ring
+     * that takes seconds to turn, and the price of never feeding the lens its
+     * own output. */
+    FwmServer *srv = e->server;
+    double sw = srv->screen_width, sh = srv->screen_height;
+    if (star_lenses(&e->orrery_star, &e->orrery_cfg) && sw > 0.0 && sh > 0.0) {
+        unsigned ring = scene3d_capture();
+        double x0 = mid.x - r, y0 = mid.y - r, side = 2.0 * r;
+        if (ring)
+            star_draw_set_ring(e->orrery_draw, ring,
+                               (float)(x0 / sw), (float)(y0 / sh),
+                               (float)(side / sw), (float)(side / sh));
+    } else {
+        star_draw_set_ring(e->orrery_draw, 0, 0.0f, 0.0f, 0.0f, 0.0f);
+    }
 
     static const float uv[4][2] = { {0,0}, {0,1}, {1,0}, {1,1} };
     static const double ox[4] = { -1, -1, 1, 1 }, oy[4] = { -1, 1, -1, 1 };

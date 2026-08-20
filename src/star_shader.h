@@ -49,6 +49,17 @@ static const char star_frag_src[] =
      * in for it. */
     "uniform sampler2D u_bg;\n"
     "uniform float u_has_bg;\n"
+    /* Where this canvas sits inside that background, u0,v0,du,dv. Identity for
+     * a photograph taken of the canvas itself; a sub-rectangle when the
+     * background is a whole screen the star is standing somewhere on, which is
+     * the orrery. */
+    "uniform vec4 u_bg_rect;\n"
+    /* How hard this thing bends what is behind it: 1 at a horizon, about a
+     * third of that for a pulsar, and small enough to be invisible for
+     * anything with a surface. See star_compactness — the one number that
+     * decides how much lensing there is, so that a hole and a neutron star can
+     * share the arithmetic instead of one of them being a special case. */
+    "uniform float u_lens;\n"
     /* Which way round it is. A spin is only visible if there is something on
      * the surface to carry round with it, which is exactly what the turbulence
      * provides — so the whole of "it turns" is sampling the surface in a
@@ -342,6 +353,26 @@ static const char star_frag_src[] =
     "    return cold * band * lump * (0.25 + 0.75 * birth) * 0.9;\n"
     "}\n"
     "\n"
+/* Where a ray that appears to arrive at `uv` really came from.
+   
+   Two effects, and both are the real ones. The bending goes as 1/b — the
+   Einstein deflection 4GM/(c^2 b) — so the picture is sampled from FURTHER OUT
+   than it appears and whatever sat directly behind is dragged around the edge.
+   The twist is frame dragging: a spinning mass pulls spacetime round with it,
+   so the picture arrives rotated, and rotated more the closer it passed. It
+   falls off as 1/b^2, which makes it a whirlpool at the rim and nothing at all
+   further out.
+   
+   `k` is the compactness — it scales both, which is precisely why a pulsar
+   needs no code of its own: it is the same lens turned down. */
+    "vec2 bend(vec2 uv, float b, float k, float reach) {\n"
+    "    float defl  = 7.5 * k / max(b, 0.5) * reach;\n"
+    "    float twist = 5.2 * k / max(b * b, 0.6) * reach;\n"
+    "    float ca = cos(twist), sa = sin(twist);\n"
+    "    vec2 spun = vec2(uv.x * ca - uv.y * sa, uv.x * sa + uv.y * ca);\n"
+    "    return normalize(spun + vec2(1e-5)) * (b + defl);\n"
+    "}\n"
+    "\n"
     "void main() {\n"
     "    vec2 px = gl_FragCoord.xy - u_res * 0.5;\n"
     "    float r = u_radius;\n"
@@ -349,6 +380,90 @@ static const char star_frag_src[] =
     "    float ang = atan(px.y, px.x);\n"
     "    vec3 col = vec3(0.0);\n"
     "    float alpha = 0.0;\n"
+    "\n"
+    /* ---- what anything compact does to the desktop behind it ----------- */
+    /* A hole is not the only thing that bends light, it is only the thing that
+       bends it hardest. A neutron star is a sun's worth of mass inside twenty
+       kilometres, and light grazing it is deflected so far that you see most
+       of the far side of the sphere as well as the near one — it is why a
+       pulsar's light curve looks the way it does, and it is plainly visible in
+       any honest rendering of one.
+    
+       So this is the same lens as the hole's, turned down by u_lens: about a
+       third as strong for a pulsar, and for a white dwarf or an ordinary star
+       so far below the threshold below that they never reach this code. No
+       phase is named anywhere in here. What is missing compared to a hole is
+       everything that needs a horizon — no shadow, no photon ring, no disc:
+       there is a SURFACE here, and it is drawn over this in the ordinary way.
+    
+       The hole has its own copy of this a few lines down because it needs the
+       result for so much else; here the bent desktop is simply what the star
+       is standing in front of. */
+    /* Premultiplied, because what is sampled is premultiplied and because the
+       thing that matters here is that it can be EMPTY: see below. */
+    "    vec3 lens_pre = vec3(0.0);\n"
+    "    float lens_a = 0.0;\n"
+    /* And the same thing with no desktop to bend: the orrery, where the strip
+       has hidden the world it is drawing cards of. A hole there falls back to
+       the procedural sky, so this does too — the difference being that a
+       pulsar ADDS the bent starfield instead of replacing everything with it.
+       Empty space is transparent: what a lens does to a starfield is move the
+       stars, not paint a black disc over the ring of desktops behind. */
+    "    if (u_phase < 2.5 && u_lens > 0.02) {\n"
+    "        float rs0 = max(u_radius, 1.0);\n"
+    "        vec2 uv0 = px / rs0;\n"
+    "        float b0 = length(uv0);\n"
+    "        float dm = min(u_res.x, u_res.y) * 0.5 / rs0;\n"
+    "        float rch = (1.0 - smoothstep(dm * 0.55, dm * 0.98, b0));\n"
+    "        vec2 dir0 = bend(uv0, b0, u_lens, rch);\n"
+    "        vec2 bguv0 = (dir0 * rs0 + u_res * 0.5) / u_res;\n"
+    "        bguv0 = u_bg_rect.xy + bguv0 * u_bg_rect.zw;\n"
+    "        vec2 cl0 = clamp(bguv0, vec2(0.002), vec2(0.998));\n"
+    /*     Off the edge of the photograph there is nothing to bend. */
+    "        float inside0 = step(length(bguv0 - cl0), 0.0001);\n"
+    /*     And only where the bending is actually worth something.
+    
+           The bent copy REPLACES the desktop under it, and the copy is not a
+           perfect one: the wallpaper in it is photographed from the half-size
+           duplicate that wallpaper.c keeps. A hole distorts everything within
+           reach so far that nobody could tell, but a pulsar's lens is gentle
+           at the edges — and covering the whole canvas with a copy that is
+           only slightly softer than the real thing draws a rectangle of blur
+           around the star, which is the one shape that gives the trick away.
+           So coverage follows the displacement: below about a pixel of it,
+           the desktop shows through as itself. */
+    "        float shift = length(dir0 - uv0) * rs0;\n"
+    /*     Only against a photograph. With none — the orrery — there is
+           nothing here worth bending and two ways to get it wrong, both
+           measured rather than guessed:
+    
+           The procedural sky is POINTS. Displacing a scatter of dots does not
+           read as space bending, it reads as dots in slightly other places:
+           switching the lens on moved 269 pixels of a 512-pixel square. A hole
+           gets away with the same sky because what you are really watching
+           there is its disc and photon ring, which are continuous.
+    
+           And painting that sky the way a hole paints it — opaque, as a
+           background — turns the star into a black disc over the ring of
+           desktops, which is precisely the failure expo_orrery_toggle warns
+           about. A hole is allowed to be a black disc. A pulsar is not.
+    
+           So in the orrery a pulsar lenses nothing, and the thing worth
+           bending there is the ring itself, which this canvas has never been
+           handed. */
+    "        float cover = u_has_bg > 0.5 ? inside0 * smoothstep(0.4, 1.6, shift) : 0.0;\n"
+    /*     What is bent is not always a picture. In the orrery the background
+           is expo's own pass, and where the ring has no card there is nothing
+           in it at all — cleared to transparent. Taking only the colour there
+           and calling it opaque paints a black disc: the lens covers the strip
+           with the one colour that is not in it, and the bigger the star the
+           more obvious. So the background's OWN coverage comes through, and
+           empty stays empty: what is behind expo shows through the lens
+           exactly as it does beside it. */
+    "        vec4 bgs = u_has_bg > 0.5 ? texture2D(u_bg, cl0) : vec4(0.0);\n"
+    "        lens_pre = bgs.rgb * cover;\n"
+    "        lens_a   = bgs.a   * cover;\n"
+    "    }\n"
     "\n"
     /* ---- the disc ------------------------------------------------------ */
     "    if (d < 1.0) {\n"
@@ -445,17 +560,11 @@ static const char star_frag_src[] =
     "        float incl = clamp(u_incl, 0.012, 0.98);\n"
     "        vec3 acc = vec3(0.0);\n"
     "\n"
-    /*     The background, bent. Deflection goes as 1/b, so the sky is sampled
-           from further out than it appears: what was behind the hole is
-           dragged around its edge into a ring. */
-    /*     Deflection goes as 1/b — the Einstein result, 4GM/(c^2 b) — so the
-           background is sampled from FURTHER OUT than it appears. Whatever was
-           directly behind the hole is dragged out around its edge into a ring,
-           and a straight window edge passing nearby bows.
-    
-           Two backgrounds: the desktop, when a snapshot of it was taken, and
-           the procedural sky when it was not. The desktop is the interesting
-           one — it is what makes this lensing rather than decoration. */
+    /*     The background, bent — the arithmetic is in bend() above, shared
+           with the pulsar. Two backgrounds go through it: the desktop, when a
+           snapshot of it was taken, and the procedural sky when it was not.
+           The desktop is the interesting one — it is what makes this lensing
+           rather than decoration. */
     /*     Faded out towards the edge of the canvas, together with the node's
            own alpha below. Where the node is only partly opaque the bent copy and
            the untouched original are both visible, and if the bending is still
@@ -465,41 +574,32 @@ static const char star_frag_src[] =
            seam cannot be seen. */
     "        float dmax0 = min(u_res.x, u_res.y) * 0.5 / rs;\n"
     "        float reach = (1.0 - smoothstep(dmax0 * 0.55, dmax0 * 0.98, b));\n"
-    "        float defl = 7.5 / max(b, 0.5) * reach;\n"
-    /*     And the twist.
-    
-           A spinning hole does not merely bend light, it drags spacetime
-           round with it — frame dragging, the Lense-Thirring effect — so the
-           picture behind it arrives ROTATED, and rotated more the closer it
-           passed. That is the thing that makes the sky around Gargantua look
-           stirred rather than magnified, and it is why a straight edge near
-           one comes out curled instead of merely bowed.
-    
-           Falls off as 1/b^2, faster than the bending itself, so it is a
-           local whirlpool at the ring and nothing at all further out. */
-    "        float twist = 5.2 / max(b * b, 0.6) * reach;\n"
-    "        float ca = cos(twist), sa = sin(twist);\n"
-    "        vec2 spun = vec2(uv.x * ca - uv.y * sa, uv.x * sa + uv.y * ca);\n"
-    "        vec2 dir = normalize(spun + vec2(1e-5)) * (b + defl);\n"
+    "        vec2 dir = bend(uv, b, u_lens, reach);\n"
     "        float seen = smoothstep(shadow * 0.99, shadow * 1.06, b);\n"
     "        float lensed = 0.0;\n"
     "        if (u_has_bg > 0.5) {\n"
     /*         Back to buffer coordinates: the bent direction is in units of
                the Schwarzschild radius, centred on the hole. */
     "            vec2 bguv = (dir * rs + u_res * 0.5) / u_res;\n"
+    "            bguv = u_bg_rect.xy + bguv * u_bg_rect.zw;\n"
     "            vec2 clamped = clamp(bguv, vec2(0.002), vec2(0.998));\n"
     /*         Off the edge of the photograph there is nothing to bend, so the
                lensing fades out rather than smearing the border pixel. */
     "            float inside = step(length(bguv - clamped), 0.0001);\n"
-    "            vec3 bg = texture2D(u_bg, clamped).rgb;\n"
-    "            acc += bg * seen * mix(0.35, 1.0, inside);\n"
+    "            vec4 bg = texture2D(u_bg, clamped);\n"
+    "            acc += bg.rgb * seen * mix(0.35, 1.0, inside);\n"
     /*         How much of this pixel is the bent picture. It has to be a
                REPLACEMENT, not an overlay: drawn semi-transparent, the lensed
                copy lay over the unbent original and you saw both at once — a
                film of curved windows floating over straight ones. Opaque
                everywhere the lens reaches, falling off only at the edge of the
                photograph and at the edge of the canvas. */
-    "            lensed = seen * mix(0.0, 1.0, inside);\n"
+    /*         Weighted by what was actually there — an empty patch of the
+               orrery's ring bends to nothing rather than to black. The shadow
+               is unaffected: it is made opaque further down, where it belongs,
+               because a hole you can see through is the one failure that
+               ruins the whole thing. */
+    "            lensed = seen * mix(0.0, 1.0, inside) * bg.a;\n"
     "        } else {\n"
     "            acc += sky(dir) * seen;\n"
     "        }\n"
@@ -640,7 +740,16 @@ static const char star_frag_src[] =
     "    float rim = (1.0 - smoothstep(dmax * 0.70, dmax, d));\n"
     "    col *= rim;\n"
     "    alpha *= rim;\n"
-    "    gl_FragColor = vec4(col * alpha, alpha);\n"  /* premultiplied */
+    /* The star over what it bent, in that order and by the ordinary rule: the
+       surface is opaque and hides it, the corona is thin and lets it through.
+       The bent copy carries the SAME rim fade as the star, so at the edge of
+       the canvas the bending, the coverage and the star all reach zero
+       together — which is what makes the bent desktop and the real one it is
+       drawn over identical there, and the buffer's border invisible. With
+       nothing bent (lens_a 0) this is exactly the line it replaces. */
+    "    float la = lens_a * rim;\n"
+    "    gl_FragColor = vec4(col * alpha + lens_pre * rim * (1.0 - alpha),\n"
+    "                        alpha + la * (1.0 - alpha));\n"  /* premultiplied */
     "}\n";
 
 static const char star_vert_src[] =

@@ -134,6 +134,32 @@ void star_color(const FwmStar *star, const StarConfig *cfg, float out[3]);
 void star_light(const FwmStar *star, const StarConfig *cfg,
                 double wx, double wy, FwmSunLight *out);
 
+/* How hard it bends light behind it: the Schwarzschild radius over the radius
+ * it actually has, 0 for anything you could stand on and 1 at a horizon.
+ *
+ * This is the number that decides lensing, and there is exactly one of it
+ * because in the sky there is exactly one of it — nothing about a black hole
+ * bends light that a neutron star does not do a third as hard. Worked out from
+ * real radii in kilometres rather than from the pixels each remnant is drawn
+ * at, because the pixels are chosen to be visible and the physics is not: a
+ * neutron star is twenty kilometres against a million, which is the whole
+ * reason it lenses and an ordinary star does not.
+ *
+ * What falls out, for the masses in play: a hole 1, a pulsar about 0.36, a
+ * white dwarf 0.0003, a burning star 0.000004. The last two are not special
+ * cases anywhere — they are simply too small to see, which is also true of
+ * them in the sky. A collapse tracks the size the star is drawn at and still
+ * comes out around 0.00001, because shrinking a sun to a third of itself is
+ * not remotely what makes a remnant compact — the lens arrives with the
+ * remnant, in one step, exactly as the sky does it. */
+double star_compactness(const FwmStar *star, const StarConfig *cfg);
+
+/* Is that enough to see? True for a hole and a pulsar, false for everything
+ * with a surface you could land on — the gap between them is three orders of
+ * magnitude, so the line does not have to be placed carefully. Callers use
+ * this rather than the number so that "what bends light" is decided once. */
+bool star_lenses(const FwmStar *star, const StarConfig *cfg);
+
 /* What this star weighs in the physics world's own units, so it can be
  * compared against a window's mass. `weight` in [star] says what one solar
  * mass is worth; the star's own mass does the rest, which means a hole that

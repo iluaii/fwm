@@ -703,6 +703,59 @@ static void test_the_beam_is_on_a_cone(void) {
     CHECK(fabs(turn1 - turn2) < 1.0);
 }
 
+static void test_what_bends_light(void) {
+    /* Lensing is not a black hole's private trick — it is a matter of how much
+     * mass sits inside how small a radius, and a neutron star is compact
+     * enough that the effect is plain. Everything with a surface you could
+     * land on is not, by several orders of magnitude, and that gap is what
+     * lets one number decide the whole thing with no phase named anywhere. */
+    CASE("compactness sorts what lenses from what does not");
+    StarConfig c = base();
+    FwmStar s;
+    star_init(&s, &c);
+
+    /* A burning star: the Sun deflects starlight by under two arcseconds, and
+     * this says the same thing. */
+    double burning = star_compactness(&s, &c);
+    CHECK(burning < 1e-5);
+
+    /* An ember. Denser than a star by a factor of a million and still nothing
+     * to look at: a white dwarf is the size of a planet, not of a city. */
+    s.mass = 1.0;
+    star_collapse_now(&s);
+    for (int i = 0; i < 2000 && s.phase == STAR_COLLAPSE; i++) star_tick(&s, &c, 1.0/60.0);
+    CHECK_INT(s.phase, STAR_DWARF);
+    double dwarf = star_compactness(&s, &c);
+    CHECK(dwarf > burning);
+    CHECK(dwarf < 0.01);
+
+    /* A pulsar. A sun and a half inside twenty kilometres, and now it is a
+     * third of the way to a horizon — which is why you can see rather more
+     * than half of one, and why this had to stop being a hole-only effect. */
+    star_init(&s, &c);
+    s.mass = 2.0;
+    star_collapse_now(&s);
+    for (int i = 0; i < 2000 && s.phase == STAR_COLLAPSE; i++) star_tick(&s, &c, 1.0/60.0);
+    CHECK_INT(s.phase, STAR_NEUTRON);
+    double pulsar = star_compactness(&s, &c);
+    CHECK(pulsar > 0.2);
+    CHECK(pulsar < 1.0);
+    /* Three orders between it and the ember it did not become. */
+    CHECK(pulsar > dwarf * 100.0);
+
+    /* And a horizon, where the two lengths are one length. */
+    star_init(&s, &c);
+    s.mass = 6.0;
+    star_collapse_now(&s);
+    for (int i = 0; i < 2000 && s.phase == STAR_COLLAPSE; i++) star_tick(&s, &c, 1.0/60.0);
+    CHECK_INT(s.phase, STAR_HOLE);
+    CHECK(star_compactness(&s, &c) == 1.0);
+    /* Eating does not make it bend harder — a bigger horizon reaches further,
+     * but at the horizon itself it is always the same lens. */
+    star_feed(&s, &c, c.throw_speed * 3.0);
+    CHECK(star_compactness(&s, &c) == 1.0);
+}
+
 int main(void) {
     test_mass_decides_the_ending();
     test_fuel_and_the_fuse();
@@ -723,5 +776,6 @@ int main(void) {
     test_ignition();
     test_the_beam_is_on_a_cone();
     test_pulsar_sweeps();
+    test_what_bends_light();
     return t_report("star");
 }

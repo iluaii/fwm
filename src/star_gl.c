@@ -39,6 +39,7 @@ static struct {
     GLint attr_pos;
     GLint u_res, u_time, u_radius, u_color, u_lum, u_phase, u_beam;
     GLint u_bg, u_has_bg, u_angle, u_incl, u_roll, u_blast, u_birth, u_aim;
+    GLint u_lens, u_bg_rect;
     bool tried;
     bool ok;
     struct wlr_renderer *owner;
@@ -121,6 +122,8 @@ static bool program_ready(struct wlr_renderer *renderer) {
     prog.u_blast  = glGetUniformLocation(id, "u_blast");
     prog.u_birth  = glGetUniformLocation(id, "u_birth");
     prog.u_aim    = glGetUniformLocation(id, "u_aim");
+    prog.u_lens   = glGetUniformLocation(id, "u_lens");
+    prog.u_bg_rect = glGetUniformLocation(id, "u_bg_rect");
     prog.ok = true;
     wlr_log(WLR_INFO, "star: shader ready");
     return true;
@@ -203,12 +206,20 @@ bool star_gl_render(struct wlr_renderer *renderer, struct wlr_buffer *dst,
     glUniform1f(prog.u_blast, (GLfloat)p->blast);
     glUniform1f(prog.u_birth, (GLfloat)(p->birth > 0.0 ? p->birth : 1.0));
     glUniform1f(prog.u_aim, (GLfloat)p->beam_aim);
+    glUniform1f(prog.u_lens, (GLfloat)p->lens);
 
     /* The desktop, for a hole to bend. Only 2D textures: a client buffer that
      * arrived as an external image would need its own sampler type, and the
      * snapshot we take is never one — it is a buffer we allocated. */
     bool have_bg = false;
-    if (p->background && wlr_texture_is_gles2(p->background)) {
+    /* A texture handed to us directly, already in this context: the ring. */
+    if (p->background_gl) {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, (GLuint)p->background_gl);
+        glUniform1i(prog.u_bg, 0);
+        have_bg = true;
+    }
+    if (!have_bg && p->background && wlr_texture_is_gles2(p->background)) {
         struct wlr_gles2_texture_attribs at = {0};
         wlr_gles2_texture_get_attribs(p->background, &at);
         if (at.target == GL_TEXTURE_2D) {
@@ -223,6 +234,13 @@ bool star_gl_render(struct wlr_renderer *renderer, struct wlr_buffer *dst,
         }
     }
     glUniform1f(prog.u_has_bg, have_bg ? 1.0f : 0.0f);
+    /* Where the canvas lands inside the background. A photograph was taken of
+     * exactly this canvas, so it is the identity; the ring is a whole screen
+     * with the star somewhere on it, so it is not. */
+    bool rect = p->bg_rect[2] != 0.0f && p->bg_rect[3] != 0.0f;
+    glUniform4f(prog.u_bg_rect,
+                rect ? p->bg_rect[0] : 0.0f, rect ? p->bg_rect[1] : 0.0f,
+                rect ? p->bg_rect[2] : 1.0f, rect ? p->bg_rect[3] : 1.0f);
 
     static const GLfloat quad[8] = { -1.0f, -1.0f,  1.0f, -1.0f,  -1.0f, 1.0f,  1.0f, 1.0f };
     glBindBuffer(GL_ARRAY_BUFFER, 0);

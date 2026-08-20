@@ -107,6 +107,22 @@ bool scene3d_quad(struct wlr_texture *tex, const struct scene3d_vert v[4],
  * around a hovered window, a desktop with no wallpaper behind it. */
 bool scene3d_quad_solid(const float rgba[4], const struct scene3d_vert v[4]);
 
+/* A copy of everything the pass has drawn SO FAR, as a GL texture the size of
+ * the destination, for a draw later in the same pass to sample.
+ *
+ * The one thing that cannot be done with a scene node: the orrery's star bends
+ * what is behind it, and what is behind it is the far half of the ring — which
+ * exists only inside this pass, half-drawn. Taken before the star goes down,
+ * so the copy can never contain the star and the lens cannot feed on its own
+ * output.
+ *
+ * The name belongs to scene3d and stays valid until the next capture or
+ * rotate_shutdown; the caller must not delete it. 0 if there is no pass open
+ * or the copy could not be made. The texture is in GL orientation (row 0 at
+ * the BOTTOM), which is the same way round as the fragment coordinates of
+ * anything sampling it — see star_draw_set_ring. */
+unsigned scene3d_capture(void);
+
 /* Close the pass and give the EGL context back. */
 void scene3d_end(void);
 
