@@ -78,6 +78,8 @@
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/backend/session.h>
 #include <wlr/types/wlr_screencopy_v1.h>
+#include <wlr/types/wlr_ext_image_capture_source_v1.h>
+#include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_ext_data_control_v1.h>
@@ -327,8 +329,26 @@ bool server_init(FwmServer *server) {
     server->compositor = wlr_compositor_create(server->wl_display, 5, server->wlr_renderer);
     wlr_subcompositor_create(server->wl_display);
     wlr_data_device_manager_create(server->wl_display);
-    // Screen capture protocol: lets wf-recorder record and grim screenshot.
+    /* Screen capture, in both generations.
+     *
+     * wlr-screencopy is what the tools on disk today still speak: grim,
+     * wf-recorder, and the xdg-desktop-portal-wlr behind every "share your
+     * screen" button. It is also deprecated upstream, and the portals and
+     * recorders are moving off it.
+     *
+     * ext-image-copy-capture is where they are moving. It splits the job in
+     * two: a *source* names what is being captured, and a session copies
+     * frames out of it. fwm serves the output sources — one per monitor —
+     * which is the whole of what a screen share needs, and wlroots does the
+     * copying itself. Per-window capture is a second source manager that wants
+     * ext-foreign-toplevel-list first; fwm publishes its window list over the
+     * wlr protocol only, so that one is not offered yet.
+     *
+     * Both run at once on purpose: dropping the old one would break every
+     * tool that has not moved, and adding the new one costs two globals. */
     wlr_screencopy_manager_v1_create(server->wl_display);
+    wlr_ext_output_image_capture_source_manager_v1_create(server->wl_display, 1);
+    wlr_ext_image_copy_capture_manager_v1_create(server->wl_display, 1);
     // Standard client protocols, all self-contained in wlroots:
     // primary selection = middle-click paste; viewporter + fractional-scale +
     // single-pixel-buffer are expected by games/video players/toolkits;

@@ -106,8 +106,11 @@ on slower hardware. `FWM_DEBUG_EFFECTS=1` prints frame timings.
 
 Discord, Zoom, OBS and browsers do not capture a Wayland screen themselves. They
 ask a *portal* — `xdg-desktop-portal` — which hands the request to a backend that
-knows the compositor. fwm implements `wlr-screencopy-v1`, and the backend that
-speaks it is **`xdg-desktop-portal-wlr`**. Install it alongside `pipewire`, which
+knows the compositor. fwm implements both capture protocols — `wlr-screencopy-v1`,
+which every backend on disk today still speaks, and `ext-image-copy-capture-v1`,
+which is what they are moving to now that the wlr one is deprecated — so a
+backend of either generation finds what it needs. The one to install today is
+**`xdg-desktop-portal-wlr`**. Install it alongside `pipewire`, which
 carries the frames:
 
 ```sh
@@ -172,9 +175,10 @@ server for the address, and the X server it would ask is fwm's own Xwayland,
 which cannot answer a compositor that is still starting up.
 
 **The picker offers windows and only the whole screen works.** xdg-desktop-portal-wlr
-captures outputs, not individual windows; fwm does not implement the
-foreign-toplevel capture path a per-window share would need. Share the screen and
-put the window on a desktop of its own.
+captures outputs, not individual windows; fwm serves the output capture sources
+of `ext-image-copy-capture` but not the per-toplevel ones, which want
+`ext-foreign-toplevel-list` first. Share the screen and put the window on a
+desktop of its own.
 
 **Flatpak applications still see nothing.** They need the portal *and* PipeWire
 across the sandbox boundary. `flatpak info --show-permissions com.discordapp.Discord`

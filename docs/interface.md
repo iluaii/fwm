@@ -258,7 +258,8 @@ the next thing you copy replaces it.
 The picture is the frame the monitor actually drew, so the tray, the bars and
 any panel that was up are all in it — a screenshot of fwm, not of the windows
 it happens to be holding. An external `grim` still works too: fwm implements
-`wlr-screencopy-v1`.
+`wlr-screencopy-v1`, and `ext-image-copy-capture-v1` beside it for the
+tools that have moved on.
 
 ## Key hints
 
