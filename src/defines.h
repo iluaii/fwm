@@ -220,6 +220,12 @@
 /* Low, so the disc starts near edge-on — the Gargantua view. Climbing with
  * the arrows or alt+drag opens it, and `,`/`.` tip the disc itself. */
 #define EXPO_ORRERY_TILT    0.30   /* radians, ~17 degrees above the ring */
+/* How fast the star in the middle of the ring goes out when the strip closes.
+ * Faster than the collapse it is going out during: the last frames of that are
+ * the camera dropping into the plane of the ring, where the middle of it is
+ * at the viewer's own depth and the billboard standing there projects to the
+ * size of the screen. It has to be gone by then, not going. */
+#define EXPO_ORRERY_FADE    16.0
 #define EXPO_ORRERY_DIST    1.55   /* pulled back, to get the whole ring in */
 /* Viewer distance from the front of the strip. Smaller is a wider lens: more
  * dramatic, and quicker to look wrong at the edges of the screen. */

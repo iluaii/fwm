@@ -245,6 +245,13 @@ static void expo_open(FwmServer *server) {
                                expo_can_orbit(e));
     e->hints_reveal = e->hints_reveal_target = 1.0;
     e->hints_timer = EXPO_HINT_SHOW_S;
+
+    /* FWM_TEST_ORRERY=1 opens straight into the orrery. Its own key is `o` and
+     * a nested run cannot be sent one — the headless backend has no keyboard —
+     * so without this the ring, the star in the middle of it and everything
+     * that happens when the strip closes over the top of them can only be
+     * looked at by hand. Same bargain as FWM_TEST_ORBIT above. */
+    if (getenv("FWM_TEST_ORRERY")) expo_orrery_toggle(server);
 }
 
 void expo_close(FwmServer *server, int desktop) {
@@ -355,6 +362,7 @@ void expo_orrery_toggle(FwmServer *server) {
          * round it, up and down lifts you over it. That is why the two keys
          * that used to set this angle are gone — they did by hand, badly, what
          * moving the camera does properly. */
+        e->orrery_fade = 1.0;
         e->orrery_tilt = 0.62;
         e->orrery_cfg.radius *= e->orrery_scale;
         star_init(&e->orrery_star, &e->orrery_cfg);
@@ -797,6 +805,18 @@ void expo_tick(FwmServer *server, double dt) {
     double dgap = e->dist_target - e->dist;
     if (fabs(dgap) > 0.0005) e->dist += dgap * (1.0 - exp(-crate * dt));
     else                     e->dist = e->dist_target;
+
+    /* And the star in the middle goes out as the strip closes. Everything else
+     * on screen is a picture of a desktop and simply arrives at the desktop it
+     * is a picture of; the star is an object standing at the centre of the
+     * ring, and the end of the closing animation is the camera moving to where
+     * that centre is. A billboard at the viewer's own depth is the size of the
+     * screen, which is why it lunged out of the middle of the picture in the
+     * last frames before the strip handed over. */
+    double ofade = e->leaving ? 0.0 : 1.0;
+    double ogap = ofade - e->orrery_fade;
+    if (fabs(ogap) > 0.002) e->orrery_fade += ogap * (1.0 - exp(-EXPO_ORRERY_FADE * dt));
+    else                    e->orrery_fade = ofade;
 
     /* The hints show themselves when the strip opens, take themselves away
      * once there has been time to read them, and come back when the cursor

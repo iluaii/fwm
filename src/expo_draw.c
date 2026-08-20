@@ -291,6 +291,11 @@ double expo_orrery_depth(FwmExpo *e) {
 
 void expo_draw_orrery(FwmExpo *e) {
     if (!e || !e->orrery || !e->orrery_draw) return;
+    /* Going out with the strip, and gone before the camera reaches the middle
+     * of the ring; see orrery_fade. */
+    float fade = (float)(e->orrery_fade < 0.0 ? 0.0 :
+                         e->orrery_fade > 1.0 ? 1.0 : e->orrery_fade);
+    if (fade <= 0.01f) return;
     struct wlr_texture *tex = star_draw_texture(e->orrery_draw);
     /* World units, not buffer pixels: the canvas is capped, so past a certain
      * size the two stop being the same number. */
@@ -315,6 +320,12 @@ void expo_draw_orrery(FwmExpo *e) {
     double px_per_unit = fabs(probe.x - mid.x) / 100.0;
     if (px_per_unit <= 1e-4) return;
     double r = half * px_per_unit;
+    /* A last guard against the projection rather than against the star: when
+     * the camera is level with the ring's centre the depth there goes to
+     * nothing and one ring-unit is worth an unbounded number of pixels. Any
+     * answer that big is arithmetic, not a star, and drawing it would fill the
+     * screen for a frame. */
+    if (r > e->server->screen_height * 1.5) return;
 
     /* Hand the star what it is standing in front of.
      *
@@ -351,7 +362,7 @@ void expo_draw_orrery(FwmExpo *e) {
         q[i].u = uv[i][0];
         q[i].v = uv[i][1];
     }
-    scene3d_quad(tex, q, 1.0f);
+    scene3d_quad(tex, q, fade);
 }
 
 static void expo_draw_gl(FwmExpo *e) {

@@ -129,6 +129,12 @@ struct FwmExpo {
      * the strip: what looks right depends on the monitor and on how far back
      * the camera is, and neither is knowable from a config file. */
     double orrery_scale;
+    /* How much of it is there, 0..1. The star is the one thing in the strip
+     * that is not a picture of a desktop, so it cannot simply travel home with
+     * the rest: it goes out instead, and it has to be gone before the camera
+     * arrives, because the camera arriving means standing where the middle of
+     * the ring was. */
+    double orrery_fade;
     double orrery_tilt;
     double orrery_roll;   /* which way the disc's plane is turned, radians */
     /* Orbits: where each desktop is round its own one, in strip px, and how

@@ -247,6 +247,7 @@ Environment variables, all read at startup:
 | `FWM_TEST_CAMERA=<n>` | start parked on desktop *n* |
 | `FWM_TEST_CAVA=1`, `FWM_TEST_CAVA_MODE=<mode>` | the visualiser on synthetic audio, for a nested run with nothing playing |
 | `FWM_TEST_ORBIT`, `FWM_TEST_ORBIT_DIST` | open the desktop strip in the wider view |
+| `FWM_TEST_ORRERY=1` | open the strip straight into the orrery (its own key cannot be injected) |
 | `FWM_OPEN_PICKER=1`, `FWM_SHOW_HINTS=1` | open the picker / hints at startup |
 
 They exist because a compositor cannot be driven by a test harness: there is no
