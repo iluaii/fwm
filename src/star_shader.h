@@ -304,12 +304,12 @@ static const char star_frag_src[] =
      * specific intensity over frequency cubed is what is conserved along a ray,
      * so a shift of g multiplies what arrives by g^3. */
     "vec4 disc_emit(vec3 P, vec3 dirv, vec3 N, vec3 A, vec3 B, float t,\n"
-    "               float r_in, float r_out, float r_gas, float far_ok) {\n"
+    "               float r_in, float r_out) {\n"
     "    float rc = length(P);\n"
     /*  Where the gas IS. Settled, that is everything from the last stable
         orbit out to the rim; while the disc is still forming it is a ring on
         its way down, and r_in is well outside the orbit it will end on. */
-    "    if (rc < 1.02 || rc > r_gas) return vec4(0.0);\n"
+    "    if (rc < r_in || rc > r_out) return vec4(0.0);\n"
 
     "    float ang = atan(dot(P, B), dot(P, A));\n"
     "\n"
@@ -381,36 +381,13 @@ static const char star_frag_src[] =
         the gas fades to nothing at the last stable orbit instead of being
         brightest where it is about to fall in. */
     "    float f = max(0.0, 1.0 - sqrt(min(r_in, R_ISCO) / rc));\n"
-    /*  Inside the last stable orbit there is still gas: it is falling, not
-        orbiting, and it fades out as it goes rather than stopping at a line.
-        Which matters for one reason — a hard edge there is a circle, and the
-        lens takes a circle and draws it back as a hairline ring across the
-        black. */
-    /*  The plunging gas fades towards the horizon rather than stopping at a
-        radius: any radius it stopped at would be a circle, and the lens draws
-        a circle back as a hairline. */
-    "    float plunge = smoothstep(1.02, r_in * 1.02, rc);\n"
-    "    f = max(f, 0.22 * plunge * (1.0 - smoothstep(r_in * 0.6, r_in, rc)));\n"
     "    float temp = pow(R_ISCO / rc, 0.75) * pow(f, 0.25);\n"
     /*  And how much gas there is at all: thinning out towards the rim, where a
         real disc simply runs out of the matter that was fed to it. */
-    /*  The bright body of the disc, which thins out towards the rim where a
-        real one runs out of the matter it was fed — plus a long dim tail
-        beyond it.
-    
-        The tail is not decoration. A disc drawn only as far as the canvas can
-        show is a disc that STOPS, and the light that orbits the hole comes
-        from everywhere in it: cut it off at six radii and the ring of orbited
-        light has almost nothing to carry, so the photon ring degenerates into
-        a single pixel-wide hairline circle sitting in a black gap — a drawn
-        line, which is what it looked like. The gas beyond the rim is far too
-        dim to see where it is, and its bent image is most of what the ring is
-        made of. */
-    "    float amount = (pow(1.0 - smoothstep(r_out * 0.45, r_out, rc), 1.3)\n"
-    "                 + 0.10 * far_ok * pow(1.0 - smoothstep(r_out * 0.9, r_gas, rc), 1.6))\n"
+    "    float amount = pow(1.0 - smoothstep(r_out * 0.45, r_out, rc), 1.3)\n"
     /*  and the inner edge, which is a soft one while the ring is still falling
         — gas on its way in has no sharp boundary, the disc it becomes does. */
-    "                 * smoothstep(1.02, r_in * 1.06 + 0.10, rc);\n"
+    "                 * smoothstep(r_in, r_in * 1.10 + 0.15, rc);\n"
     "\n"
     /*  Doppler. The gas runs on a circular orbit, so its speed is fixed by the
         radius alone: v = sqrt(M/(r - 2M)), which with the horizon at 1 is
@@ -436,16 +413,7 @@ static const char star_frag_src[] =
         it, and without that the desktop showing through the disc washes the
         disc out completely — a black hole over a bright window had a bright
         window's colours and none of its own. */
-    /*  And how much it BLOCKS. Squared in the amount, so the bright body of
-        the disc hides what is behind it — without that, a hole over a light
-        desktop has the desktop's colours and none of its own — while the dim
-        outer gas stays nearly transparent. Which matters for one line of
-        sight in particular: a ray running along the disc's own plane travels
-        through a great deal of that outer haze before it reaches the bright
-        inner disc, and with the haze counted as opaque it arrived having
-        blacked out everything behind it. That was a dark line, one pixel wide,
-        drawn across the brightest part of the picture. */
-    "    float opacity = dens * amount * amount * 2.4;\n"
+    "    float opacity = dens * amount * 1.5;\n"
     "    return vec4(col * (0.18 + 2.1 * dens) * temp * amount * pow(g, 2.4), opacity);\n"
     "}\n"
     "\n"
@@ -484,7 +452,7 @@ static const char star_frag_src[] =
     "    float caught; \n"   /* 1 if it fell in */
     "};\n"
     "\n"
-    "Ray trace(vec2 uv, float incl, float roll, float t, float r_in, float r_out, float r_gas) {\n"
+    "Ray trace(vec2 uv, float incl, float roll, float t, float r_in, float r_out) {\n"
     /*  How much light there is in the gas at all. Falling material is cold and
         dark: what heats a disc is the friction of one orbit rubbing against
         the next, and until it is a disc there are no orbits to rub. So it
@@ -503,9 +471,6 @@ static const char star_frag_src[] =
     "    vec3 vel = vec3(0.0, 0.0, -1.0);\n"
     "    float h2 = dot(uv, uv);\n"
     "    float side = dot(pos, N);\n"
-    "    float seen = 0.0, got = 0.0;\n"
-    "    float near_h = 1e9;\n"
-    "    vec3 near_p = vec3(0.0), near_v = vec3(0.0, 0.0, -1.0);\n"
     "    float behind = pos.z + R_SKY;\n"   /* the backdrop plane, as a signed distance */
     "\n"
     "    for (int i = 0; i < 420; i++) {\n"
@@ -545,59 +510,9 @@ static const char star_frag_src[] =
             hairline ring. Front to back, so gas met earlier dims what is
             behind it. */
     "        float nside = dot(npos, N);\n"
-    "        float rn2 = length(npos);\n"
-    "        float slab = 0.16 + 0.055 * length(npos);\n"
-    /*      A ray running along inside the gas without ever crossing the
-            mid-plane gets nothing from the test below, and it is the ray that
-            went through more gas than any other: that is a DARK line, one
-            pixel wide, straight across the middle of the brightest part of the
-            disc — the one ray the disc could not light. The closest it came is
-            remembered here and lit after the march, so the line fills in
-            without changing what every other ray does. */
-    "        if (abs(nside) < slab && abs(nside) < near_h\n"
-    "            && rn2 > r_in && rn2 < r_gas) {\n"
-    "            near_h = abs(nside); near_p = npos; near_v = nvel;\n"
-    "        }\n"
-    /*      Crossed the mid-plane — or running along inside the gas without
-            ever crossing it.
-    
-            That second case is not a nicety. A ray whose direction lies IN the
-            disc's plane never changes sides, so a test on the crossing alone
-            gives it nothing — and it is the ray that went through more gas
-            than any other. What that produced was a DARK line, one pixel wide,
-            straight across the middle of the brightest part of the disc: the
-            one ray the disc could not light. Dark rather than bright, which is
-            why it read as something drawn over the picture rather than as
-            anything belonging to a black hole.
-    
-            Skipped once the gas already met has hidden whatever is behind it,
-            and after a handful of passes whatever happens. A ray that winds
-            round the photon sphere goes through the disc again and again, and
-            each pass is two evaluations of a five-octave noise field — the
-            most expensive thing in this shader by a wide margin. The fourth
-            pass of a ray whose light is already blocked changes no pixel and
-            costs as much as the first. */
-    /*      Crossed the mid-plane — or is running along it.
-    
-            The second case is not a nicety. A ray whose direction lies IN the
-            disc's plane barely changes sides, so a test on the crossing alone
-            gives it one sample somewhere thin, and it is the ray that went
-            through more gas than any other. What came out was a DARK line, one
-            pixel wide, straight across the middle of the brightest part of the
-            disc — the one ray the disc could not light. Dark rather than
-            bright, which is why it read as something drawn over the picture
-            rather than as anything belonging to a black hole.
-    
-            So a ray inside the gas and nearly parallel to it is sampled as it
-            goes, a few times at most. Everything steeper still takes exactly
-            one sample per crossing, as before. */
-    "        if (side * nside < 0.0 && o.veil < 0.97 && seen < 6.0) {\n"
-    "            seen += 1.0;\n"
-    /*          Where to look: the crossing point if the ray crossed, and where
-                the ray is now if it is running along inside the gas without
-                crossing at all. */
-    "            float f = clamp(side / (side - nside), 0.0, 1.0);\n"
-    "            vec3 P = mix(npos, pos + (npos - pos) * f, step(side * nside, 0.0));\n"
+    "        if (side * nside < 0.0) {\n"
+    "            float f = side / (side - nside);\n"
+    "            vec3 P = pos + (npos - pos) * f;\n"
     /*      Thicker while it is falling: gas that has not settled yet is a
             ragged shell rather than a disc, and it thins as it grinds into
             one. u_form is 1 for a hole that has arrived, and for everything
@@ -605,29 +520,10 @@ static const char star_frag_src[] =
     "            float thick = (0.14 + 0.055 * length(P))\n"
     "                        * mix(2.6, 1.0, smoothstep(0.15, 0.95, u_form));\n"
     "            float ct = abs(dot(normalize(nvel), N));\n"
-    "            float path = thick * clamp(1.0 / max(ct, 0.05), 1.0, 14.0);\n"
-    /*          Whether this crossing is BEHIND the hole — past the closest
-                approach, so its light has to come round to reach the eye. The
-                dim outer gas is counted only there: seen directly it is a haze
-                across half the shadow and a rim the canvas cuts off, and seen
-                bent it is the one thing that fills the ring of orbited light.
-                A real disc has both; a picture nine radii wide can only afford
-                the half that pays for itself. */
-    "            float far_ok = step(0.0, dot(P, nvel));\n"
-    "            vec4 em = disc_emit(P, nvel, N, A, B, t, r_in, r_out, r_gas, far_ok);\n"
+    "            float path = thick * clamp(1.0 / max(ct, 0.09), 1.0, 6.0);\n"
+    "            vec4 em = disc_emit(P, nvel, N, A, B, t, r_in, r_out);\n"
     "            o.glow += em.rgb * path * 5.5 * lit * (1.0 - o.veil);\n"
-    /*          What this gas hides. Weak on purpose: a grazing line of sight
-                travels far through the disc, and with a heavy coefficient the
-                first whiff of the dim outer gas blacked out everything behind
-                it — including the bright inner disc the same ray goes on to
-                cross. That was a dark line one pixel wide straight across the
-                brightest part of the picture, and it was extinction, not
-                geometry. */
-    "            o.veil = clamp(o.veil + em.a * path * 0.8, 0.0, 1.0);\n"
-    /*          Whether that crossing actually found gas. A ray can cross the
-                disc's plane a long way outside the disc and come back with
-                nothing, which is not the same as never having crossed. */
-    "            got = max(got, step(0.0001, em.a + dot(em.rgb, vec3(1.0))));\n"
+    "            o.veil = clamp(o.veil + em.a * path * 3.0, 0.0, 1.0);\n"
     "        }\n"
     "        side = nside;\n"
     "\n"
@@ -659,53 +555,9 @@ static const char star_frag_src[] =
             with nothing to show, and the pixel goes transparent — so the bent
             copy ended in a ragged ring at exactly the radius where that starts
             happening, with the untouched desktop outside it. */
-    "        if (o.hit > 0.5 && dot(pos, vel) > 0.0 && rn > r_gas + 1.0) break;\n"
+    "        if (o.hit > 0.5 && dot(pos, vel) > 0.0 && rn > r_out + 1.0) break;\n"
     "        if (rn > R_EYE * 1.6) break;\n"
     "    }\n"
-    /*  The ray that runs ALONG the disc rather than through it.
-    
-        Its direction lies in the plane, so it barely changes sides and the
-        crossing test above gives it one sample somewhere thin — while in truth
-        it went through more gas than any other ray in the picture. Left like
-        that it came out DARK: a line one pixel wide straight across the
-        brightest part of the disc, the one ray the disc could not light, and
-        the thing that read as a stroke drawn over the black hole rather than
-        as part of it.
-    
-        So the march remembers where such a ray came closest to the plane, and
-        it is lit once there, with a path length that says how far it actually
-        travelled through the gas. One sample, chosen by a minimum over the
-        whole march rather than by which step happened to land where — take it
-        step by step instead and neighbouring rows disagree about how many
-        samples they got, which is banding in place of a line. */
-    "    if (near_h < 1e8) {\n"
-    "        float ct = abs(dot(normalize(near_v), N));\n"
-    "        float thick = 0.16 + 0.055 * length(near_p);\n"
-    "        if (ct < 0.25 && near_h < thick) {\n"
-    "            float path = thick * clamp(1.0 / max(ct, 0.05), 1.0, 12.0)\n"
-    /*          Fading in as the ray flattens, so there is no radius at which
-                this switches on: at a quarter it adds nothing and at nothing
-                it adds all of it. */
-    "                       * (1.0 - smoothstep(0.10, 0.25, ct));\n"
-    "            float far_ok = step(0.0, dot(near_p, near_v));\n"
-    "            vec4 em = disc_emit(near_p, near_v, N, A, B, t, r_in, r_out, r_gas, far_ok);\n"
-    "            o.glow += em.rgb * path * 5.5 * lit * (1.0 - o.veil);\n"
-    "        }\n"
-    "    }\n"
-    "\n"
-    /*  Out of steps and still down the well.
-    
-        A ray that grazes the photon sphere winds round it, and the closer it
-        passes the longer it takes to decide — some of them are still going
-        when the loop's last step runs out. Left as they were, they count as
-        neither caught nor escaped: the pixel takes whatever backdrop the ray
-        happened to have crossed on the way IN, so a bright desktop showed up
-        as a dotted circle inside the black, at exactly the impact parameter
-        where the winding starts to outlast the budget. On a dark wallpaper it
-        was invisible; on a light one it is a ring drawn inside a black hole.
-    
-        Anything still that deep after four hundred steps is not coming out. */
-    "    if (o.caught < 0.5 && length(pos) < 6.0) { o.caught = 1.0; o.hit = 0.0; }\n"
     "    return o;\n"
     "}\n"
     "\n"
@@ -959,41 +811,24 @@ static const char star_frag_src[] =
     "        float r_in  = mix(dmax * 0.62, R_ISCO, smoothstep(0.0, 0.72, fall));\n"
     "        float r_out = mix(dmax * 0.74, r_settled, smoothstep(0.12, 1.0, fall));\n"
     "        r_out = max(r_out, r_in * 1.04);\n"
-    /*     How far the gas reaches at all, as against how far it can be
-           SEEN: the dim outer disc is what the photon ring is made of. */
-    "        float r_gas = r_out * 2.0;\n"
     "        float incl = clamp(u_incl, 0.012, 0.995);\n"
     "\n"
     "        float tt = u_time + u_angle * 0.2;\n"
-    "        Ray ray = trace(uv, incl, u_roll, tt, r_in, r_out, r_gas);\n"
+    "        Ray ray = trace(uv, incl, u_roll, tt, r_in, r_out);\n"
     "        vec3 acc = ray.glow;\n"
     "        vec3 back = vec3(0.0);\n"
+    /*     The hairline ring is one pixel wide and it is the sharpest feature
+           in the picture, so it is the one that aliases. Three more rays
+           through the same pixel, only in the narrow band where the ring can
+           be, cost nothing anywhere else in the frame. */
+    "        if (b > 2.20 && b < 3.30) {\n"
+    "            float q = 0.35 / rs;\n"
+    "            acc = (acc + trace(uv + vec2( q,  q), incl, u_roll, tt, r_in, r_out).glow\n"
+    "                       + trace(uv + vec2(-q,  q), incl, u_roll, tt, r_in, r_out).glow\n"
+    "                       + trace(uv + vec2( q, -q), incl, u_roll, tt, r_in, r_out).glow) * 0.25;\n"
+    "        }\n"
     "        float lensed = 0.0;\n"
     "\n"
-    /*     A note on the ring of orbited light, and why nothing here samples it
-           more than once.
-    
-           Light that grazes the photon sphere comes back out having been round
-           the hole, so just outside b = 3*sqrt(3)/2 sits the whole disc again,
-           squeezed into a band far thinner than a pixel — and outside that,
-           again, thinner still. One ray per pixel reports whichever image it
-           happened to land on, and the answer used to be a bright hairline
-           circle drawn across the black: a ring inside the hole that no line
-           of code draws.
-    
-           The obvious cure is to trace that band several times per pixel, and
-           it works, and it is unaffordable: those are exactly the rays that
-           wind around the hole for hundreds of steps and cross the gas over
-           and over, so six of them cost more than the whole rest of the frame
-           and dropped the compositor from sixty frames a second to twenty.
-    
-           What fixed it instead was giving the light somewhere to come from.
-           The gas does not stop dead at the last stable orbit — inside it,
-           matter is falling rather than orbiting, and it fades out rather than
-           ending at a line — and it does not stop at the rim of the picture
-           either. With both, the ring is no longer one lit pixel in an empty
-           annulus: it is the bright edge of the shadow, which is where the eye
-           expects an edge and where it actually is. */
     /*     The backdrop, seen from wherever the ray actually came from.
     
            Faded back to the straight-line answer at the edge of the canvas:
@@ -1003,28 +838,6 @@ static const char star_frag_src[] =
            coverage does makes the two the same picture. */
     "        float reach = (1.0 - smoothstep(dmax * 0.45, dmax * 0.85, b));\n"
     "        vec2 src = mix(uv, ray.src, reach);\n"
-    /*     How much of the world one pixel is looking at.
-    
-           Right at the edge of the shadow the lens is not merely strong, it is
-           singular: the whole sky behind the hole is squeezed into a band far
-           thinner than a pixel, so one ray reports whichever part of it that
-           pixel's ray happened to catch, and the ring next to it catches
-           somewhere else entirely. Averaged properly that band is the AVERAGE
-           of everything behind the hole — a dim, even ring. Sampled once it is
-           a bright hairline circle drawn on the black, which is exactly what
-           it looked like: a ring inside the hole that nothing in the code
-           draws.
-    
-           Nothing here can average the whole sky in one pixel, so it does the
-           other honest thing: where a pixel covers that much of the world it
-           stops claiming to know what is there, and the lensed image fades out
-           over that last fraction of a radius rather than aliasing across it.
-           What is left is the shadow's own edge, which is where the eye
-           expects the picture to end anyway. */
-    "        float wide = 0.0;\n"
-    "#ifdef GL_OES_standard_derivatives\n"
-    "        wide = smoothstep(0.12, 0.75, length(abs(dFdx(src)) + abs(dFdy(src))));\n"
-    "#endif\n"
     /*     How much work the lens did on this pixel: how far the light it shows
            came from, compared with where it appears to be. Near the shadow the
            answer is radii, at the edge of the canvas it is nothing — and it is
@@ -1080,7 +893,7 @@ static const char star_frag_src[] =
                    round the hole at exactly the radius where the lens starts
                    reaching past its own photograph, and that ring is the
                    "lensed area" you could see on the desktop. */
-    "                back = bg.rgb * inside * (1.0 - ray.veil) * (1.0 - wide);\n"
+    "                back = bg.rgb * inside * (1.0 - ray.veil);\n"
     /*             Where the desktop was re-drawn bent, this pixel IS the
                    desktop and has to cover what lies underneath completely:
                    drawn semi-transparent it would sit as a film of curved
@@ -1089,7 +902,7 @@ static const char star_frag_src[] =
                    than to black. */
     "                lensed = inside * bg.a;\n"
     "            } else {\n"
-    "                back = sky(src) * (1.0 - ray.veil) * (1.0 - wide);\n"
+    "                back = sky(src) * (1.0 - ray.veil);\n"
     "            }\n"
     "        }\n"
     "\n"
