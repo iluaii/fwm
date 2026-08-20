@@ -138,6 +138,7 @@ set(SOURCES
     src/foreign.c
     src/workspace.c
     src/shortcuts.c
+    src/sandbox.c
     src/group.c
     src/ipc.c
     src/ipc_events.c

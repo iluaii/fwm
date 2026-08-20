@@ -185,6 +185,19 @@ across the sandbox boundary. `flatpak info --show-permissions com.discordapp.Dis
 should show a `pipewire` socket; if it does not, grant it:
 `flatpak override --user --socket=pipewire com.discordapp.Discord`.
 
+**A Flatpak bar, clipboard manager or screen recorder does nothing at all.** That
+is deliberate, and it is not a Flatpak bug. A sandboxed app announces itself to
+fwm through `security-context-v1`, and fwm answers by leaving the privileged
+protocols out of the registry it sends that client: the clipboard read behind
+everyone's back, screen capture, layer-shell, the window list, the workspaces,
+global shortcuts, the backlight and the gamma ramps. The app sees no such
+global, so waybar-in-a-flatpak has nowhere to put its bar and cliphist-in-a-
+flatpak sees no selection.
+
+Nothing started from the session itself is affected — a bar installed from your
+distro's packages is an ordinary client and gets everything. Run the tool
+outside the sandbox, or, for capture, let it ask the portal like Discord does.
+
 ## Monitors
 
 `fwmctl outputs` lists what fwm sees, including every mode each screen offers, and

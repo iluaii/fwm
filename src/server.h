@@ -514,6 +514,10 @@ typedef struct FwmServer {
     struct wlr_cursor_shape_manager_v1 *cursor_shape;
     struct wl_listener cursor_shape_request;
 
+    /* Which clients arrived through a sandbox, and thus never see the
+     * privileged globals; see sandbox.h. */
+    struct wlr_security_context_manager_v1 *security_context;
+
     struct wlr_idle_notifier_v1 *idle_notifier;
     struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
     int idle_inhibited;                    /* last state pushed to the notifier */

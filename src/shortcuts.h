@@ -39,9 +39,10 @@ struct FwmServer;
  * the XML is vendored in protocols/.
  *
  * The protocol is a privileged one: any client that binds the global can ask
- * for a key. fwm serves it to everything, exactly as it serves layer-shell —
- * a session where untrusted clients can connect at all has already lost this
- * argument (see the security_context note in the README). */
+ * for a key, and thus be told whenever it is pressed anywhere. fwm serves it to
+ * every client of the session, exactly as it serves layer-shell — a shell you
+ * started is a shell you trust. What it is not served to is a client that came
+ * out of a sandbox: those never see this global at all (see sandbox.h). */
 void shortcuts_init(struct FwmServer *server);
 
 /* Fire the shortcut registered as `app_id:id`, the whole press and release.

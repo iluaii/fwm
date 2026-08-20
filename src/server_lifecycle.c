@@ -49,6 +49,7 @@
 #include "wallpaper.h"
 #include "cava.h"
 #include "sound.h"
+#include "sandbox.h"
 #include "server_internal.h"
 
 #include <stdlib.h>
@@ -364,6 +365,11 @@ bool server_init(FwmServer *server) {
     wlr_fractional_scale_manager_v1_create(server->wl_display, 1);
     wlr_single_pixel_buffer_manager_v1_create(server->wl_display);
     wlr_presentation_create(server->wl_display, server->wlr_backend, 2);
+
+    /* Which clients came out of a sandbox, and what they are not shown for it.
+     * Installed here, well before the socket exists: the filter has to be in
+     * place before any client can be sent a registry. See sandbox.h. */
+    sandbox_init(server);
 
     server->output_layout = wlr_output_layout_create(server->wl_display);
     // xdg-output: exposes output geometry to clients (grim/wf-recorder need it).
