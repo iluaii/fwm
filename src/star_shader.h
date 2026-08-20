@@ -525,8 +525,16 @@ static const char star_frag_src[] =
     /*      Done: past the gas, past the backdrop, and on its way out. There is
             nothing further along this ray for the picture to gain, and
             marching it to some arbitrary far radius was most of what the
-            tracer cost. */
-    "        if (dot(pos, vel) > 0.0 && rn > r_out + 1.0) break;\n"
+            tracer cost.
+    
+            PAST THE BACKDROP is half the test, and leaving it out is what drew
+            a circle round the hole on the desktop. A ray that passes six or
+            seven radii out turns round while it is still short of the plane
+            the desktop hangs on; stopped there it never reaches it, comes back
+            with nothing to show, and the pixel goes transparent — so the bent
+            copy ended in a ragged ring at exactly the radius where that starts
+            happening, with the untouched desktop outside it. */
+    "        if (o.hit > 0.5 && dot(pos, vel) > 0.0 && rn > r_out + 1.0) break;\n"
     "        if (rn > R_EYE * 1.6) break;\n"
     "    }\n"
     "    return o;\n"
@@ -790,7 +798,7 @@ static const char star_frag_src[] =
            transparent bent copy lies over the untouched original the window
            underneath appears twice. Bending that dies exactly where the
            coverage does makes the two the same picture. */
-    "        float reach = (1.0 - smoothstep(dmax * 0.55, dmax * 0.98, b));\n"
+    "        float reach = (1.0 - smoothstep(dmax * 0.45, dmax * 0.85, b));\n"
     "        vec2 src = mix(uv, ray.src, reach);\n"
     "        if (ray.caught < 0.5 && ray.hit > 0.5) {\n"
     "            if (u_has_bg > 0.5) {\n"
@@ -822,7 +830,15 @@ static const char star_frag_src[] =
     "                    bg = mix(bg, acc4 * 0.25, 0.75);\n"
     "                }\n"
     "#endif\n"
-    "                back = bg.rgb * mix(0.30, 1.0, inside) * (1.0 - ray.veil);\n"
+    /*             Where the ray came from beyond the edge of the photograph
+                   there is nothing to show, and the honest answer is to show
+                   nothing: this pixel stays transparent and the real desktop
+                   underneath comes through untouched. Dimming the border
+                   sample instead — which is what stood here — drew a dark ring
+                   round the hole at exactly the radius where the lens starts
+                   reaching past its own photograph, and that ring is the
+                   "lensed area" you could see on the desktop. */
+    "                back = bg.rgb * inside * (1.0 - ray.veil);\n"
     /*             Where the desktop was re-drawn bent, this pixel IS the
                    desktop and has to cover what lies underneath completely:
                    drawn semi-transparent it would sit as a film of curved
@@ -863,7 +879,13 @@ static const char star_frag_src[] =
            it, and a black hole you can see the wallpaper through is the one
            failure that ruins the whole picture. */
     "        a = max(a, ray.caught);\n"
-    "        float rim2 = (1.0 - smoothstep(dmax * 0.70, dmax, b));\n"
+    /*     And the node's own edge. It fades only where the bending has
+           already died — past 0.85 of the canvas nothing is displaced, so the
+           bent copy and the desktop under it are the same picture and the
+           join cannot be seen. Overlapping the two fades is what made a
+           half-transparent, still-displaced copy lie over the real thing: the
+           window appeared twice. */
+    "        float rim2 = (1.0 - smoothstep(dmax * 0.86, dmax, b));\n"
     "        vec3 out3 = acc * a * rim2;\n"
     "        gl_FragColor = vec4(out3.b, out3.g, out3.r, a * rim2);\n"
     "        return;\n"
