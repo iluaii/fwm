@@ -35,6 +35,11 @@
  * whatever wlroots' GLES2 renderer will take. */
 
 static const char star_frag_src[] =
+    /* Derivatives, for one job: knowing how much of the desktop behind a hole
+     * is squeezed into this pixel. Optional by the letter of GLSL ES 1.0, so
+     * it is asked for rather than required, and the code below falls back to a
+     * single sample where it is missing. */
+    "#extension GL_OES_standard_derivatives : enable\n"
     "precision highp float;\n"
     "uniform vec2  u_res;\n"      /* canvas size, px */
     "uniform float u_time;\n"     /* seconds */
@@ -145,15 +150,30 @@ static const char star_frag_src[] =
        behind convective turbulence — plain fbm looks like cloud, warped fbm
        looks like something boiling, because the features get dragged along by
        a flow instead of sitting still. */
+    /* The clock comes in as seconds since the machine booted, which is a
+       number in the tens or hundreds of thousands. A float carries seven
+       digits: at t = 20000 the fraction is quantised to about two
+       thousandths, and fract() — which is the whole of how noise interpolates
+       between lattice points — starts returning steps instead of a ramp. The
+       result is not a subtly worse star, it is sand: the disc of a black hole
+       fills with crawling speckle, and only on a machine that has been up for
+       a few hours, which is why it never showed up in a render.
+    
+       Wrapping the time offsets fixes it exactly rather than approximately.
+       hash() already wraps its input every 256 units, so the whole noise field
+       is periodic with that period — and an offset of (x mod 256) therefore
+       lands on precisely the same field as an offset of x, with none of the
+       precision thrown away. */
+    "float wrap_t(float t, float rate) { return mod(t * rate, 256.0); }\n"
     "float turbulence(vec2 p, float t) {\n"
     /* The rates are what make it a star rather than a photograph of one. Slow
        enough and turbulence is indistinguishable from a still image — which is
        exactly how the first version looked. These are tuned so a cell visibly
        changes shape over a couple of seconds. */
-    "    vec2 q = vec2(fbm(p + vec2(0.0, t * 0.45)),\n"
-    "                  fbm(p + vec2(5.2, 1.3) - vec2(t * 0.38, 0.0)));\n"
-    "    vec2 r = vec2(fbm(p + 3.0 * q + vec2(1.7, 9.2) + t * 0.30),\n"
-    "                  fbm(p + 3.0 * q + vec2(8.3, 2.8) - t * 0.24));\n"
+    "    vec2 q = vec2(fbm(p + vec2(0.0, wrap_t(t, 0.45))),\n"
+    "                  fbm(p + vec2(5.2, 1.3) - vec2(wrap_t(t, 0.38), 0.0)));\n"
+    "    vec2 r = vec2(fbm(p + 3.0 * q + vec2(1.7, 9.2) + wrap_t(t, 0.30)),\n"
+    "                  fbm(p + 3.0 * q + vec2(8.3, 2.8) - wrap_t(t, 0.24)));\n"
     "    return fbm(p + 3.5 * r);\n"
     "}\n"
     "\n"
@@ -290,15 +310,64 @@ static const char star_frag_src[] =
         inner edge laps the outer many times over, neighbouring radii sample
         unrelated noise, and the disc tears into concentric rings — a sampling
         artefact that reads as beams of light. */
-    "    float phi = ang + t * (2.2 / pow(rc, 0.9));\n"
-    "    vec2 sp = vec2(cos(phi), sin(phi)) * rc;\n"
-    "    float body  = turbulence(sp * 0.55, t * 0.6);\n"
-    "    float flow  = turbulence(sp * 1.60 + vec2(phi * 0.9, 0.0), t * 1.1);\n"
-    "    float fine  = turbulence(sp * 5.60 + vec2(phi * 2.3, 0.0), t * 1.8);\n"
+    /*  The gas, and the one hard problem in drawing it: it has to KEEP
+        turning, for as long as the session lasts, without the picture coming
+        apart.
+    
+        Sampling a fixed noise field at an angle that grows with time cannot do
+        that. The disc turns differentially — the inside faster than the
+        outside — so the phase difference between two neighbouring radii grows
+        without bound, and after an hour they are sampling places in the field
+        with nothing to do with each other. The disc dissolves into crawling
+        speckle. It is not a precision bug, though it looks like one: it is
+        winding, and no amount of care with floats fixes it. (fwm hands the
+        shader CLOCK_MONOTONIC, so on a machine up for a few hours this was the
+        state a black hole was ALWAYS found in — while every render of the same
+        shader, made seconds after start, looked perfect.)
+    
+        So the field is advected instead, in cycles. Two copies run at once,
+        each carried round by the flow for at most one cycle before it is
+        retired and re-seeded, and the picture cross-fades from the older to
+        the younger. Nothing ever winds further than one cycle's worth, the
+        seam where a layer is replaced is under the fade, and the disc turns
+        for ever. */
+    /*  How fast the gas goes round at this radius. Kepler's law would put the
+        exponent at 1.5; this is flatter on purpose, because at the true value
+        the inner edge laps the outer many times inside one cycle and the two
+        stop looking like one disc. */
+    "    float w = 2.2 / pow(rc, 0.9);\n"
+    "    float cyc = 9.0;\n"
+    "    float ph = t / cyc, seg = floor(ph), fr = fract(ph);\n"
+    /*  Where the flow has carried each layer, in radians: the young one is
+        just starting its trip, the old one is finishing the previous. */
+    "    float spinA = fr * cyc * w;\n"
+    "    float spinB = (fr - 1.0) * cyc * w;\n"
+    /*  And a seed per cycle, so a retired layer comes back as different gas
+        rather than the same gas again. Wrapped, because the noise field
+        repeats every 256 units and a seed of a hundred thousand is a seed a
+        float can no longer tell from its neighbour. */
+    "    vec2 seedA = vec2(mod(seg * 37.0, 256.0), mod(seg * 61.0, 256.0));\n"
+    "    vec2 seedB = vec2(mod((seg + 1.0) * 37.0, 256.0), mod((seg + 1.0) * 61.0, 256.0));\n"
+    "    vec2 pA = vec2(cos(ang + spinA), sin(ang + spinA)) * rc + seedA;\n"
+    "    vec2 pB = vec2(cos(ang + spinB), sin(ang + spinB)) * rc + seedB;\n"
+    "    float aw = 1.0 - fr, bw = fr;\n"
+    /*  Two scales of gas: the broad structure of where the disc is thick, and
+        the streaks the flow draws out of it. A third, finer one used to sit
+        here; at the size a hole is actually drawn it was below one pixel and
+        arrived as grain rather than as gas. */
+    /*  Each layer carries its OWN age into the noise's internal boil, the
+        young one counting up from zero and the old one finishing the count it
+        started last cycle. Handing both the same age is the one way to make
+        the handover show: the whole field would reset its boil at the instant
+        the layers change hands, and the disc would blink once a cycle. */
+    "    float body = aw * turbulence(pA * 0.55, fr * 2.0)\n"
+    "               + bw * turbulence(pB * 0.55, (fr - 1.0) * 2.0);\n"
+    "    float flow = aw * turbulence(pA * 1.70, fr * 3.0)\n"
+    "               + bw * turbulence(pB * 1.70, (fr - 1.0) * 3.0);\n"
     /*  Clumped hard: raising the sum to a power thins the quiet regions and
         leaves the bright filaments standing, which is what hot gas looks like
         and what an evenly lit ring never does. */
-    "    float dens  = clamp(pow(clamp(body * 0.62 + flow * 0.54 + fine * 0.38, 0.0, 2.0), 2.2), 0.0, 2.6);\n"
+    "    float dens  = clamp(pow(clamp(body * 0.80 + flow * 0.62, 0.0, 2.0), 2.0), 0.0, 2.6);\n"
     "\n"
     /*  Shakura-Sunyaev: T goes as r^-3/4, damped by (1 - sqrt(r_in/r))^1/4 so
         the gas fades to nothing at the last stable orbit instead of being
@@ -430,7 +499,7 @@ static const char star_frag_src[] =
     "            vec3 P = pos + (npos - pos) * f;\n"
     "            float thick = 0.14 + 0.055 * length(P);\n"
     "            float ct = abs(dot(normalize(nvel), N));\n"
-    "            float path = thick * clamp(1.0 / max(ct, 0.05), 1.0, 9.0);\n"
+    "            float path = thick * clamp(1.0 / max(ct, 0.09), 1.0, 6.0);\n"
     "            vec4 em = disc_emit(P, nvel, N, A, B, t, r_out);\n"
     "            o.glow += em.rgb * path * 5.5 * (1.0 - o.veil);\n"
     "            o.veil = clamp(o.veil + em.a * path * 3.0, 0.0, 1.0);\n"
@@ -480,7 +549,7 @@ static const char star_frag_src[] =
     "    float width = 0.5 + 3.5 * fall;\n"
     "    float band = exp(-pow(abs(d - shell) / width, 2.0));\n"
     /*  Ragged and turning: gas, and gas with angular momentum at that. */
-    "    float lump = 0.35 + 1.15 * turbulence(vec2(ang * 1.8 + t * 0.25, d * 0.6), t * 0.6);\n"
+    "    float lump = 0.35 + 1.15 * turbulence(vec2(ang * 1.8 + wrap_t(t, 0.25), d * 0.6), t * 0.6);\n"
     /*  Cold and dim at first, warming as it falls in. */
     "    vec3 cold = mix(vec3(0.35, 0.22, 0.45), u_color, birth * birth);\n"
     "    return cold * band * lump * (0.25 + 0.75 * birth) * 0.9;\n"
@@ -644,7 +713,7 @@ static const char star_frag_src[] =
     /*     The churn is the life: sampled fast enough, the turbulence itself
            brings tongues up and takes them away. An extra slow term on top of
            it was tried and made them swell into pink clouds instead. */
-    "        float f = turbulence(vec2((ang + u_angle) * 2.6, d * 3.4 - u_time * 0.30), u_time * 1.4);\n"
+    "        float f = turbulence(vec2((ang + u_angle) * 2.6, d * 3.4 - wrap_t(u_time, 0.30)), u_time * 1.4);\n"
 
     /*     Tight thresholds and a short reach: loosened, these stop being
            tongues of gas off the limb and become pink smoke across the whole
@@ -657,7 +726,7 @@ static const char star_frag_src[] =
     "\n"
     /* ---- corona ------------------------------------------------------- */
     "    if (d >= 0.97) {\n"
-    "        float streak = turbulence(vec2(ang * 2.3, log(d) * 2.2 - u_time * 0.12), u_time * 0.5);\n"
+    "        float streak = turbulence(vec2(ang * 2.3, log(d) * 2.2 - wrap_t(u_time, 0.12)), u_time * 0.5);\n"
     "        float fall = 1.0 / (1.0 + pow((d - 0.97) * 4.2, 2.4));\n"
     "        float k = fall * (0.50 + 0.50 * streak);\n"
     "        col += u_color * k * 0.40;\n"
@@ -690,10 +759,10 @@ static const char star_frag_src[] =
     "        float b = length(uv);\n"
     /*     How many radii of canvas this hole was given — star_draw.c hands it
            STAR_HOLE_BOX of them and sizes the node to match, so this is nine
-           unless the buffer hit its ceiling. The disc has to END before the
-           fade at the canvas edge begins, or its outer rim is cut off in a
-           straight line across the picture, which is what a hole drawn into a
-           canvas meant for the star it used to be always looked like. */
+           unless the buffer hit its cap. The disc has to END before the fade
+           at the canvas edge begins, or its outer rim is cut off in a straight
+           line across the picture, which is what a hole fed past its buffer
+           used to look like. */
     "        float dmax = min(u_res.x, u_res.y) * 0.5 / rs;\n"
     "        float r_out = clamp(dmax * 0.60, R_ISCO * 1.25, 16.0);\n"
     "        float incl = clamp(u_incl, 0.012, 0.995);\n"
@@ -701,6 +770,7 @@ static const char star_frag_src[] =
     "        float tt = u_time + u_angle * 0.2;\n"
     "        Ray ray = trace(uv, incl, u_roll, tt, r_out);\n"
     "        vec3 acc = ray.glow;\n"
+    "        vec3 back = vec3(0.0);\n"
     /*     The hairline ring is one pixel wide and it is the sharpest feature
            in the picture, so it is the one that aliases. Three more rays
            through the same pixel, only in the narrow band where the ring can
@@ -732,7 +802,27 @@ static const char star_frag_src[] =
                    border pixel across the frame. */
     "                float inside = step(length(bguv - clamped), 0.0001);\n"
     "                vec4 bg = bg_texel(clamped);\n"
-    "                acc += bg.rgb * mix(0.30, 1.0, inside) * (1.0 - ray.veil);\n"
+    /*             Just outside the shadow the lens squeezes the whole of the
+                   desktop into a band a few pixels wide. One sample of a
+                   texture at that compression is not a picture of it, it is a
+                   picture of whichever pixel the ray happened to land on — and
+                   since the ray next door lands somewhere else entirely, the
+                   band comes out as a mess of speckle that crawls as anything
+                   moves. So where a pixel covers a lot of the photograph, it
+                   is sampled across that whole footprint instead of at a
+                   point. Four taps, only where the compression is real. */
+    "#ifdef GL_OES_standard_derivatives\n"
+    "                vec2 foot = (abs(dFdx(bguv)) + abs(dFdy(bguv))) * 0.5;\n"
+    "                if (max(foot.x, foot.y) > 1.2 / min(u_res.x, u_res.y)) {\n"
+    "                    vec2 fx = vec2(foot.x, 0.0), fy = vec2(0.0, foot.y);\n"
+    "                    vec4 acc4 = bg_texel(clamp(bguv + fx, vec2(0.002), vec2(0.998)))\n"
+    "                              + bg_texel(clamp(bguv - fx, vec2(0.002), vec2(0.998)))\n"
+    "                              + bg_texel(clamp(bguv + fy, vec2(0.002), vec2(0.998)))\n"
+    "                              + bg_texel(clamp(bguv - fy, vec2(0.002), vec2(0.998)));\n"
+    "                    bg = mix(bg, acc4 * 0.25, 0.75);\n"
+    "                }\n"
+    "#endif\n"
+    "                back = bg.rgb * mix(0.30, 1.0, inside) * (1.0 - ray.veil);\n"
     /*             Where the desktop was re-drawn bent, this pixel IS the
                    desktop and has to cover what lies underneath completely:
                    drawn semi-transparent it would sit as a film of curved
@@ -741,24 +831,31 @@ static const char star_frag_src[] =
                    than to black. */
     "                lensed = inside * bg.a;\n"
     "            } else {\n"
-    "                acc += sky(src) * (1.0 - ray.veil);\n"
+    "                back = sky(src) * (1.0 - ray.veil);\n"
     "            }\n"
     "        }\n"
     "\n"
-    /*     The glow the whole thing sits in. Gas this hot lights the dust
-           around it, and without a little of that the object is a bright shape
-           pasted on black rather than something enormous a long way off. Kept
-           small, tied to the disc's own reach, and never inside the shadow:
-           nothing comes out of there. */
-    "        float aura = exp(-pow(max(0.0, b - 2.6) / max(r_out * 0.55, 1.0), 1.3));\n"
-    "        acc += vec3(1.00, 0.66, 0.32) * aura * 0.16 * (1.0 - ray.caught);\n"
-    "\n"
+    /*     No painted-on glow around it. There used to be one — a warm halo,
+           on the reasoning that gas this hot lights the dust around it — and
+           over a desktop it is exactly wrong: it lays a brown haze across
+           every window within nine radii and hides the one thing the lens does
+           that nobody has seen before, which is the windows themselves bent
+           round the shadow. Whatever glow there is here is light that came
+           from somewhere, and it is already in the disc. */
     /*     Tone-mapped gently, so the approaching side of the disc keeps
            climbing instead of clipping to a flat white slab — the highlight
            rolls off the way a camera's does, which is where the white core
-           with colour surviving around it comes from. */
+           with colour surviving around it comes from.
+    
+           The GAS is tone-mapped; the desktop behind it is not, and is added
+           afterwards. Running the desktop through the same curve dimmed and
+           warmed every window inside the node while the same window outside it
+           stayed as it was, and the join between the two was a great circle
+           drawn across the screen — the wider the hole's canvas, the more
+           obvious. What the lens does to the desktop is move it, not tint it. */
     "        acc = acc / (1.0 + acc * 0.30);\n"
     "        acc = pow(max(acc, vec3(0.0)), vec3(0.88));\n"
+    "        acc += back;\n"
     "        float a = clamp(max(acc.r, max(acc.g, acc.b)) * 1.4, 0.0, 1.0);\n"
     "        a = max(a, lensed);\n"
     /*     The shadow is opaque black, full stop. Derived from the arithmetic
