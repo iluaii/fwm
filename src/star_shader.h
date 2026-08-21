@@ -269,6 +269,13 @@ static const char star_frag_src[] =
      * fall out of the metric, and having them fall out is the difference
      * between a picture of a black hole and a black hole. */
     "const float R_ISCO = 3.0;\n"
+    /* The hottest the gas gets, in kelvin, before any shift: the peak of a
+     * Shakura-Sunyaev profile sits just outside the inner edge, and everything
+     * further out follows from r^-3/4. Nine thousand puts that peak at
+     * white-hot and the outer disc in deep orange, which is the disc of a
+     * supermassive hole — the only kind whose disc is cool enough to have a
+     * colour a person would recognise. */
+    "const float DISC_K = 9000.0;\n"
     /* How far out the gas reaches. A real disc runs for thousands of radii;
        what decides this is the canvas, which is only a few radii wide, and a
        disc drawn past its edge is a disc cut off with scissors. Fed in from
@@ -289,13 +296,34 @@ static const char star_frag_src[] =
        hottest gas in the picture. Not a fit to Planck's law — the eye is being
        asked whether this is hot metal or a hot star, and the answer is carried
        by the sequence dull red, orange, white, blue-white. */
-    "vec3 disc_heat(float t) {\n"
-    "    t = clamp(t, 0.0, 1.4);\n"
-    "    vec3 c = mix(vec3(0.55, 0.12, 0.02), vec3(1.00, 0.45, 0.08), smoothstep(0.0, 0.35, t));\n"
-    "    c = mix(c, vec3(1.00, 0.83, 0.45), smoothstep(0.30, 0.62, t));\n"
-    "    c = mix(c, vec3(1.00, 0.98, 0.92), smoothstep(0.58, 0.90, t));\n"
-    "    c = mix(c, vec3(0.78, 0.87, 1.00), smoothstep(0.95, 1.35, t));\n"
-    "    return c;\n"
+    /* The colour of something at a temperature, rather than a ramp somebody
+     * liked the look of.
+     *
+     * A thin accretion disc radiates as a blackbody, so its colour is decided
+     * by one number — how hot the gas is there — and the sequence dull red,
+     * orange, white, blue-white is not a stylistic choice, it is the Planckian
+     * locus. This is the usual compact fit to it, good to a few percent across
+     * the range a disc actually spans, and it costs two divides.
+     *
+     * The temperature is in kelvin and the range is chosen for a SUPERMASSIVE
+     * hole: those are the ones with discs a few thousand kelvin, which is the
+     * black hole everybody has seen a picture of. A stellar-mass hole's inner
+     * disc runs to ten million kelvin, and the honest colour for that is a
+     * featureless blue-white that says nothing about what it is looking at. */
+    "vec3 blackbody(float kelvin) {\n"
+    "    float t = clamp(kelvin, 1000.0, 22000.0) / 100.0;\n"
+    "    float r, g, b;\n"
+    "    if (t <= 66.0) {\n"
+    "        r = 1.0;\n"
+    "        g = clamp(0.3900816 * log(t) - 0.6318414, 0.0, 1.0);\n"
+    "    } else {\n"
+    "        r = clamp(1.2929362 * pow(t - 60.0, -0.1332047), 0.0, 1.0);\n"
+    "        g = clamp(1.1298909 * pow(t - 60.0, -0.0755148), 0.0, 1.0);\n"
+    "    }\n"
+    "    if (t >= 66.0)      b = 1.0;\n"
+    "    else if (t <= 19.0) b = 0.0;\n"
+    "    else                b = clamp(0.5432068 * log(t - 10.0) - 1.1962541, 0.0, 1.0);\n"
+    "    return vec3(r, g, b);\n"
     "}\n"
     "\n"
     /* What the gas at one point of the disc sends towards us.
@@ -427,7 +455,14 @@ static const char star_frag_src[] =
     /*  Colour follows the shifted temperature — the approaching side is not
         just brighter, it is BLUER, and that is half of what makes it read as
         something moving. */
-    "    vec3 col = disc_heat(temp * 1.35 * (0.5 + 0.8 * g));\n"
+    /*  What the gas here is, in kelvin — and what it LOOKS, which is not the
+        same number. Light climbing out of the well loses energy and light
+        thrown towards us gains it, and both do it to the whole spectrum at
+        once: the temperature an observer measures is the emitted one times the
+        shift. So the approaching side of the disc is not merely brighter, it
+        is genuinely hotter to look at, which is where its blue comes from. */
+    "    float kelvin = DISC_K * temp * g;\n"
+    "    vec3 col = blackbody(kelvin);\n"
     /*  And how much it BLOCKS. The gas is thin but it is not glass: where it
         is thick enough to shine it is also thick enough to hide what is behind
         it, and without that the desktop showing through the disc washes the
