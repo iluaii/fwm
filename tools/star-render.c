@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <zlib.h>
 
 #include "../src/star_shader.h"
@@ -54,6 +55,7 @@ struct opts {
     const char *out;
     const char *bg;      /* PNG-free: a raw BGRA dump to stand in for the desktop */
     const char *raw;     /* where to dump the premultiplied RGBA, for checking alpha */
+    int bench;           /* draw this many frames and report ms each, instead of one */
 };
 
 static void usage(void) {
@@ -159,6 +161,7 @@ int main(int argc, char **argv) {
         }
         if (!strcmp(a, "--bg") && v) { o.bg = v; i++; continue; }
         if (!strcmp(a, "--raw") && v) { o.raw = v; i++; continue; }
+        if (!strcmp(a, "--bench") && v) { o.bench = atoi(v); i++; continue; }
         if (!strcmp(a, "-o") && v) { o.out = v; i++; continue; }
         o.out = a;
     }
@@ -252,6 +255,21 @@ int main(int argc, char **argv) {
     glEnableVertexAttribArray(0);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glFinish();
+
+    /* What one frame of this costs on this card, with the readback and the PNG
+     * left out of it — those are the whole of what a single-shot run measures,
+     * and they hid a twentyfold regression in the shader completely. */
+    if (o.bench > 0) {
+        struct timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        for (int f = 0; f < o.bench; f++) glDrawArrays(GL_TRIANGLES, 0, 3);
+        glFinish();
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        double ms = ((double)(t1.tv_sec - t0.tv_sec) * 1e3
+                   + (double)(t1.tv_nsec - t0.tv_nsec) / 1e6) / o.bench;
+        printf("%dx%d radius %.0f: %.2f ms/frame\n",
+               o.side, o.side, o.radius, ms);
+    }
 
     unsigned char *px = malloc((size_t)o.side * o.side * 4);
     glReadPixels(0, 0, o.side, o.side, GL_RGBA, GL_UNSIGNED_BYTE, px);
