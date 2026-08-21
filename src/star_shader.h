@@ -181,6 +181,26 @@ static const char star_frag_src[] =
     "    return fbm(p + 3.5 * r);\n"
     "}\n"
     "\n"
+    /* ---- angles, and the seam they draw ---------------------------------
+     *
+     * atan jumps from +pi to -pi across the negative x axis, so any noise
+     * field fed the angle as a coordinate has a discontinuity there: a
+     * straight line from the middle of the object out to its left edge, with
+     * the two sides of it sampling unrelated places in the field. That is a
+     * seam through every effect built this way — the supernova shell, the
+     * cloud a star condenses out of, the prominences, the corona — and it is
+     * the one part of the picture that is unmistakably drawn rather than lit.
+     *
+     * The cure is to stop using the angle as a coordinate and use a point on a
+     * circle instead: the field is then periodic in the angle by construction
+     * and there is no line to draw. The radius rides on the circle's own
+     * radius, so moving outward still moves through the field. (The hole's
+     * disc was given this when its seam was found; everything else kept the
+     * old form until now.) */
+    "vec2 ring_uv(float ang, float freq, float radial) {\n"
+    "    return vec2(cos(ang), sin(ang)) * (freq + radial);\n"
+    "}\n"
+    "\n"
     /* Blackbody-ish ramp from the star's own colour: the hotter the material,
        the whiter it goes, and the cooler it is the deeper into orange it
        falls. One curve, so the surface, the limb and the loops all agree. */
@@ -578,7 +598,7 @@ static const char star_frag_src[] =
     "    float width = 0.5 + 3.5 * fall;\n"
     "    float band = exp(-pow(abs(d - shell) / width, 2.0));\n"
     /*  Ragged and turning: gas, and gas with angular momentum at that. */
-    "    float lump = 0.35 + 1.15 * turbulence(vec2(ang * 1.8 + wrap_t(t, 0.25), d * 0.6), t * 0.6);\n"
+    "    float lump = 0.35 + 1.15 * turbulence(ring_uv(ang + wrap_t(t, 0.14), 1.8, d * 0.6), t * 0.6);\n"
     /*  Cold and dim at first, warming as it falls in. */
     "    vec3 cold = mix(vec3(0.35, 0.22, 0.45), u_color, birth * birth);\n"
     "    return cold * band * lump * (0.25 + 0.75 * birth) * 0.9;\n"
@@ -861,7 +881,8 @@ static const char star_frag_src[] =
     /*     The churn is the life: sampled fast enough, the turbulence itself
            brings tongues up and takes them away. An extra slow term on top of
            it was tried and made them swell into pink clouds instead. */
-    "        float f = turbulence(vec2((ang + u_angle) * 2.6, d * 3.4 - wrap_t(u_time, 0.30)), u_time * 1.4);\n"
+    "        float f = turbulence(ring_uv(ang + u_angle, 2.6, d * 3.4 - wrap_t(u_time, 0.30)),\n"
+    "                            u_time * 1.4);\n"
 
     /*     Tight thresholds and a short reach: loosened, these stop being
            tongues of gas off the limb and become pink smoke across the whole
@@ -874,7 +895,8 @@ static const char star_frag_src[] =
     "\n"
     /* ---- corona ------------------------------------------------------- */
     "    if (d >= 0.97) {\n"
-    "        float streak = turbulence(vec2(ang * 2.3, log(d) * 2.2 - wrap_t(u_time, 0.12)), u_time * 0.5);\n"
+    "        float streak = turbulence(ring_uv(ang, 2.3, log(d) * 2.2 - wrap_t(u_time, 0.12)),\n"
+    "                                 u_time * 0.5);\n"
     "        float fall = 1.0 / (1.0 + pow((d - 0.97) * 4.2, 2.4));\n"
     "        float k = fall * (0.50 + 0.50 * streak);\n"
     "        col += u_color * k * 0.40;\n"
@@ -998,7 +1020,7 @@ static const char star_frag_src[] =
     "            float far = 0.6 + (dmax * 0.95 - 0.6) * u_blast * u_blast;\n"
     "            float thk = (0.35 + 2.4 * u_blast) * max(dmax / 9.0, 0.4);\n"
     "            float ring = exp(-pow(abs(b - far) / thk, 2.0));\n"
-    "            float rag = 0.55 + 0.75 * turbulence(vec2(ang * 2.2, b * 0.5), u_time * 0.7);\n"
+    "            float rag = 0.55 + 0.75 * turbulence(ring_uv(ang, 2.2, b * 0.5), u_time * 0.7);\n"
     "            float fade = pow(1.0 - u_blast, 1.6);\n"
     "            vec3 hot = mix(vec3(1.0, 0.55, 0.18), vec3(1.0, 0.98, 0.95),\n"
     "                           clamp(1.0 - u_blast * 1.8, 0.0, 1.0));\n"
@@ -1043,7 +1065,7 @@ static const char star_frag_src[] =
     "        float far = 0.6 + 13.0 * u_blast * u_blast;\n"
     "        float thick = 0.35 + 2.4 * u_blast;\n"
     "        float ring = exp(-pow(abs(d - far) / thick, 2.0));\n"
-    "        float rag = 0.55 + 0.75 * turbulence(vec2(ang * 2.2, d * 0.5), u_time * 0.7);\n"
+    "        float rag = 0.55 + 0.75 * turbulence(ring_uv(ang, 2.2, d * 0.5), u_time * 0.7);\n"
     "        float fade = pow(1.0 - u_blast, 1.6);\n"
     "        vec3 hot = mix(vec3(1.0, 0.55, 0.18), vec3(1.0, 0.98, 0.95),\n"
     "                       clamp(1.0 - u_blast * 1.8, 0.0, 1.0));\n"
