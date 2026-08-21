@@ -169,6 +169,33 @@ static const char star_frag_src[] =
        lands on precisely the same field as an offset of x, with none of the
        precision thrown away. */
     "float wrap_t(float t, float rate) { return mod(t * rate, 256.0); }\n"
+    /* The same idea at a third of the price, for the gas of a disc.
+     *
+     * turbulence() above is five fbm of five octaves each: twenty-five layers
+     * of noise, a hundred lookups, for one number. That is affordable on a
+     * star's surface, where it is asked for once per pixel. It is not
+     * affordable on an accretion disc, which is asked four times for every
+     * crossing a ray makes of it — and once the gas comes down to the horizon
+     * nearly every pixel in the frame crosses it, some of them twice. It was
+     * the single most expensive thing in the picture by a wide margin.
+     *
+     * Three octaves and one warp instead of five and two. The difference is
+     * detail below the size the disc is drawn at, which is to say no
+     * difference at all, and it is nine layers rather than twenty-five. */
+    "float fbm3(vec2 p) {\n"
+    "    float v = 0.0, amp = 0.5;\n"
+    "    for (int i = 0; i < 3; i++) {\n"
+    "        v += amp * noise(p);\n"
+    "        p = p * 2.03 + vec2(17.3, 9.1);\n"
+    "        amp *= 0.5;\n"
+    "    }\n"
+    "    return v;\n"
+    "}\n"
+    "float gas_turb(vec2 p, float t) {\n"
+    "    vec2 q = vec2(fbm3(p + vec2(0.0, wrap_t(t, 0.45))),\n"
+    "                  fbm3(p + vec2(5.2, 1.3) - vec2(wrap_t(t, 0.38), 0.0)));\n"
+    "    return fbm3(p + 3.0 * q + vec2(1.7, 9.2)) * 1.35;\n"
+    "}\n"
     "float turbulence(vec2 p, float t) {\n"
     /* The rates are what make it a star rather than a photograph of one. Slow
        enough and turbulence is indistinguishable from a still image — which is
@@ -239,20 +266,38 @@ static const char star_frag_src[] =
 
     /* A procedural sky. Points, not blobs — a star is smaller than a pixel and
      * what you actually see is the airy disc of your optics. */
+    /* A procedural sky. Points, not blobs — a star is smaller than a pixel and
+     * what you actually see is the airy disc of your optics.
+     *
+     * And a galaxy behind them, because a sky of evenly scattered dots is the
+     * one sky nobody has ever stood under. Ours is a disc seen from inside it,
+     * so half the stars in the sky are in a band across it with dust lanes cut
+     * through — and the band is what makes the lensing legible: a scatter of
+     * points moved sideways reads as points somewhere else, while a BAND bent
+     * round the shadow reads as space bending, which is the whole thing the
+     * hole is there to show. */
     "vec3 sky(vec2 dir) {\n"
     "    vec3 c = vec3(0.0);\n"
+    "    float band = dir.y * 0.86 - dir.x * 0.51;\n"
+    "    float along = dir.x * 0.86 + dir.y * 0.51;\n"
+    "    float lane = fbm(vec2(along * 0.62, band * 1.5) + 21.0);\n"
+    "    float glow = exp(-pow(abs(band) / (2.9 + 1.4 * lane), 2.0));\n"
+    "    float dust = smoothstep(0.34, 0.72, fbm(vec2(along * 0.9, band * 2.6) - 7.0));\n"
+    "    c += mix(vec3(0.052, 0.055, 0.078), vec3(0.075, 0.062, 0.050), lane)\n"
+    "       * glow * 2.2 * (1.0 - 0.72 * dust);\n"
     "    for (int i = 0; i < 3; i++) {\n"
     "        float sc = 6.0 + float(i) * 9.0;\n"
     "        vec2 g = dir * sc;\n"
     "        vec2 id = floor(g), f = fract(g) - 0.5;\n"
     "        float h = hash(id + float(i) * 31.7);\n"
-    "        if (h > 0.90) {\n"
+    "        float cut = mix(0.90, 0.74, glow);\n"
+    "        if (h > cut) {\n"
     "            vec2 off = vec2(hash(id + 3.1), hash(id + 7.7)) - 0.5;\n"
     "            float d2 = length(f - off * 0.7);\n"
-    "            float mag = (h - 0.90) / 0.10;\n"
+    "            float mag = (h - cut) / max(1.0 - cut, 1e-3);\n"
     "            float point = exp(-d2 * d2 * 420.0) * mag;\n"
     "            vec3 tint = mix(vec3(0.75, 0.83, 1.0), vec3(1.0, 0.88, 0.72), hash(id + 11.3));\n"
-    "            c += tint * point;\n"
+    "            c += tint * point * (1.0 - 0.55 * dust);\n"
     "        }\n"
     "    }\n"
     "    return c;\n"
@@ -268,13 +313,15 @@ static const char star_frag_src[] =
      * edge of any disc — is at 3. Those three numbers are not chosen, they
      * fall out of the metric, and having them fall out is the difference
      * between a picture of a black hole and a black hole. */
+    /* Everything below works in Schwarzschild units with the horizon at r = 1,
+     * which is what u_radius is: the shader's whole coordinate system is the
+     * hole's own radius, so no conversion is needed anywhere. In those units
+     * the photon sphere is at 1.5, the shadow an unlit observer sees is
+     * 3*sqrt(3)/2 = 2.598 across, and the innermost stable orbit — the inner
+     * edge of any disc — is at 3. Those three numbers are not chosen, they
+     * fall out of the metric, and having them fall out is the difference
+     * between a picture of a black hole and a black hole. */
     "const float R_ISCO = 3.0;\n"
-    /* The hottest the gas gets, in kelvin, before any shift: the peak of a
-     * Shakura-Sunyaev profile sits just outside the inner edge, and everything
-     * further out follows from r^-3/4. Nine thousand puts that peak at
-     * white-hot and the outer disc in deep orange, which is the disc of a
-     * supermassive hole — the only kind whose disc is cool enough to have a
-     * colour a person would recognise. */
     "const float DISC_K = 9000.0;\n"
     /* How far out the gas reaches. A real disc runs for thousands of radii;
        what decides this is the canvas, which is only a few radii wide, and a
@@ -351,15 +398,12 @@ static const char star_frag_src[] =
      * The three multiply into one factor, and brightness goes as its cube:
      * specific intensity over frequency cubed is what is conserved along a ray,
      * so a shift of g multiplies what arrives by g^3. */
-    "vec4 disc_emit(vec3 P, vec3 dirv, vec3 N, vec3 A, vec3 B, float t,\n"
-    "               float r_in, float r_out) {\n"
-    "    float rc = length(P);\n"
+    "vec4 disc_emit(float rc, float ang, float g, float t,\n"
+    "               float r_in, float r_out, float r_isco) {\n"
     /*  Where the gas IS. Settled, that is everything from the last stable
         orbit out to the rim; while the disc is still forming it is a ring on
         its way down, and r_in is well outside the orbit it will end on. */
     "    if (rc < r_in || rc > r_out) return vec4(0.0);\n"
-
-    "    float ang = atan(dot(P, B), dot(P, A));\n"
     "\n"
     /*  The texture of the gas. Sampled in the disc's own turning frame, with
         the shear kept gentler than Kepler's law: at the true exponent the
@@ -416,10 +460,10 @@ static const char star_frag_src[] =
         started last cycle. Handing both the same age is the one way to make
         the handover show: the whole field would reset its boil at the instant
         the layers change hands, and the disc would blink once a cycle. */
-    "    float body = aw * turbulence(pA * 0.55, fr * 2.0)\n"
-    "               + bw * turbulence(pB * 0.55, (fr - 1.0) * 2.0);\n"
-    "    float flow = aw * turbulence(pA * 1.70, fr * 3.0)\n"
-    "               + bw * turbulence(pB * 1.70, (fr - 1.0) * 3.0);\n"
+    "    float body = aw * gas_turb(pA * 0.55, fr * 2.0)\n"
+    "               + bw * gas_turb(pB * 0.55, (fr - 1.0) * 2.0);\n"
+    "    float flow = aw * gas_turb(pA * 1.70, fr * 3.0)\n"
+    "               + bw * gas_turb(pB * 1.70, (fr - 1.0) * 3.0);\n"
     /*  Clumped hard: raising the sum to a power thins the quiet regions and
         leaves the bright filaments standing, which is what hot gas looks like
         and what an evenly lit ring never does. */
@@ -428,8 +472,8 @@ static const char star_frag_src[] =
     /*  Shakura-Sunyaev: T goes as r^-3/4, damped by (1 - sqrt(r_in/r))^1/4 so
         the gas fades to nothing at the last stable orbit instead of being
         brightest where it is about to fall in. */
-    "    float f = max(0.0, 1.0 - sqrt(min(r_in, R_ISCO) / rc));\n"
-    "    float temp = pow(R_ISCO / rc, 0.75) * pow(f, 0.25);\n"
+    "    float f = max(0.0, 1.0 - sqrt(min(r_in, r_isco) / rc));\n"
+    "    float temp = pow(r_isco / rc, 0.75) * pow(f, 0.25);\n"
     /*  And how much gas there is at all: thinning out towards the rim, where a
         real disc simply runs out of the matter that was fed to it. */
     "    float amount = pow(1.0 - smoothstep(r_out * 0.45, r_out, rc), 1.3)\n"
@@ -437,30 +481,16 @@ static const char star_frag_src[] =
         — gas on its way in has no sharp boundary, the disc it becomes does. */
     "                 * smoothstep(r_in, r_in * 1.10 + 0.15, rc);\n"
     "\n"
-    /*  Doppler. The gas runs on a circular orbit, so its speed is fixed by the
-        radius alone: v = sqrt(M/(r - 2M)), which with the horizon at 1 is
-        sqrt(0.5/(r - 1)) — 0.5c at the inner edge, and still 0.25c far out. */
-    "    vec3 vhat = normalize(cross(N, P));\n"
-    "    float beta = clamp(sqrt(0.5 / max(rc - 1.0, 0.35)), 0.0, 0.85);\n"
-    "    float gam = 1.0 / sqrt(1.0 - beta * beta);\n"
-    /*  The photon's direction of travel towards us is the reverse of the one
-        the march was going in. */
-    "    vec3 nhat = -normalize(dirv);\n"
-    "    float dopp = 1.0 / (gam * (1.0 - beta * dot(vhat, nhat)));\n"
-    /*  Climbing out of the well: sqrt(1 - 1/r), which is where the inner disc
-        loses back some of what the Doppler term gave it. */
-    "    float grav = sqrt(max(0.0, 1.0 - 1.0 / rc));\n"
-    "    float g = clamp(dopp * grav, 0.05, 3.5);\n"
-    "\n"
-    /*  Colour follows the shifted temperature — the approaching side is not
-        just brighter, it is BLUER, and that is half of what makes it read as
-        something moving. */
-    /*  What the gas here is, in kelvin — and what it LOOKS, which is not the
-        same number. Light climbing out of the well loses energy and light
-        thrown towards us gains it, and both do it to the whole spectrum at
-        once: the temperature an observer measures is the emitted one times the
-        shift. So the approaching side of the disc is not merely brighter, it
-        is genuinely hotter to look at, which is where its blue comes from. */
+    /*  The shift is handed in rather than worked out here. The gas is on a
+        circular orbit, so its speed is fixed by the radius alone — v =
+        sqrt(M/(r - 2M)), which with the horizon at 1 is sqrt(0.5/(r - 1)), so
+        0.5c at the inner edge and still 0.25c far out — but what that does to
+        the light also depends on which way the photon was going when it
+        crossed, and the march is the only thing that knows. So it arrives as
+        one number, carrying the Doppler beaming and the climb out of the well
+        together: the approaching side brighter, bluer and thinner, the
+        receding side dimmer and redder, and the inner disc pulled back down by
+        the well just where the beaming is shouting loudest. */
     "    float kelvin = DISC_K * temp * g;\n"
     "    vec3 col = blackbody(kelvin);\n"
     /*  And how much it BLOCKS. The gas is thin but it is not glass: where it
@@ -490,102 +520,144 @@ static const char star_frag_src[] =
      *
      * with h the angular momentum of the ray, which is conserved and is
      * exactly the impact parameter it started with. That is one cross product
-     * and one multiply-add per step, and a hundred and sixty steps of it are
-     * cheaper than the two texture samples this shader was already doing.
+     * and one multiply-add per step.
+     *
+     * And it is CARTESIAN, which is not an implementation detail — it is the
+     * whole reason this form was come back to. A spinning hole was tried here,
+     * integrated exactly, in the Boyer-Lindquist coordinates that make Kerr
+     * separable. Those coordinates are polar, and polar coordinates have an
+     * axis: on the spin axis the azimuth is not merely hard to compute, it
+     * does not exist. The rays either side of that line therefore come from
+     * opposite azimuths and no step size makes them agree, so the desktop
+     * behind the hole was cut by a hairline slit from one edge of the picture
+     * to the other, standing up out of the shadow like something driven
+     * through it. No amount of care with the integrator touched it, because it
+     * was not the integrator: it was the coordinate.
+     *
+     * These have no axis anywhere. The slit is not fixed here, it is
+     * impossible.
      *
      * The step is proportional to r: coarse where nothing is happening, fine
      * where the path is actually bending. */
-    "const float R_EYE = 30.0;\n"       /* how far off the camera stands, in radii */
-    "const float R_SKY = 3.0;\n"       /* and how far behind the hole the desktop hangs */
-    "\n"
+    "const float R_EYE = 30.0;\n"
+    "const float R_SKY = 3.0;\n"
+
     /* Everything the march found, so main can compose it in one place. */
     "struct Ray {\n"
-    "    vec3 glow;    \n"   /* what the disc put into this pixel */
-    "    vec2 src;     \n"   /* where on the backdrop the ray came from */
-    "    float hit;    \n"   /* 1 if it reached the backdrop at all */
-    "    float veil;   \n"   /* how much of it the gas hides, 0..1 */
-    "    float caught; \n"   /* 1 if it fell in */
+    "    vec3 glow;\n"
+    "    vec2 src;\n"
+    "    float hit;\n"
+    "    float veil;\n"
+    "    float caught;\n"
+    "    float rmin;\n"
+    "    float cross;\n"
     "};\n"
-    "\n"
-    "Ray trace(vec2 uv, float incl, float roll, float t, float r_in, float r_out) {\n"
-    /*  How much light there is in the gas at all. Falling material is cold and
-        dark: what heats a disc is the friction of one orbit rubbing against
-        the next, and until it is a disc there are no orbits to rub. So it
-        arrives as a dim ring, and lights as it settles. */
+
+    "Ray trace(vec2 uv, vec3 N, vec3 A, vec3 B, float t,\n"
+    "          float r_in, float r_out, float r_isco) {\n"
     "    float lit = mix(0.14, 1.0, smoothstep(0.06, 0.80, u_form));\n"
     "    Ray o;\n"
-    "    o.glow = vec3(0.0); o.src = uv; o.hit = 0.0; o.caught = 0.0; o.veil = 0.0;\n"
-    "\n"
-    "    vec3 N = disc_normal(incl, roll);\n"
-    /*  A frame for the disc's own plane, so a crossing can be given an angle.
-        Degenerate exactly face-on, where any pair will do. */
-    "    vec3 A = abs(N.z) > 0.999 ? vec3(1.0, 0.0, 0.0) : normalize(cross(N, vec3(0.0, 0.0, 1.0)));\n"
-    "    vec3 B = cross(N, A);\n"
+    "    o.glow = vec3(0.0); o.src = uv; o.hit = 0.0; o.caught = 0.0;\n"
+    "    o.veil = 0.0; o.rmin = 1e9; o.cross = 0.0;\n"
     "\n"
     "    vec3 pos = vec3(uv, R_EYE);\n"
     "    vec3 vel = vec3(0.0, 0.0, -1.0);\n"
     "    float h2 = dot(uv, uv);\n"
     "    float side = dot(pos, N);\n"
-    "    float behind = pos.z + R_SKY;\n"   /* the backdrop plane, as a signed distance */
+    "    float behind = pos.z + R_SKY;\n"
     "\n"
     "    for (int i = 0; i < 420; i++) {\n"
     "        float r = length(pos);\n"
-    /*      Fine where the path is bending hardest, and coarse where it is a
-            straight line in all but name. A ray that grazes the photon sphere
-            winds most of the way round the hole, and a step too coarse to
-            resolve that winding is what turns the hairline ring into a faint
-            outline; a ray twenty radii out is going nowhere interesting and
-            paying per step for the privilege. */
     "        float dt = r > 8.0 ? 0.30 * r\n"
     "                           : clamp(0.042 * r, 0.014, 1.6) * (r < 3.2 ? 0.5 : 1.0);\n"
     "        vec3 acc = -1.5 * h2 * pos / pow(r, 5.0);\n"
     "        vec3 nvel = vel + acc * dt;\n"
     "        vec3 npos = pos + nvel * dt;\n"
     "\n"
-    /*      Through the gas.
-    
-            The disc has thickness — it is not a sheet of paper, and one drawn
-            as a plane vanishes exactly edge-on, which is the angle most of it
-            is seen at. But integrating that thickness step by step means
-            evaluating the noise dozens of times for every ray that skims along
-            the disc, and that is where thirty times the old shader's entire
-            cost went.
-    
-            So the gas is sampled once, where the ray crosses the mid-plane,
-            and multiplied by how far through the disc that ray actually
-            travelled: a head-on crossing gets one thickness, a grazing one
-            gets several, and the limb brightening that produces is the same
-            thing that makes the edge of a real disc its brightest part. The
-            cap is for the ray that crosses at nearly zero degrees, which would
-            otherwise be handed an unbounded amount of gas.
-    
-            Optically thin, so a ray that crosses twice picks up both — which
-            is how the far side of the disc comes to be visible above the near
-            one, and how a ray that winds around the photon sphere collects the
-            hairline ring. Front to back, so gas met earlier dims what is
-            behind it. */
     "        float nside = dot(npos, N);\n"
-    "        if (side * nside < 0.0) {\n"
+    "        if (side * nside < 0.0 && o.veil < 0.985 && o.cross < 4.0) {\n"
+    "            o.cross += 1.0;\n"
     "            float f = side / (side - nside);\n"
     "            vec3 P = pos + (npos - pos) * f;\n"
-    /*      Thicker while it is falling: gas that has not settled yet is a
-            ragged shell rather than a disc, and it thins as it grinds into
-            one. u_form is 1 for a hole that has arrived, and for everything
-            that is not a hole at all. */
-    "            float thick = (0.14 + 0.055 * length(P))\n"
+    "            float rc = length(P);\n"
+    "            float thick = (0.14 + 0.055 * rc)\n"
     "                        * mix(2.6, 1.0, smoothstep(0.15, 0.95, u_form));\n"
     "            float ct = abs(dot(normalize(nvel), N));\n"
     "            float path = thick * clamp(1.0 / max(ct, 0.09), 1.0, 6.0);\n"
-    "            vec4 em = disc_emit(P, nvel, N, A, B, t, r_in, r_out);\n"
+    "            float ang = atan(dot(P, B), dot(P, A));\n"
+    "            vec3 vhat = normalize(cross(N, P));\n"
+    "            float beta = clamp(sqrt(0.5 / max(rc - 1.0, 0.35)), 0.0, 0.85);\n"
+    "            float gam = 1.0 / sqrt(1.0 - beta * beta);\n"
+    "            vec3 nhat = -normalize(nvel);\n"
+    "            float dopp = 1.0 / (gam * (1.0 - beta * dot(vhat, nhat)));\n"
+    "            float grav = sqrt(max(0.0, 1.0 - 1.0 / rc));\n"
+    "            float g = clamp(dopp * grav, 0.05, 3.5);\n"
+    "            vec4 em = disc_emit(rc, ang, g, t, r_in, r_out, r_isco);\n"
     "            o.glow += em.rgb * path * 5.5 * lit * (1.0 - o.veil);\n"
     "            o.veil = clamp(o.veil + em.a * path * 3.0, 0.0, 1.0);\n"
     "        }\n"
+    /*      And the jet.
+     *
+     *      A disc threaded by a magnetic field and turning differentially winds
+     *      that field up, and gas that gets onto a field line leaning outward
+     *      far enough is flung along it and collimated by the wound-up
+     *      toroidal component — Blandford and Payne. It needs no spin from the
+     *      hole, only a disc, which is what this one has: the axis is the
+     *      disc's own normal, the same vector everything else here is measured
+     *      against.
+     *
+     *      Two things decide what it looks like. It is COLLIMATED, not
+     *      parallel: narrow where it leaves, opening about as the square root
+     *      of the height over the few radii this picture covers, and thinning
+     *      out to nothing well inside the frame. Drawn instead at a constant
+     *      opening angle and run off both edges — which is what the first
+     *      attempt did — it is not a jet, it is a rod somebody has skewered
+     *      the hole with.
+     *
+     *      And the beaming. The plasma leaves at a good fraction of c, so the
+     *      side coming towards the eye is brightened by the Doppler factor
+     *      squared and the side going away is dimmed by it. Seen from near the
+     *      disc's plane, as this hole is, the two sides differ by less than a
+     *      factor of two and both are there; seen down the axis one of them
+     *      would all but vanish. Either way it is the beaming that stops it
+     *      reading as a painted-on shape.
+     *
+     *      In these coordinates it costs almost nothing: the distance from the
+     *      axis is one dot product and a length, with no angle to go wrong. */
+    "        float jz = dot(npos, N);\n"
+    "        float jaz = abs(jz);\n"
+    "        float jreach = r_out * 1.18;\n"
+    /*      Starting well above the hole, and that is not squeamishness about
+            the shadow — it is where a jet becomes visible. Down at the base it
+            is being accelerated and collimated and is optically thin and
+            faint; it brightens once it has run far enough to shock against
+            itself and against what it is ploughing into. Drawn from the
+            horizon up it laid a blue wash straight across the shadow, and a
+            black hole you can see a glow through is the one failure that
+            ruins the whole picture. Two and a half radii is where the
+            silhouette ends, so that is where the plume begins. */
+    "        if (jaz > 2.55 && jaz < jreach && o.veil < 0.985) {\n"
+    "            float jrho = length(npos - jz * N);\n"
+    "            float open = 0.10 + 0.34 * sqrt(jaz);\n"
+    "            float ju = jrho / open;\n"
+    "            if (ju < 1.3) {\n"
+    "                float core = exp(-ju * ju * 2.3);\n"
+    "                float lump = 0.55 + 1.15 * fbm3(\n"
+    "                    vec2(jrho * 1.6 + jaz * 0.3, jaz * 0.5 - t * 0.33));\n"
+    "                float jfade = (1.0 - smoothstep(jreach * 0.62, jreach, jaz))\n"
+    "                            * smoothstep(2.55, 3.6, jaz) / (1.0 + jaz * 0.40);\n"
+    "                vec3 vj = N * (jz > 0.0 ? 1.0 : -1.0);\n"
+    "                float bj = 0.80;\n"
+    "                float gj = 1.0 / sqrt(1.0 - bj * bj);\n"
+    "                float dj = 1.0 / (gj * (1.0 - bj * dot(vj, -normalize(nvel))));\n"
+    "                o.glow += vec3(0.62, 0.76, 1.0) * core * lump * jfade\n"
+    "                        * pow(clamp(dj, 0.02, 6.0), 2.0)\n"
+    "                        * dt * lit * 4.2 * (1.0 - o.veil);\n"
+    "            }\n"
+    "        }\n"
+    "\n"
     "        side = nside;\n"
     "\n"
-    /*      And through the backdrop: the desktop is a flat thing a fixed way
-            behind the hole, so the first crossing of that plane is where this
-            pixel's picture of it comes from. Bent rays reach it further out
-            than they appear to, which is the whole of the lensing. */
     "        float nbehind = npos.z + R_SKY;\n"
     "        if (o.hit < 0.5 && behind > 0.0 && nbehind <= 0.0) {\n"
     "            float f = behind / (behind - nbehind);\n"
@@ -597,19 +669,9 @@ static const char star_frag_src[] =
     "\n"
     "        pos = npos; vel = nvel;\n"
     "        float rn = length(pos);\n"
+    "        o.rmin = min(o.rmin, rn);\n"
     "        if (rn < 1.0) { o.caught = 1.0; break; }\n"
-    /*      Done: past the gas, past the backdrop, and on its way out. There is
-            nothing further along this ray for the picture to gain, and
-            marching it to some arbitrary far radius was most of what the
-            tracer cost.
-    
-            PAST THE BACKDROP is half the test, and leaving it out is what drew
-            a circle round the hole on the desktop. A ray that passes six or
-            seven radii out turns round while it is still short of the plane
-            the desktop hangs on; stopped there it never reaches it, comes back
-            with nothing to show, and the pixel goes transparent — so the bent
-            copy ended in a ragged ring at exactly the radius where that starts
-            happening, with the untouched desktop outside it. */
+    "        if (o.veil > 0.995) break;\n"
     "        if (o.hit > 0.5 && dot(pos, vel) > 0.0 && rn > r_out + 1.0) break;\n"
     "        if (rn > R_EYE * 1.6) break;\n"
     "    }\n"
@@ -664,10 +726,28 @@ static const char star_frag_src[] =
      * Pulled out of main so that a pixel can be traced more than once, which
      * exactly one part of this picture needs: see the photon ring below.
      * Returns the colour and how much of the pixel this ray covers. */
-    "vec4 hole_ray(vec2 uv, float rs, float dmax, float incl, float tt,\n"
-    "              float r_in, float r_out) {\n"
+    "vec4 hole_ray(vec2 uv, float rs, float dmax, vec3 N, vec3 A, vec3 B,\n"
+    "              float tt, float r_in, float r_out,\n"
+    "              float r_isco,\n"
+    "              out float wind) {\n"
     "    float b = length(uv);\n"
-    "    Ray ray = trace(uv, incl, u_roll, tt, r_in, r_out);\n"
+    /*  Out at the rim there is nothing to trace. The bending is faded to
+        nothing there on purpose — see `reach` below: it has to be, or a partly
+        transparent bent copy of the desktop sits over the straight one and
+        every window inside the node appears twice — and the gas ends further
+        in still. So past that radius the march is a hundred steps of
+        arithmetic whose every result is thrown away, for the outer third of
+        the canvas. The answer there is the desktop where it already is. */
+    "    float quiet = max(dmax * 0.85, r_out + 1.0);\n"
+    "    Ray ray;\n"
+    "    if (b >= quiet) {\n"
+    "        ray.glow = vec3(0.0); ray.src = uv; ray.hit = 1.0;\n"
+    "        ray.veil = 0.0; ray.caught = 0.0; ray.rmin = 1e9; ray.cross = 0.0;\n"
+    "    } else {\n"
+    "        ray = trace(uv, N, A, B, tt, r_in, r_out, r_isco);\n"
+    "    }\n"
+    "    wind = (1.0 - ray.caught) * step(ray.rmin, 1.85);\n"
+
     "    vec3 acc = ray.glow;\n"
     "    vec3 back = vec3(0.0);\n"
     "    float lensed = 0.0;\n"
@@ -882,16 +962,27 @@ static const char star_frag_src[] =
     "        float ca0 = cos(u_angle), sa0 = sin(u_angle);\n"
     "        vec2 rp = vec2(px.x * ca0 - px.y * sa0, px.x * sa0 + px.y * ca0);\n"
     "        vec2 sp = vec2(rp.x / r / max(mu, 0.42), rp.y / r / max(mu, 0.42));\n"
+    /*     Spots. The one thing a photosphere plainly has that this did not:
+           where the field has come up through the surface it stops the
+           convection under it, and the gas there arrives fifteen hundred
+           degrees cooler than the gas beside it. That is all a sunspot is — not
+           a hole, the same surface not being heated — so it is drawn by taking
+           light away rather than by painting anything on, with a penumbra
+           round the umbra where the suppression is only partial.
+
+           On a slow field of its own, because spots outlive the granules they
+           sit in by weeks. */
     "        float gran = turbulence(sp * 3.4, u_time * 1.1);\n"
     "        float fine = turbulence(sp * 11.0 - 4.0, u_time * 2.6);\n"
     "        float cells = mix(gran, fine, 0.35);\n"
-    /*     Limb darkening, the classical linear law. */
+    "        float spot = fbm(sp * 1.25 + 17.0);\n"
+    "        float umbra = 1.0 - 0.58 * smoothstep(0.640, 0.700, spot);\n"
+    "        float pen   = 1.0 - 0.22 * smoothstep(0.560, 0.645, spot);\n"
     "        float limb = 1.0 - 0.62 * (1.0 - mu);\n"
     "        float t = clamp(cells * 1.35 + 0.12, 0.0, 1.0);\n"
     "        col = heat(t * limb + (1.0 - limb) * 0.12);\n"
-    /*     Faculae: the bright network in the lanes between cells, which is
-           what keeps a real surface from reading as noise. */
     "        col += heat(1.0) * pow(max(0.0, cells - 0.55), 2.0) * 2.4 * limb;\n"
+    "        col *= umbra * pen;\n"
     "        col *= mix(0.55, 1.35, limb);\n"
     "        alpha = 1.0;\n"
     /*     Antialiasing, measured in PIXELS. Written as a fraction of the
@@ -906,12 +997,25 @@ static const char star_frag_src[] =
            glow — the same fault the cairo version had, arrived at by a
            different road. */
     "        alpha *= edge;\n"
+    /*     Unless it is not a photosphere. A neutron star has no convection,
+           no granulation and no spots: what is up there is a crystalline crust
+           twenty kilometres across at a million kelvin, and at a million kelvin
+           there is nothing to see but the colour. Which is the point — it is
+           the same blackbody every other temperature in this shader goes
+           through, taken to its top, and the answer it gives is a featureless
+           blue-white. Drawing a sun's mottled gold on it, which is what stood
+           here, said the one thing about a pulsar that is plainly untrue: that
+           it is a small star. It is not a star at all. */
+    "        if (u_phase > 1.5) {\n"
+    "            float lb = 1.0 - 0.55 * (1.0 - mu);\n"
+    "            col = blackbody(9.0e5) * (0.30 + 1.15 * lb);\n"
+    "        }\n"
     "    }\n"
     "\n"
     /* ---- prominences: turbulence sampled in polar coordinates just off the
            limb, so what stands out is a tongue of gas rather than a shape
            somebody placed there. ------------------------------------------ */
-    "    if (d >= 0.93 && d < 1.9) {\n"
+    "    if (u_phase < 1.5 && d >= 0.93 && d < 1.9) {\n"
     "        float h = (d - 1.0);\n"
     /*     The churn is the life: sampled fast enough, the turbulence itself
            brings tongues up and takes them away. An extra slow term on top of
@@ -934,7 +1038,8 @@ static const char star_frag_src[] =
     "                                 u_time * 0.5);\n"
     "        float fall = 1.0 / (1.0 + pow((d - 0.97) * 4.2, 2.4));\n"
     "        float k = fall * (0.50 + 0.50 * streak);\n"
-    "        col += u_color * k * 0.40;\n"
+    "        vec3 halo = u_phase > 1.5 ? blackbody(9.0e5) : u_color;\n"
+    "        col += halo * k * 0.40;\n"
     "        alpha = max(alpha, clamp(k * 0.75, 0.0, 1.0));\n"
     "    }\n"
     "\n"
@@ -943,7 +1048,8 @@ static const char star_frag_src[] =
        Smooth, wide, and the colour of the light that made it. */
     "    {\n"
     "        float g = exp(-pow(max(0.0, d - 0.9) * 1.9, 1.3));\n"
-    "        vec3 warm = mix(u_color, vec3(1.0), 0.25);\n"
+    "        vec3 warm = mix(u_phase > 1.5 ? blackbody(9.0e5) : u_color,\n"
+    "                        vec3(1.0), 0.25);\n"
     /*     Only outside the limb. Added over the disc as well it lifted the
            darkened edge back up and drew a bright wire right round it. */
     /*     Overlaps the limb rather than starting past it, so the disc hands
@@ -969,7 +1075,12 @@ static const char star_frag_src[] =
            line across the picture, which is what a hole fed past its buffer
            used to look like. */
     "        float dmax = min(u_res.x, u_res.y) * 0.5 / rs;\n"
-    "        float r_settled = clamp(dmax * 0.60, R_ISCO * 1.25, 16.0);\n"
+    /*     How far out the gas reaches. The old rim at 0.60 of the canvas left
+           a disc only 1.8 radii wide, over which r^-3/4 has nothing to say; a
+           real disc runs for thousands. This takes as much of the canvas as
+           the fade at its edge will allow. */
+    "        float r_isco = R_ISCO;\n"
+    "        float r_settled = clamp(dmax * 0.72, r_isco * 1.25, 16.0);\n"
     /*     Where the gas is right now.
     
            Settled, it runs from the last stable orbit out to r_settled. A hole
@@ -984,13 +1095,23 @@ static const char star_frag_src[] =
            Squared, so it falls the way anything falls: slowly at first, and
            then all at once. */
     "        float fall = u_form * u_form;\n"
-    "        float r_in  = mix(dmax * 0.62, R_ISCO, smoothstep(0.0, 0.72, fall));\n"
+    "        float r_in  = mix(dmax * 0.62, r_isco, smoothstep(0.0, 0.72, fall));\n"
     "        float r_out = mix(dmax * 0.74, r_settled, smoothstep(0.12, 1.0, fall));\n"
     "        r_out = max(r_out, r_in * 1.04);\n"
     "        float incl = clamp(u_incl, 0.012, 0.995);\n"
+    /*     The spin axis IS the disc's normal, and that is not a shortcut: gas
+           round a turning hole is dragged into its equatorial plane within a
+           few orbits of the inner edge — Bardeen and Petterson — so one vector
+           says both where the disc lies and which way the metric turns. */
+    "        vec3 N = disc_normal(incl, u_roll);\n"
+    "        vec3 A = abs(N.z) > 0.999 ? vec3(1.0, 0.0, 0.0)\n"
+    "                 : normalize(cross(N, vec3(0.0, 0.0, 1.0)));\n"
+    "        vec3 B = cross(N, A);\n"
     "\n"
     "        float tt = u_time + u_angle * 0.2;\n"
-    "        vec4 px4 = hole_ray(uv, rs, dmax, incl, tt, r_in, r_out);\n"
+    "        float wind = 0.0;\n"
+    "        vec4 px4 = hole_ray(uv, rs, dmax, N, A, B, tt,\n"
+    "                            r_in, r_out, r_isco, wind);\n"
     "\n"
     /*     The photon ring, drawn round instead of dotted.
     
@@ -1008,21 +1129,32 @@ static const char star_frag_src[] =
            that thin, but they do not need to: averaged, they are what the ring
            actually looks like at this scale, which is a thin even circle.
     
-           The band is kept narrow on purpose. These are the rays that wind
-           around the hole for hundreds of steps and cross the gas over and
-           over — the most expensive in the frame — and sampling a wide band
-           this way once took the compositor from sixty frames a second to
-           twenty. A quarter of a radius either side of the critical one is
-           where the ring can be, and nowhere else in the picture pays. */
-    "        if (abs(b - 2.598) < 0.14) {\n"
+           Which pixels those are is asked of the ray rather than guessed
+           from where it started: the march remembers how close it came, and
+           the ring is made of the photons that grazed the photon sphere at
+           1.5 and got out again. Nothing else in the frame qualifies, and
+           nothing else pays.
+
+           The threshold matters more than it looks. At 2.2 it caught a wide
+           annulus of ordinary, smoothly-varying picture along with the ring —
+           seven percent of the frame, traced five times over, and every one of
+           those rays is the most expensive kind there is because winding is
+           exactly what they do. That one number was two thirds of the cost of
+           a black hole. At 1.85 it catches the ring and stops.
+
+           And the ray already traced for this pixel is one of the samples,
+           rather than being thrown away and three fresh ones taken. Three
+           traces across a pixel, one of which was free. */
+    "        if (wind > 0.5) {\n"
     "            vec2 rad = uv / max(b, 0.001);\n"
-    "            vec4 sum = vec4(0.0);\n"
-    "            for (int k = 0; k < 4; k++) {\n"
-    "                float o = (float(k) + 0.5) / 4.0 - 0.5;\n"
-    "                sum += hole_ray(uv + rad * (o / rs), rs, dmax, incl, tt,\n"
-    "                                r_in, r_out);\n"
+    "            vec4 sum = px4;\n"
+    "            float junk;\n"
+    "            for (int k = 0; k < 2; k++) {\n"
+    "                float o = (float(k) - 0.5) * 1.5;\n"
+    "                sum += hole_ray(uv + rad * (o / rs), rs, dmax, N, A, B,\n"
+    "                                tt, r_in, r_out, r_isco, junk);\n"
     "            }\n"
-    "            px4 = sum / 4.0;\n"
+    "            px4 = sum / 3.0;\n"
     "        }\n"
     "        vec3 acc = px4.rgb;\n"
     "        float a = px4.a;\n"
@@ -1062,6 +1194,14 @@ static const char star_frag_src[] =
     "            acc += hot * ring * rag * fade * 5.5;\n"
     "        }\n"
     "\n"
+    /* And a grain of noise under the last bit, worth half a step of the eight
+       the display has. Every gradient in this picture is smooth and enormous —
+       the bloom round a star, the glow of the far disc, the band of the galaxy
+       — and eight bits cannot hold a smooth enormous gradient: it comes out in
+       rings, and once seen they are all anybody looks at. Dithering breaks the
+       quantiser's decision up per pixel so the rings become grain, which is
+       what film did and what the eye forgives. */
+    "        acc += (hash(gl_FragCoord.xy) - 0.5) / 255.0;\n"
     "        float rim2 = (1.0 - smoothstep(dmax * 0.86, dmax, b));\n"
     "        vec3 out3 = acc * a * rim2;\n"
     "        gl_FragColor = vec4(out3.b, out3.g, out3.r, a * rim2);\n"
@@ -1069,17 +1209,34 @@ static const char star_frag_src[] =
     "    }\n"
     "\n"
     "    if (u_phase > 1.5) {\n"
+    /*     The beam, and the thing an exponent of 220 got wrong about it: it
+           is a CONE, some ten degrees wide, and there are two of them, from
+           opposite magnetic poles. What stood here was one bar ruled straight
+           across the frame at both ends equally, which is a laser and not a
+           lighthouse.
+
+           The two lobes are not equal either. One is tipped towards the
+           observer and one away, and it is the near one that sweeps the eye
+           — so the far lobe is drawn at a third, which is what stops the star
+           looking as though it were being skewered. And the light falls off
+           with distance, because a beam is a beam and not a rod. */
     "        float rel = ang - u_beam;\n"
-    "        float lobe = max(abs(cos(rel)), 0.0);\n"
-    "        float cone = pow(lobe, 220.0);\n"
-    "        float reach = 1.0 / (1.0 + d * 0.05);\n"
+    "        float ca = cos(rel);\n"
+    "        float cone = pow(max(ca, 0.0), 70.0)\n"
+    "                   + pow(max(-ca, 0.0), 70.0) * 0.32;\n"
+    "        float reach = 1.0 / (1.0 + d * 0.42);\n"
+    /*     And it starts ABOVE the pole, not inside the star: the beam is
+           radiation from the magnetosphere, and drawn across the disc as
+           well it put a bright X through the middle of a body that is
+           opaque. */
+    "        reach *= smoothstep(0.92, 1.10, d);\n"
     /*     The pulse itself. The beam is always there; what changes is whether
            it is pointed at you, and that is what turns a rotating spotlight
            into something that flashes. A floor, because the far lobe and the
            lit gas around the star never go entirely dark. */
     "        float pulse = 0.18 + 0.82 * clamp(u_aim, 0.0, 1.0);\n"
     "        cone *= pulse;\n"
-    "        vec3 blue = mix(u_color, vec3(1.0), 0.6);\n"
+    "        vec3 blue = mix(blackbody(9.0e5), vec3(1.0), 0.45);\n"
     "        col += blue * cone * reach * 1.6;\n"
     "        alpha = max(alpha, clamp(cone * reach, 0.0, 1.0));\n"
     "    }\n"
@@ -1150,6 +1307,7 @@ static const char star_frag_src[] =
        together — which is what makes the bent desktop and the real one it is
        drawn over identical there, and the buffer's border invisible. With
        nothing bent (lens_a 0) this is exactly the line it replaces. */
+    "    col += (hash(gl_FragCoord.xy + 13.0) - 0.5) / 255.0;\n"
     "    float la = lens_a * rim;\n"
     "    vec3 out3 = col * alpha + lens_pre * rim * (1.0 - alpha);\n"
     "    gl_FragColor = vec4(out3.b, out3.g, out3.r,\n"
