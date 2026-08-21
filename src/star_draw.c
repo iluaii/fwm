@@ -65,7 +65,36 @@
  * on purpose. It is not stretched to fit — a black hole's photon ring is one
  * pixel wide, and magnifying that turns the sharpest thing in the picture into
  * the softest. */
-#define STAR_MAX_SIDE 1024
+/* The most pixels a star's canvas may be given.
+ *
+ * A thousand was chosen when nothing ever asked for more: on the desktop a
+ * star is a couple of hundred pixels across. The orrery asks for more — it
+ * draws one object in the middle of the screen and lets it be zoomed to six
+ * times its size — and past the ceiling the picture is drawn smaller and
+ * stretched back up to fit, which for a surface of boiling plasma is a smear.
+ * That is what "soapy at large sizes" was.
+ *
+ * Two thousand costs 3.7ms a frame for a star, measured, against 0.9 at a
+ * thousand — worth it for the one object the orrery exists to look at. It is
+ * NOT what a hole may have; see STAR_HOLE_MAX_SIDE. */
+#define STAR_MAX_SIDE 2048
+
+/* And the most a hole's may, which is a different number for a different
+ * reason. Every other phase is a handful of noise lookups per pixel; a hole is
+ * a photon integrated backwards along its geodesic, and that costs the same
+ * per pixel however many there are. Measured on this card: 5.9ms at 512 across,
+ * 17.3 at 1024, 39 at 2048. A frame is 16.6.
+ *
+ * So a hole gets a ceiling of its own, below even the old one — it is the
+ * one thing here that cannot afford to be given every pixel it asks for, and
+ * unlike everything else it has to be redrawn every single frame: what is in
+ * its canvas is a photograph of the desktop, and a stale one shows as a disc
+ * of yesterday's windows dragging along behind the real ones. What
+ * stops the ceiling from showing is that a hole is never MAGNIFIED past its
+ * own pixels (see shown_half below): it stops growing rather than going
+ * soft, which for a picture whose whole point is a hairline ring is the
+ * better of the two failures. */
+#define STAR_HOLE_MAX_SIDE 768
 
 /* The surface, as a fixed set of convection cells. Real granulation is a
  * million cells that boil over in about eight minutes each; what reads as that
@@ -897,8 +926,18 @@ static bool worth_repainting(const FwmStarDraw *d, const struct star_paint *p,
      * the rate limiting below exists because the cairo path allocates and
      * uploads a megabyte per repaint — none of which applies here, so the star
      * simply animates at the frame rate, which is what it should always have
-     * done. */
+     * done.
+     *
+     * And a hole least of all, however expensive it is. What is inside its
+     * canvas is not a picture of a hole, it is a PHOTOGRAPH OF THE DESKTOP
+     * bent around one — so a canvas older than the frame is a copy of the
+     * windows as they were, laid over the windows as they are. Rationing it by
+     * area was tried, and it did exactly that: a disc of stale desktop
+     * dragging along behind everything that moved, with its own edge plainly
+     * visible. Whatever a hole costs has to be paid every frame or not at all.
+     */
     if (d->use_gl) return true;
+
     /* A hole has nothing that moves: no surface, no corona, no beam. It is
      * drawn once and left alone. */
     /* A hole has no light of its own, but everything around it moves: the
@@ -1030,7 +1069,7 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
          * own ceiling — and only in real steps, so a hole being fed does not
          * reallocate three buffers a frame while the picture creeps outward. */
         int want = (int)lround(p.radius * STAR_HOLE_BOX * 2.0);
-        if (want > STAR_MAX_SIDE) want = STAR_MAX_SIDE;
+        if (want > STAR_HOLE_MAX_SIDE) want = STAR_HOLE_MAX_SIDE;
         if (d->use_gl && (want > d->side * 5 / 4 || want * 5 / 4 < d->side))
             star_recanvas(d, want);
         paint.radius = d->glow_r / STAR_HOLE_BOX;
@@ -1038,8 +1077,8 @@ void star_draw_update(FwmStarDraw *d, const FwmStar *star, const StarConfig *cfg
         /* Never magnified past the pixels it was drawn with: a hairline photon
          * ring stretched over four screen pixels is a smear, and a hole that
          * stops growing is the better of the two failures. This is the same
-         * ceiling a star meets — see STAR_MAX_SIDE — reached by the same
-         * route. */
+         * ceiling a star meets — see STAR_HOLE_MAX_SIDE — reached by the
+         * same route. */
         if (shown_half > d->side / 2.0) shown_half = d->side / 2.0;
     }
     d->shown_half = shown_half;
