@@ -604,6 +604,125 @@ static const char star_frag_src[] =
     "    return normalize(spun + vec2(1e-5)) * (b + defl);\n"
     "}\n"
     "\n"
+    /* ---- one ray's worth of the picture --------------------------------
+     *
+     * Pulled out of main so that a pixel can be traced more than once, which
+     * exactly one part of this picture needs: see the photon ring below.
+     * Returns the colour and how much of the pixel this ray covers. */
+    "vec4 hole_ray(vec2 uv, float rs, float dmax, float incl, float tt,\n"
+    "              float r_in, float r_out) {\n"
+    "    float b = length(uv);\n"
+    "    Ray ray = trace(uv, incl, u_roll, tt, r_in, r_out);\n"
+    "    vec3 acc = ray.glow;\n"
+    "    vec3 back = vec3(0.0);\n"
+    "    float lensed = 0.0;\n"
+    "\n"
+    /*  The backdrop, seen from wherever the ray actually came from.
+    
+           Faded back to the straight-line answer at the edge of the canvas:
+           out there the node's own alpha is fading too, and where a partly
+           transparent bent copy lies over the untouched original the window
+           underneath appears twice. Bending that dies exactly where the
+           coverage does makes the two the same picture. */
+    "    float reach = (1.0 - smoothstep(dmax * 0.45, dmax * 0.85, b));\n"
+    "    vec2 src = mix(uv, ray.src, reach);\n"
+    /*  How much work the lens did on this pixel: how far the light it shows
+           came from, compared with where it appears to be. Near the shadow the
+           answer is radii, at the edge of the canvas it is nothing — and it is
+           what decides whether this pixel may be see-through. Anywhere the
+           lens moved the picture, the pixel belongs to the hole and has to
+           cover what is underneath, because what is underneath is the same
+           desktop drawn straight. */
+    "    float bent = smoothstep(0.08, 0.40, length(src - uv));\n"
+    /*  A ray that neither fell in nor ever reached the desktop went round
+           the back and left sideways or came out towards the eye. There is
+           nothing behind it to show and nothing in front either: it is black.
+           It must not be TRANSPARENT black, though — that is a window seen
+           unbent through the gap between the shadow and the disc, which is
+           precisely where these rays live. */
+    "    float lost = (1.0 - ray.hit) * (1.0 - ray.caught);\n"
+    "    float offpage = 0.0;\n"
+    "    if (ray.caught < 0.5 && ray.hit > 0.5) {\n"
+    "        if (u_has_bg > 0.5) {\n"
+    "        vec2 bguv = (src * rs + u_res * 0.5) / u_res;\n"
+    "        bguv = u_bg_rect.xy + bguv * u_bg_rect.zw;\n"
+    "        vec2 clamped = clamp(bguv, vec2(0.002), vec2(0.998));\n"
+    /*          Off the edge of the photograph there is nothing to show, so
+                   what the lens does there fades out instead of smearing the
+                   border pixel across the frame. */
+    "        float inside = step(length(bguv - clamped), 0.0001);\n"
+    "        offpage = 1.0 - inside;\n"
+    "        vec4 bg = bg_texel(clamped);\n"
+    /*          Just outside the shadow the lens squeezes the whole of the
+                   desktop into a band a few pixels wide. One sample of a
+                   texture at that compression is not a picture of it, it is a
+                   picture of whichever pixel the ray happened to land on — and
+                   since the ray next door lands somewhere else entirely, the
+                   band comes out as a mess of speckle that crawls as anything
+                   moves. So where a pixel covers a lot of the photograph, it
+                   is sampled across that whole footprint instead of at a
+                   point. Four taps, only where the compression is real. */
+    "#ifdef GL_OES_standard_derivatives\n"
+    "        vec2 foot = (abs(dFdx(bguv)) + abs(dFdy(bguv))) * 0.5;\n"
+    "        if (max(foot.x, foot.y) > 1.2 / min(u_res.x, u_res.y)) {\n"
+    "            vec2 fx = vec2(foot.x, 0.0), fy = vec2(0.0, foot.y);\n"
+    "            vec4 acc4 = bg_texel(clamp(bguv + fx, vec2(0.002), vec2(0.998)))\n"
+    "                      + bg_texel(clamp(bguv - fx, vec2(0.002), vec2(0.998)))\n"
+    "                      + bg_texel(clamp(bguv + fy, vec2(0.002), vec2(0.998)))\n"
+    "                      + bg_texel(clamp(bguv - fy, vec2(0.002), vec2(0.998)));\n"
+    "            bg = mix(bg, acc4 * 0.25, 0.75);\n"
+    "        }\n"
+    "#endif\n"
+    /*          Where the ray came from beyond the edge of the photograph
+                   there is nothing to show, and the honest answer is to show
+                   nothing: this pixel stays transparent and the real desktop
+                   underneath comes through untouched. Dimming the border
+                   sample instead — which is what stood here — drew a dark ring
+                   round the hole at exactly the radius where the lens starts
+                   reaching past its own photograph, and that ring is the
+                   "lensed area" you could see on the desktop. */
+    "        back = bg.rgb * inside * (1.0 - ray.veil);\n"
+    /*          Where the desktop was re-drawn bent, this pixel IS the
+                   desktop and has to cover what lies underneath completely:
+                   drawn semi-transparent it would sit as a film of curved
+                   windows over the straight ones. Weighted by what was
+                   actually there, so an empty patch bends to nothing rather
+                   than to black. */
+    "        lensed = inside * bg.a;\n"
+    "        } else {\n"
+    "        back = sky(src) * (1.0 - ray.veil);\n"
+    "        }\n"
+    "    }\n"
+    "\n"
+    /*  Tone-mapped gently, so the approaching side of the disc keeps climbing
+        instead of clipping to a flat white slab — the highlight rolls off the
+        way a camera's does, which is where the white core with colour
+        surviving around it comes from.
+
+        The GAS is tone-mapped; the desktop behind it is not, and is added
+        afterwards. Running the desktop through the same curve dimmed and
+        warmed every window inside the node while the same window outside it
+        stayed as it was, and the join between the two was a great circle drawn
+        across the screen. What the lens does to the desktop is move it, not
+        tint it. */
+    "    acc = acc / (1.0 + acc * 0.30);\n"
+    "    acc = pow(max(acc, vec3(0.0)), vec3(0.88));\n"
+    "    acc += back;\n"
+    "    float a = clamp(max(acc.r, max(acc.g, acc.b)) * 1.4, 0.0, 1.0);\n"
+    "    a = max(a, lensed);\n"
+    /*  The shadow is opaque black, full stop: a black hole you can see the
+        wallpaper through is the one failure that ruins the whole picture. And
+        opaque wherever the lens did the work, whether or not it found anything
+        to show there — off the edge of the photograph near the shadow, and
+        along every path that never reached the desktop at all, the honest
+        picture is black, but it has to be a black that covers. Out at the rim,
+        where the lens moves nothing, this is zero and the desktop comes
+        through untouched, which is what keeps the node's edge invisible. */
+    "    a = max(a, ray.caught);\n"
+    "    a = max(a, max(lost, offpage * bent));\n"
+    "    return vec4(acc, a);\n"
+    "}\n"
+    "\n"
     "void main() {\n"
     "    vec2 px = gl_FragCoord.xy - u_res * 0.5;\n"
     "    float r = u_radius;\n"
@@ -814,97 +933,42 @@ static const char star_frag_src[] =
     "        float incl = clamp(u_incl, 0.012, 0.995);\n"
     "\n"
     "        float tt = u_time + u_angle * 0.2;\n"
-    "        Ray ray = trace(uv, incl, u_roll, tt, r_in, r_out);\n"
-    "        vec3 acc = ray.glow;\n"
-    "        vec3 back = vec3(0.0);\n"
-    /*     The hairline ring is one pixel wide and it is the sharpest feature
-           in the picture, so it is the one that aliases. Three more rays
-           through the same pixel, only in the narrow band where the ring can
-           be, cost nothing anywhere else in the frame. */
-    "        if (b > 2.20 && b < 3.30) {\n"
-    "            float q = 0.35 / rs;\n"
-    "            acc = (acc + trace(uv + vec2( q,  q), incl, u_roll, tt, r_in, r_out).glow\n"
-    "                       + trace(uv + vec2(-q,  q), incl, u_roll, tt, r_in, r_out).glow\n"
-    "                       + trace(uv + vec2( q, -q), incl, u_roll, tt, r_in, r_out).glow) * 0.25;\n"
-    "        }\n"
-    "        float lensed = 0.0;\n"
+    "        vec4 px4 = hole_ray(uv, rs, dmax, incl, tt, r_in, r_out);\n"
     "\n"
-    /*     The backdrop, seen from wherever the ray actually came from.
+    /*     The photon ring, drawn round instead of dotted.
     
-           Faded back to the straight-line answer at the edge of the canvas:
-           out there the node's own alpha is fading too, and where a partly
-           transparent bent copy lies over the untouched original the window
-           underneath appears twice. Bending that dies exactly where the
-           coverage does makes the two the same picture. */
-    "        float reach = (1.0 - smoothstep(dmax * 0.45, dmax * 0.85, b));\n"
-    "        vec2 src = mix(uv, ray.src, reach);\n"
-    /*     How much work the lens did on this pixel: how far the light it shows
-           came from, compared with where it appears to be. Near the shadow the
-           answer is radii, at the edge of the canvas it is nothing — and it is
-           what decides whether this pixel may be see-through. Anywhere the
-           lens moved the picture, the pixel belongs to the hole and has to
-           cover what is underneath, because what is underneath is the same
-           desktop drawn straight. */
-    "        float bent = smoothstep(0.08, 0.40, length(src - uv));\n"
-    /*     A ray that neither fell in nor ever reached the desktop went round
-           the back and left sideways or came out towards the eye. There is
-           nothing behind it to show and nothing in front either: it is black.
-           It must not be TRANSPARENT black, though — that is a window seen
-           unbent through the gap between the shadow and the disc, which is
-           precisely where these rays live. */
-    "        float lost = (1.0 - ray.hit) * (1.0 - ray.caught);\n"
-    "        float offpage = 0.0;\n"
-    "        if (ray.caught < 0.5 && ray.hit > 0.5) {\n"
-    "            if (u_has_bg > 0.5) {\n"
-    "                vec2 bguv = (src * rs + u_res * 0.5) / u_res;\n"
-    "                bguv = u_bg_rect.xy + bguv * u_bg_rect.zw;\n"
-    "                vec2 clamped = clamp(bguv, vec2(0.002), vec2(0.998));\n"
-    /*             Off the edge of the photograph there is nothing to show, so
-                   what the lens does there fades out instead of smearing the
-                   border pixel across the frame. */
-    "                float inside = step(length(bguv - clamped), 0.0001);\n"
-    "                offpage = 1.0 - inside;\n"
-    "                vec4 bg = bg_texel(clamped);\n"
-    /*             Just outside the shadow the lens squeezes the whole of the
-                   desktop into a band a few pixels wide. One sample of a
-                   texture at that compression is not a picture of it, it is a
-                   picture of whichever pixel the ray happened to land on — and
-                   since the ray next door lands somewhere else entirely, the
-                   band comes out as a mess of speckle that crawls as anything
-                   moves. So where a pixel covers a lot of the photograph, it
-                   is sampled across that whole footprint instead of at a
-                   point. Four taps, only where the compression is real. */
-    "#ifdef GL_OES_standard_derivatives\n"
-    "                vec2 foot = (abs(dFdx(bguv)) + abs(dFdy(bguv))) * 0.5;\n"
-    "                if (max(foot.x, foot.y) > 1.2 / min(u_res.x, u_res.y)) {\n"
-    "                    vec2 fx = vec2(foot.x, 0.0), fy = vec2(0.0, foot.y);\n"
-    "                    vec4 acc4 = bg_texel(clamp(bguv + fx, vec2(0.002), vec2(0.998)))\n"
-    "                              + bg_texel(clamp(bguv - fx, vec2(0.002), vec2(0.998)))\n"
-    "                              + bg_texel(clamp(bguv + fy, vec2(0.002), vec2(0.998)))\n"
-    "                              + bg_texel(clamp(bguv - fy, vec2(0.002), vec2(0.998)));\n"
-    "                    bg = mix(bg, acc4 * 0.25, 0.75);\n"
-    "                }\n"
-    "#endif\n"
-    /*             Where the ray came from beyond the edge of the photograph
-                   there is nothing to show, and the honest answer is to show
-                   nothing: this pixel stays transparent and the real desktop
-                   underneath comes through untouched. Dimming the border
-                   sample instead — which is what stood here — drew a dark ring
-                   round the hole at exactly the radius where the lens starts
-                   reaching past its own photograph, and that ring is the
-                   "lensed area" you could see on the desktop. */
-    "                back = bg.rgb * inside * (1.0 - ray.veil);\n"
-    /*             Where the desktop was re-drawn bent, this pixel IS the
-                   desktop and has to cover what lies underneath completely:
-                   drawn semi-transparent it would sit as a film of curved
-                   windows over the straight ones. Weighted by what was
-                   actually there, so an empty patch bends to nothing rather
-                   than to black. */
-    "                lensed = inside * bg.a;\n"
-    "            } else {\n"
-    "                back = sky(src) * (1.0 - ray.veil);\n"
+           Light that grazes the photon sphere goes round the hole and comes
+           back out, so at b = 3*sqrt(3)/2 — 2.598 radii, where capture begins
+           — everything behind the hole appears again, squeezed into a band far
+           thinner than a pixel. That ring is real and it is in the photographs
+           of the real thing; what was wrong with it here was only that one ray
+           per pixel samples a sub-pixel band at one point, so it came out as a
+           dotted circle of stray pixels rather than as a ring.
+    
+           So a pixel that can contain any of it is traced across its own width
+           — radially, since that is the direction everything varies in, and
+           hardly at all round the circle. Eight rays cannot resolve a band
+           that thin, but they do not need to: averaged, they are what the ring
+           actually looks like at this scale, which is a thin even circle.
+    
+           The band is kept narrow on purpose. These are the rays that wind
+           around the hole for hundreds of steps and cross the gas over and
+           over — the most expensive in the frame — and sampling a wide band
+           this way once took the compositor from sixty frames a second to
+           twenty. A quarter of a radius either side of the critical one is
+           where the ring can be, and nowhere else in the picture pays. */
+    "        if (abs(b - 2.598) < 0.14) {\n"
+    "            vec2 rad = uv / max(b, 0.001);\n"
+    "            vec4 sum = vec4(0.0);\n"
+    "            for (int k = 0; k < 4; k++) {\n"
+    "                float o = (float(k) + 0.5) / 4.0 - 0.5;\n"
+    "                sum += hole_ray(uv + rad * (o / rs), rs, dmax, incl, tt,\n"
+    "                                r_in, r_out);\n"
     "            }\n"
+    "            px4 = sum / 4.0;\n"
     "        }\n"
+    "        vec3 acc = px4.rgb;\n"
+    "        float a = px4.a;\n"
     "\n"
     /*     No painted-on glow around it. There used to be one — a warm halo,
            on the reasoning that gas this hot lights the dust around it — and
@@ -941,43 +1005,6 @@ static const char star_frag_src[] =
     "            acc += hot * ring * rag * fade * 5.5;\n"
     "        }\n"
     "\n"
-    /*     Tone-mapped gently, so the approaching side of the disc keeps
-           climbing instead of clipping to a flat white slab — the highlight
-           rolls off the way a camera's does, which is where the white core
-           with colour surviving around it comes from.
-    
-           The GAS is tone-mapped; the desktop behind it is not, and is added
-           afterwards. Running the desktop through the same curve dimmed and
-           warmed every window inside the node while the same window outside it
-           stayed as it was, and the join between the two was a great circle
-           drawn across the screen — the wider the hole's canvas, the more
-           obvious. What the lens does to the desktop is move it, not tint it. */
-    "        acc = acc / (1.0 + acc * 0.30);\n"
-    "        acc = pow(max(acc, vec3(0.0)), vec3(0.88));\n"
-    "        acc += back;\n"
-    "        float a = clamp(max(acc.r, max(acc.g, acc.b)) * 1.4, 0.0, 1.0);\n"
-    "        a = max(a, lensed);\n"
-    /*     And opaque wherever the lens did the work, whether or not it found
-           anything to show there. Off the edge of the photograph near the
-           shadow, and along every path that never reached the desktop at all,
-           the honest picture is black — but it has to be a black that covers,
-           or the window behind the hole shows through the gap between the
-           shadow and the disc exactly as if there were no hole at all. Out at
-           the rim, where the lens moves nothing, this is zero and the desktop
-           comes through untouched, which is what keeps the node's edge
-           invisible. */
-    "        a = max(a, max(lost, offpage * bent));\n"
-    /*     The shadow is opaque black, full stop. Derived from the arithmetic
-           it was at the mercy of whatever the driver made of the terms feeding
-           it, and a black hole you can see the wallpaper through is the one
-           failure that ruins the whole picture. */
-    "        a = max(a, ray.caught);\n"
-    /*     And the node's own edge. It fades only where the bending has
-           already died — past 0.85 of the canvas nothing is displaced, so the
-           bent copy and the desktop under it are the same picture and the
-           join cannot be seen. Overlapping the two fades is what made a
-           half-transparent, still-displaced copy lie over the real thing: the
-           window appeared twice. */
     "        float rim2 = (1.0 - smoothstep(dmax * 0.86, dmax, b));\n"
     "        vec3 out3 = acc * a * rim2;\n"
     "        gl_FragColor = vec4(out3.b, out3.g, out3.r, a * rim2);\n"
