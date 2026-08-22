@@ -476,6 +476,23 @@ void server_request_tray_redraw(FwmServer *server) {
         if (d2.active_desktop < 0) d2.active_desktop = 0;
         if (d2.active_desktop > 9) d2.active_desktop = 9;
 
+        /* Where every OTHER screen is parked, so this strip can mark the
+         * desktops that are taken. Their live camera rather than their
+         * out->desktop: the marker then slides with them exactly as this
+         * monitor's does, and a trade reads as the two crossing. A dark screen
+         * holds nothing (server_output_showing skips it), so it gets no
+         * marker. */
+        d2.other_count = 0;
+        FwmOutput *o2;
+        wl_list_for_each(o2, &server->outputs, link) {
+            if (o2 == out || !o2->enabled) continue;
+            if (d2.other_count >= TRAY_MAX_OTHER) break;
+            double p = (double)o2->camera_x / server->screen_width;
+            if (p < 0.0) p = 0.0;
+            if (p > 9.0) p = 9.0;
+            d2.other_pos[d2.other_count++] = p;
+        }
+
         /* Layout is per-desktop, so the pill reports this monitor's desktop;
          * gravity and cava are global. */
         d2.modes_tiling   = server->desktop_mode[d2.active_desktop] == DESKTOP_MODE_TILING;

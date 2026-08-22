@@ -19,6 +19,9 @@
 #include <wlr/render/wlr_renderer.h>
 
 #define TRAY_HEIGHT 28
+/* Markers for monitors other than the one the strip is drawn on: the world has
+ * ten desktops and a desktop belongs to one monitor, so nine is the ceiling. */
+#define TRAY_MAX_OTHER 9
 /* The tray floats: it is inset from the top edge, so the strip it actually
  * occupies runs down to TRAY_BOTTOM, not to TRAY_HEIGHT. Anything reserving
  * space for the tray must use TRAY_BOTTOM, or the gap it leaves comes out
@@ -36,6 +39,15 @@ typedef struct {
     int active_desktop;
     double active_pos; /* fractional desktop position (camera_x / screen_w):
                         * the underline marker glides with the camera slide */
+    /* Where the OTHER monitors are parked, in the same fractional units. One
+     * desktop is shown by at most one monitor, so a desktop another screen
+     * holds is not somewhere this one can simply go: asking for it TRADES the
+     * two screens' desktops (server_output_show_desktop). The strip has to say
+     * which those are, or half the desktops answer a click with a move nobody
+     * asked for. Ten desktops, one monitor each at most, so nine is every
+     * marker that can exist; any monitor past that is dropped. */
+    double other_pos[TRAY_MAX_OTHER];
+    int other_count;
     double opacity; /* island fill alpha 0..1 (decor.tray_opacity) */
     char kbd_layout[8]; /* short active-layout tag ("EN", "RU"); "" hides it */
     int error_count;    /* config problems; >0 draws the warning pill */
@@ -80,6 +92,7 @@ typedef struct {
     int  sig_speed, sig_angle, sig_mass10, sig_flying;
     int  sig_counts[10];
     int  sig_active_desktop, sig_pos_mil, sig_opacity1000, sig_minute;
+    int  sig_other_count, sig_other_mil[TRAY_MAX_OTHER];
     char sig_kbd[8];
     int  sig_errors, sig_err_expanded;
     int  sig_m_tiling, sig_m_floating, sig_m_gravity, sig_m_cava, sig_m_open;

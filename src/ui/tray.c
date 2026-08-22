@@ -286,6 +286,22 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
 
         }
 
+        /* The other monitors' markers: the same 8px footprint as this
+         * monitor's, hollowed out to its two end caps and drawn in the muted
+         * tone. A desktop wearing one is already up on another screen, and
+         * going there TRADES the two screens' desktops rather than just moving
+         * this one — without the marker half the strip can answer a click with
+         * a swap nobody expected. They glide with their own monitor's camera,
+         * so a trade shows as the two markers passing each other. Drawn before
+         * the active marker, so where they cross this monitor's stays on top. */
+        for (int i = 0; i < data->other_count && i < TRAY_MAX_OTHER; i++) {
+            double ox = px + PILL_PAD + 3 + data->other_pos[i] * spacing;
+            cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
+            cairo_rectangle(cr, ox - 4, h - 6, 2, 2);
+            cairo_rectangle(cr, ox + 2, h - 6, 2, 2);
+            cairo_fill(cr);
+        }
+
         // Underline marker: drawn at the fractional camera position, so it
         // glides between indicators in sync with the desktop-switch slide.
         double ux = px + PILL_PAD + 3 + data->active_pos * spacing;
@@ -492,6 +508,14 @@ void tray_redraw(struct wlr_scene_buffer *tray_buf, const TrayData *data,
     memcpy(sig.sig_counts, data->desktop_window_counts, sizeof(sig.sig_counts));
     sig.sig_active_desktop = data->active_desktop;
     sig.sig_pos_mil = (int)lround(data->active_pos * 1000.0);
+    /* Zeroed whole, not just up to other_count: the tail is compared along with
+     * the rest, and a monitor going away would otherwise leave its last
+     * position sitting in a slot nobody writes any more. */
+    memset(sig.sig_other_mil, 0, sizeof(sig.sig_other_mil));
+    sig.sig_other_count = data->other_count < TRAY_MAX_OTHER
+                        ? data->other_count : TRAY_MAX_OTHER;
+    for (int i = 0; i < sig.sig_other_count; i++)
+        sig.sig_other_mil[i] = (int)lround(data->other_pos[i] * 1000.0);
     sig.sig_opacity1000 = (int)lround(data->opacity * 1000.0);
     time_t now = time(NULL);
     struct tm tm;

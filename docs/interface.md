@@ -26,6 +26,10 @@ Left to right:
   and mass. Each monitor reports the window on *its own* desktop.
 - **Desktop indicators** — ten dots, the current one marked. The marker slides as
   the camera pans, so it tracks a free pan rather than jumping between desktops.
+  The desktops the *other* monitors are holding get a hollow marker of the same
+  size, gliding with their screen's camera the same way: a desktop is shown by
+  one monitor at a time, so asking this screen for a taken one trades the two
+  screens' desktops rather than moving only this one.
 - **The stats pill** — what the machine is doing: `CPU 12% • RAM 7.4G • GPU 41%`.
   Click it for the menu below. Ellipsized rather than dropped on a narrow screen:
   it is the only way to reach its own menu, and the switches in that menu are
