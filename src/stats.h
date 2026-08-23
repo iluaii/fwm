@@ -22,13 +22,13 @@
  * The readouts in the tray's stats pill: what the machine is doing, sampled on
  * a timer and rendered as one short line.
  *
- * Three sensors are built in — cpu, ram, gpu — and everything else is a shell
- * command the user names in [stats]. That split is the whole design: a
+ * Five sensors are built in — cpu, ram, gpu, bat, net — and everything else is
+ * a shell command the user names in [stats]. That split is the whole design: a
  * compositor has no business knowing how to ask PulseAudio for the volume, and
  * a user who wants it in the tray should not have to write a plugin to get it.
  *
- * NOTHING HERE MAY BLOCK. The built-in sensors are three small reads out of
- * /proc and /sys, which are memory, not disk. A custom sensor is a child
+ * NOTHING HERE MAY BLOCK. The built-in sensors are small reads out of /proc and
+ * /sys, which are memory, not disk. A custom sensor is a child
  * process, and a child process can take as long as it likes — so it is started
  * on one tick and collected on a later one, through a pipe that is never read
  * except when it has something to say. A command that never exits is killed
@@ -43,6 +43,8 @@ enum {
     STATS_SRC_CPU = 0,
     STATS_SRC_RAM,
     STATS_SRC_GPU,
+    STATS_SRC_BAT,
+    STATS_SRC_NET,
     STATS_SRC_CUSTOM,
 };
 

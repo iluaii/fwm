@@ -113,9 +113,21 @@ Click the stats pill (or bind `stats_menu`). One row per sensor, each with its
 live value and a switch; switching one off takes it out of the pill but keeps it sampled-ready, so
 switching it back on shows a number immediately.
 
-Three sensors are built in — `cpu` (load over the last second), `ram` (in use,
-i.e. total minus `MemAvailable`) and `gpu` (busy percentage, from `amdgpu` or
-`i915`; a card that does not report it is shown greyed rather than hidden).
+Five sensors are built in:
+
+| Name | Shows | Notes |
+|---|---|---|
+| `cpu` | load over the last second | the difference between two reads of `/proc/stat`, so it says nothing until the second one |
+| `ram` | in use, i.e. total minus `MemAvailable` | not total minus free: a warm page cache is not a full machine |
+| `gpu` | busy percentage | `amdgpu` and `i915` report it; a card that does not (nvidia's proprietary stack) is shown greyed rather than hidden |
+| `bat` | charge, `87%` — or `87%+` while it is filling | the machine's own battery, never a mouse's or a headset's (`scope = Device` is skipped). Sampled every ten seconds: a charge does not move faster than that |
+| `net` | what is moving right now, `↓1.2M ↑340K` | bytes per second both ways, summed over interfaces with real hardware behind them — `lo`, `docker0`, bridges and veth pairs are left out, since a bridge counts bytes its members already counted |
+
+`bat` is in the default pill and `net` is not, for one reason: a sensor the
+machine cannot answer is dropped from the pill entirely, so the charge appears
+by itself on a laptop and changes nothing on a desktop — while a network rate is
+available everywhere, and defaulting it on would change every existing tray. Add
+it to `items` if you want it.
 
 **Everything else is yours.** Any key in `[stats]` that is not one of the
 table's own settings defines a sensor: the key is its name, the value is a shell

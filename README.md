@@ -220,18 +220,28 @@ it finds on the other side can be a different gravity.
 - **Rotated and bent windows** — a spinning window is drawn at any angle, not in quarter turns, and a dragged one is drawn through a deforming mesh. wlroots' scene graph is axis-aligned to its bones, so these two draw their own geometry on the renderer's GL context (`src/rotate.c`); everything else stays on the public API.
 - **Wallpaper-derived palette** — optionally tint the whole UI toward the wallpaper's dominant hue (`color_source = "wallpaper"`).
 - **Minimal tray** — flat chevron-ended islands: focused window + physics readout, desktop indicators, a stats pill, a modes pill, clock. No titlebars anywhere (server-side decorations).
-- **Stats pill** — what the machine is doing, in the tray: `CPU 12% • RAM 7.4G • GPU 41%`. Click it (or bind `stats_menu`) for a switch per readout. See below.
+- **Stats pill** — what the machine is doing, in the tray: `CPU 12% • RAM 7.4G • GPU 41% • BAT 87%`. Click it (or bind `stats_menu`) for a switch per readout. See below.
 - **Modes pill** — four icons between the desktop indicators and the clock (tiling, floating, gravity, cava), lit when the mode is on. Click it for a menu of ten rows: tiling, floating, gravity, mass, sound, cava, grass, wind, ring (the desktop strip closed into a loop) and breakable. Two of them are segmented controls rather than switches, because they are not on-off things — cava (off / visual / physical) and mass (size / ram: what decides how heavy a window is, its size or how much memory the application is using). The mass and sound choices are remembered in `~/.local/state/fwm/modes` and survive a restart; breakable deliberately is not, and every session starts with windows unbreakable. Fixed width, and dropped rather than squeezed on a screen too narrow to hold it — the clock grows with the locale's date and the desktop island is centred, so something has to give, and losing a pill that is also a keybind beats overlapping the clock.
 - **Transparency** — client alpha (e.g. kitty `background_opacity`) is rendered as-is.
 - **Fake fullscreen** (`Super+D`) keeps the tray visible; **real fullscreen** (`Super+F`) hides it and covers the whole output.
 
 ### The machine's own numbers
 
-The island between the desktop dots and the modes pill. Three sensors are built
+The island between the desktop dots and the modes pill. Five sensors are built
 in — `cpu` (how much of the last second every core spent working), `ram` (in
-use: total minus `MemAvailable`) and `gpu` (busy percentage, from `amdgpu` or
+use: total minus `MemAvailable`), `gpu` (busy percentage, from `amdgpu` or
 `i915`; a card that does not report it is greyed out in the menu rather than
-hidden).
+hidden), `bat` (`87%`, or `87%+` while it is charging) and `net` (`↓1.2M ↑340K`,
+bytes a second each way).
+
+`bat` reads the machine's own battery and never a peripheral's — a wireless
+mouse reports itself as a battery too, and nobody wants their mouse in the
+clock. `net` sums the interfaces with real hardware behind them, so a machine
+running containers is not counting the same bytes three times through a bridge.
+The charge is in the default pill and the network rate is not: a sensor the
+machine cannot answer is dropped from the pill outright, so `bat` appears by
+itself on a laptop and changes nothing on a desktop, while `net` would change
+every tray there is.
 
 **Everything else is yours.** Any key in `[stats]` that is not one of the
 table's own settings is a sensor: the key is its name, the value is a shell

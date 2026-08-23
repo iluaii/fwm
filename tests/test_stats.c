@@ -190,11 +190,74 @@ static void test_reconfigure_keeps_values(void) {
     stats_destroy(s);
 }
 
+/* The two sensors added after the first three. Both are machine-dependent in a
+ * way cpu and ram are not — a desktop has no battery, a container has no
+ * interface with a device behind it — so what is pinned here is the CONTRACT
+ * rather than a number: an unavailable sensor says so instead of sitting there
+ * empty, and an available one answers in a shape the tray can draw. */
+static void test_battery_and_network(void) {
+    CASE("the network rate needs two reads, like the cpu load");
+    StatsConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interval = 0.5;
+    snprintf(cfg.items[0], STATS_NAME_MAX, "net");
+    cfg.item_count = 1;
+
+    FwmStats *s = stats_create(&cfg);
+    CHECK(s != NULL);
+    CHECK_INT(stats_count(s), 1);
+
+    const StatsItem *net = stats_item(s, 0);
+    CHECK(net != NULL);
+    if (net && net->available) {
+        /* One tick is one read: a rate cannot exist yet. */
+        stats_tick(s, 0.05);
+        CHECK_STR(net->value, "");
+
+        const StatsItem *got = pump_until_value(s, "net", 4.0);
+        CHECK(got != NULL);
+        /* Both directions, down first, each with its arrow: "↓12K ↑0". */
+        if (got) CHECK(strstr(got->value, "\xE2\x86\x93") == got->value);
+        if (got) CHECK(strstr(got->value, "\xE2\x86\x91") != NULL);
+    }
+    stats_destroy(s);
+
+    CASE("the battery is either answered or declared unavailable");
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.interval = 0.5;
+    snprintf(cfg.items[0], STATS_NAME_MAX, "bat");
+    cfg.item_count = 1;
+
+    s = stats_create(&cfg);
+    CHECK(s != NULL);
+    const StatsItem *bat = stats_item(s, 0);
+    CHECK(bat != NULL);
+    if (bat && bat->available) {
+        const StatsItem *got = pump_until_value(s, "bat", 2.0);
+        CHECK(got != NULL);
+        /* "87%" or "87%+", never a bare number: the pill's own label says BAT,
+         * and a percentage without its sign reads as minutes to some people. */
+        if (got) {
+            size_t n = strlen(got->value);
+            CHECK(n >= 2);
+            if (n >= 2) CHECK(got->value[n - 1] == '%' || got->value[n - 1] == '+');
+        }
+    } else {
+        /* A machine with no battery must not draw an empty BAT in the pill —
+         * unavailable is what keeps it out of stats_format entirely. */
+        char line[256];
+        stats_format(s, line, sizeof(line));
+        CHECK_STR(line, "");
+    }
+    stats_destroy(s);
+}
+
 int main(void) {
     test_builtins();
     test_custom_command();
     test_format();
     test_slow_command();
     test_reconfigure_keeps_values();
+    test_battery_and_network();
     return t_report("stats");
 }

@@ -1257,14 +1257,18 @@ static void test_outputs(void) {
 }
 
 static void test_stats(void) {
-    CASE("[stats] defaults to the three built-in sensors");
+    /* Four, not five: `bat` is in the default pill because a machine without a
+     * battery drops the readout entirely, while `net` is available everywhere
+     * and would change every existing tray. */
+    CASE("[stats] defaults to the built-in sensors");
     const char *p = write_config("[binds]\n\"super+q\" = \"killclient\"\n");
     FwmConfig cfg;
     config_load(&cfg, p);
-    CHECK_INT(cfg.stats.item_count, 3);
+    CHECK_INT(cfg.stats.item_count, 4);
     CHECK_STR(cfg.stats.items[0], "cpu");
     CHECK_STR(cfg.stats.items[1], "ram");
     CHECK_STR(cfg.stats.items[2], "gpu");
+    CHECK_STR(cfg.stats.items[3], "bat");
     CHECK_INT(cfg.stats.custom_count, 0);
     config_free(&cfg);
     drop_config();

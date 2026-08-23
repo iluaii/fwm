@@ -31,15 +31,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <wlr/util/log.h>
 
-/* The built-ins are three reads out of memory-backed files, so they are taken
- * on their own cadence rather than the (user-set, deliberately slow) one the
+/* The built-ins are reads out of memory-backed files, so they are taken on
+ * their own cadence rather than the (user-set, deliberately slow) one the
  * commands run on. A second is what a load figure means anyway: faster and the
  * number is noise the eye cannot follow. */
 #define BUILTIN_PERIOD_S  1.0
+
+/* The charge, on its own much slower clock — see the sampling switch. */
+#define BAT_PERIOD_S     10.0
 
 /* A command that has not answered in this long is not going to. Killed rather
  * than left running: sensors run again every interval, and a hung one would
@@ -47,6 +51,14 @@
 #define STATS_CMD_TIMEOUT_S 5.0
 
 #define GPU_BUSY_GLOB "/sys/class/drm/card%d/device/gpu_busy_percent"
+#define POWER_SUPPLY_DIR "/sys/class/power_supply"
+#define NET_DEV_PATH     "/proc/net/dev"
+
+/* Long enough for a machine with a wall of veth interfaces: /proc/net/dev is
+ * about 200 bytes a line, so this is some eighty of them. A machine with more
+ * than that has the tail of its list cut off rather than a wrong total — the
+ * interfaces that matter are at the top of the file, not the end of it. */
+#define NET_DEV_BUF      16384
 
 typedef struct {
     StatsItem pub;                 /* what callers see */
@@ -74,6 +86,19 @@ struct FwmStats {
     int    cpu_primed;   /* one sample is a total, not a load: skip the first */
 
     char   gpu_path[64]; /* "" when no card exposes a busy percentage */
+
+    char   bat_path[288]; /* "" when the machine has no battery of its own */
+
+    /* The counters behind the network rate, and the clock they were read on.
+     * Like the CPU load this is a difference between two reads, so the first
+     * one produces nothing — and unlike the CPU it is a difference per SECOND,
+     * which is why the time is kept rather than assumed: a sensor that was
+     * switched off in the menu for a minute comes back with a minute's worth
+     * of bytes, and dividing those by the sample period would report a burst
+     * that never happened. */
+    unsigned long long net_rx, net_tx;
+    int    net_primed;
+    struct timespec net_at;
 };
 
 /* ── built-in sensors ────────────────────────────────────────────────── */
@@ -174,6 +199,181 @@ static int sample_gpu(FwmStats *s, char *out, size_t out_size) {
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
     snprintf(out, out_size, "%d%%", pct);
+    return 1;
+}
+
+/* ── the battery ─────────────────────────────────────────────────────
+ *
+ * The one readout on this list that is not about load, and the one a laptop
+ * actually wants: a compositor that draws a status strip and leaves the charge
+ * out of it sends its user to install a second bar for one number.
+ *
+ * `scope = Device` is what keeps a wireless mouse out of the tray. Peripherals
+ * report themselves as batteries here too — hidpp_battery_0, a headset, a
+ * stylus — and they are batteries, just not the one the machine runs on. A
+ * supply with no `capacity` at all is skipped for the same reason: nothing to
+ * show but a name. */
+static void find_battery(FwmStats *s) {
+    s->bat_path[0] = '\0';
+
+    DIR *d = opendir(POWER_SUPPLY_DIR);
+    if (!d) return;
+
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+
+        char path[384], buf[64];
+        snprintf(path, sizeof(path), POWER_SUPPLY_DIR "/%s/type", e->d_name);
+        if (!read_small(path, buf, sizeof(buf))) continue;
+        if (strncmp(buf, "Battery", 7) != 0) continue;
+
+        snprintf(path, sizeof(path), POWER_SUPPLY_DIR "/%s/scope", e->d_name);
+        if (read_small(path, buf, sizeof(buf)) && strncmp(buf, "Device", 6) == 0)
+            continue;   /* a mouse, not the machine */
+
+        snprintf(path, sizeof(path), POWER_SUPPLY_DIR "/%s/capacity", e->d_name);
+        if (access(path, R_OK) != 0) continue;
+
+        snprintf(s->bat_path, sizeof(s->bat_path), POWER_SUPPLY_DIR "/%s", e->d_name);
+        break;
+    }
+    closedir(d);
+}
+
+/* "87%" on the way down, "87%+" on the way up. A trailing plus rather than a
+ * bolt or an arrow: the tray already gambles on two glyphs (see ui/modes.h)
+ * and a charge readout is not the place to add a third — everything here has
+ * to be legible in whatever "sans" resolves to on the machine. */
+static int sample_bat(FwmStats *s, char *out, size_t out_size) {
+    if (!s->bat_path[0]) return 0;
+
+    char path[sizeof(s->bat_path) + 16], buf[64];
+    snprintf(path, sizeof(path), "%s/capacity", s->bat_path);
+    if (!read_small(path, buf, sizeof(buf))) return 0;
+    int pct = atoi(buf);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+
+    /* "Full" is deliberately NOT a plus: a battery that has finished charging
+     * is not filling, and a plug left in overnight should read the same as one
+     * that was never in. */
+    snprintf(path, sizeof(path), "%s/status", s->bat_path);
+    int charging = read_small(path, buf, sizeof(buf)) && strncmp(buf, "Charging", 8) == 0;
+
+    snprintf(out, out_size, "%d%%%s", pct, charging ? "+" : "");
+    return 1;
+}
+
+/* ── the network ─────────────────────────────────────────────────────
+ *
+ * What is moving right now, both ways, not what has moved since boot: a total
+ * since boot is the same number all day and tells nobody whether the download
+ * they are waiting on is still going.
+ *
+ * Only interfaces with a device behind them are counted. /sys/class/net/<if>/
+ * device is a link to real hardware, so it is present for ethernet and wifi
+ * and absent for lo, docker0, veth pairs, bridges and tunnels — and a bridge
+ * counts every byte its members already counted, which on a machine running
+ * containers doubles or triples the reading. A machine where nothing has a
+ * device (a container, a VM with a virtio interface the driver does not
+ * expose) falls back to everything except lo rather than reporting zero
+ * forever. */
+static int net_has_device(const char *ifname) {
+    char path[128];
+    snprintf(path, sizeof(path), "/sys/class/net/%s/device", ifname);
+    return access(path, F_OK) == 0;
+}
+
+static void fmt_rate(double bytes_per_s, char *out, size_t out_size) {
+    if (bytes_per_s >= 1024.0 * 1024.0)
+        snprintf(out, out_size, "%.1fM", bytes_per_s / (1024.0 * 1024.0));
+    else if (bytes_per_s >= 1024.0)
+        snprintf(out, out_size, "%.0fK", bytes_per_s / 1024.0);
+    else
+        snprintf(out, out_size, "0");
+}
+
+static int sample_net(FwmStats *s, char *out, size_t out_size) {
+    char buf[NET_DEV_BUF];
+    if (!read_small(NET_DEV_PATH, buf, sizeof(buf))) return 0;
+
+    unsigned long long phys_rx = 0, phys_tx = 0, any_rx = 0, any_tx = 0;
+    int phys_seen = 0;
+
+    /* Two header lines, then one per interface:
+     *   "  eth0: <rx_bytes> <rx_packets> ... <tx_bytes> <tx_packets> ..." */
+    const char *p = buf;
+    for (int line = 0; *p; line++) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+
+        if (line >= 2) {
+            const char *colon = memchr(p, ':', len);
+            if (colon) {
+                char name[32];
+                const char *n = p;
+                while (n < colon && (*n == ' ' || *n == '\t')) n++;
+                size_t nlen = (size_t)(colon - n);
+                if (nlen < sizeof(name)) {
+                    memcpy(name, n, nlen);
+                    name[nlen] = '\0';
+
+                    unsigned long long v[9] = {0};
+                    if (strcmp(name, "lo") != 0 &&
+                        sscanf(colon + 1, "%llu %llu %llu %llu %llu %llu %llu %llu %llu",
+                               &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8]) == 9) {
+                        any_rx += v[0];
+                        any_tx += v[8];
+                        if (net_has_device(name)) {
+                            phys_rx += v[0];
+                            phys_tx += v[8];
+                            phys_seen = 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!nl) break;
+        p = nl + 1;
+    }
+
+    unsigned long long rx = phys_seen ? phys_rx : any_rx;
+    unsigned long long tx = phys_seen ? phys_tx : any_tx;
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    double secs = (double)(now.tv_sec - s->net_at.tv_sec) +
+                  (double)(now.tv_nsec - s->net_at.tv_nsec) / 1e9;
+
+    unsigned long long prev_rx = s->net_rx, prev_tx = s->net_tx;
+    s->net_rx = rx;
+    s->net_tx = tx;
+    s->net_at = now;
+
+    if (!s->net_primed) { s->net_primed = 1; return 0; }
+    if (secs <= 0.0) return 0;
+    /* Switched off in the menu and back on, or the machine was suspended: the
+     * counters kept running while nobody was reading them, and the difference
+     * now spans minutes. Averaging it over those minutes would be true and
+     * useless — "what is moving right now" is the question — so take this read
+     * as the new baseline and answer one period later. */
+    if (secs > 5.0) return 0;
+
+    /* An interface that was unplugged, renamed or restarted takes its counter
+     * with it, so the sum can go DOWN. Reporting that as a negative rate — or
+     * as the enormous positive one unsigned arithmetic would produce — is
+     * worse than reporting nothing for one period. */
+    double down = rx >= prev_rx ? (double)(rx - prev_rx) / secs : 0.0;
+    double up   = tx >= prev_tx ? (double)(tx - prev_tx) / secs : 0.0;
+
+    char d[10], u[10];
+    fmt_rate(down, d, sizeof(d));
+    fmt_rate(up, u, sizeof(u));
+    /* U+2193 / U+2191, the two arrows every "sans" has had since the DejaVu
+     * days. Down first: it is the one being waited on. */
+    snprintf(out, out_size, "\xE2\x86\x93%s \xE2\x86\x91%s", d, u);
     return 1;
 }
 
@@ -294,6 +494,8 @@ static int source_of(const char *name) {
     if (strcmp(name, "cpu") == 0) return STATS_SRC_CPU;
     if (strcmp(name, "ram") == 0) return STATS_SRC_RAM;
     if (strcmp(name, "gpu") == 0) return STATS_SRC_GPU;
+    if (strcmp(name, "bat") == 0) return STATS_SRC_BAT;
+    if (strcmp(name, "net") == 0) return STATS_SRC_NET;
     return STATS_SRC_CUSTOM;
 }
 
@@ -342,6 +544,12 @@ void stats_reconfigure(FwmStats *s, const StatsConfig *cfg) {
             if (!it->cmd[0]) continue;
         }
         if (it->pub.source == STATS_SRC_GPU && !s->gpu_path[0]) it->pub.available = 0;
+        /* A desktop has no battery, and the menu greys the row out rather than
+         * leaving a readout that never fills in. Looked for once per reload,
+         * not once per sample: a machine does not grow one. */
+        if (it->pub.source == STATS_SRC_BAT && !s->bat_path[0]) it->pub.available = 0;
+        if (it->pub.source == STATS_SRC_NET && access(NET_DEV_PATH, R_OK) != 0)
+            it->pub.available = 0;
 
         /* An item that was already here keeps what it had: its value, so the
          * pill does not blank for an interval, and its on/off, so a reload does
@@ -365,6 +573,7 @@ FwmStats *stats_create(const StatsConfig *cfg) {
     FwmStats *s = calloc(1, sizeof(*s));
     if (!s) return NULL;
     find_gpu(s);
+    find_battery(s);
     stats_reconfigure(s, cfg);
     return s;
 }
@@ -407,6 +616,19 @@ bool stats_tick(FwmStats *s, double dt) {
         case STATS_SRC_GPU:
             it->due = BUILTIN_PERIOD_S;
             have = sample_gpu(s, value, sizeof(value));
+            break;
+        case STATS_SRC_BAT:
+            /* Charge moves in minutes, not seconds. Sampling it as often as
+             * the load sensors would be two file reads a second to watch a
+             * number that changes forty times a day — and the tray is only
+             * repainted when a value actually changes, so a slower sensor is
+             * also a quieter one. */
+            it->due = BAT_PERIOD_S;
+            have = sample_bat(s, value, sizeof(value));
+            break;
+        case STATS_SRC_NET:
+            it->due = BUILTIN_PERIOD_S;
+            have = sample_net(s, value, sizeof(value));
             break;
         default:
             it->due = s->interval;

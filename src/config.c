@@ -971,7 +971,8 @@ static void load_wallpaper_picker(toml_table_t *root, FwmConfig *cfg) {
 /* Names the compositor answers itself. Anything else in [stats] is a command. */
 static int stats_is_builtin(const char *name) {
     return strcmp(name, "cpu") == 0 || strcmp(name, "ram") == 0 ||
-           strcmp(name, "gpu") == 0;
+           strcmp(name, "gpu") == 0 || strcmp(name, "bat") == 0 ||
+           strcmp(name, "net") == 0;
 }
 
 static void load_stats(toml_table_t *root, FwmConfig *cfg) {
@@ -981,12 +982,19 @@ static void load_stats(toml_table_t *root, FwmConfig *cfg) {
 
     /* The default is the pill everybody would have written anyway. It is not
      * "nothing": an empty island in the tray teaches nobody that the feature
-     * exists, and every one of these three costs a read of a file that is
-     * already in memory. */
+     * exists, and every one of these costs a read of a file that is already in
+     * memory.
+     *
+     * `bat` is in the default list and `net` is not, which is not an oversight:
+     * a sensor the machine cannot answer is dropped from the pill entirely, so
+     * the charge appears by itself on a laptop and changes nothing on a desktop
+     * — while a network rate is available everywhere and would therefore be a
+     * change to every existing tray. */
     snprintf(s->items[0], STATS_NAME_MAX, "cpu");
     snprintf(s->items[1], STATS_NAME_MAX, "ram");
     snprintf(s->items[2], STATS_NAME_MAX, "gpu");
-    s->item_count = 3;
+    snprintf(s->items[3], STATS_NAME_MAX, "bat");
+    s->item_count = 4;
 
     if (!root) return;
     toml_table_t *tbl = toml_table_in(root, "stats");

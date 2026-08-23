@@ -147,12 +147,19 @@ tick_rate             = 60.0
 # and the modes pill. Click it for the menu that switches each readout on and
 # off, or bind the `stats_menu` action to a key.
 #
-# Three sensors are built in:
+# Five sensors are built in:
 #
 #   cpu   how much of the last second every core spent working
 #   ram   memory in use (total minus MemAvailable, i.e. what you actually mean)
 #   gpu   how busy the card is; needs a driver that reports it (amdgpu, i915).
 #         A card that does not is shown greyed in the menu rather than hidden.
+#   bat   the charge: "87%", or "87%+" while it is filling. The machine's own
+#         battery only — a wireless mouse reports itself as one too, and it is
+#         skipped. A machine without a battery drops the readout entirely,
+#         which is why this one is in the default pill.
+#   net   what is moving right now, "↓1.2M ↑340K", bytes a second each way.
+#         Summed over interfaces with real hardware behind them, so lo, veth
+#         pairs and docker bridges do not count the same traffic twice.
 #
 # ANY OTHER KEY HERE IS A SENSOR OF YOUR OWN: the key is its name, the value is
 # a shell command, and what the command prints on its first line is what the
@@ -167,7 +174,7 @@ tick_rate             = 60.0
 # only one run of it exists at a time, so a slow sensor reports less often
 # instead of piling up processes.
 #[stats]
-#items    = ["cpu", "ram", "gpu", "vol", "mic"]
+#items    = ["cpu", "ram", "gpu", "bat", "net", "vol", "mic"]
 #interval = 2.0
 #vol = "pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1"
 #mic = "pactl get-source-mute @DEFAULT_SOURCE@ | grep -q yes && echo off || echo on"
