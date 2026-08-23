@@ -354,6 +354,8 @@ Runs the software you already use: **XWayland** (X11 apps as ordinary physics wi
 
 **The screen goes out by itself.** `[idle] blank_after` (ten minutes out of the box) turns the monitors off after that long with no input, and `lock_after` runs whatever `lock` names — swaylock, gtklock, waylock, since fwm serves the session-lock protocol but does not draw a lock screen. Any key, click or touch lights the screens again, and the press that does it is spent on that rather than reaching the window underneath. An idle inhibitor freezes both timers where they stand instead of resetting them, so a film holds the screen for exactly as long as it plays. None of this displaces swayidle: it still works, on its own timers, and `blank_after = 0` hands the whole question back to it. Blanking is not `output_off` — nothing leaves the layout, no desktop is handed back, the pointer does not move, and a screen already dark for another reason is not lit by the next keystroke.
 
+**The clipboard survives the window you copied from.** Wayland's selection is a promise by that window to hand the bytes over later, so closing a terminal takes the command you copied out of it with it. fwm reads the text once, while the window is alive, and offers it again when the selection would go empty ([`[clipboard]`](docs/configuration.md#clipboard)) — no `wl-clip-persist` in the session. Text only and capped at `max_kb`: this is for the command you copied, not a silent cache of every image on the clipboard, and it keeps the last thing copied rather than a history. X11's names for the same bytes are offered too, so a paste into an XWayland application works the same way.
+
 **Cursor theme** is chosen rather than left to chance: `XCURSOR_THEME`/`XCURSOR_SIZE` are honoured as named, and with nothing asked for fwm goes looking for an installed theme that actually has the shapes clients ask for (resize arrows, grab hand, crosshair) instead of falling back to wlroots' built-in four. The name it settles on is exported, so GTK and Xwayland load the same one and the pointer keeps its style across windows.
 
 **Multiple monitors** are independent screens sharing one set of ten desktops (the i3 arrangement). Each monitor shows one desktop and switches on its own: a desktop bind moves the screen the pointer is on, and asking for a desktop that is already up on the other monitor trades the two rather than showing it twice — and each strip draws a hollow marker under the desktops the other screens are holding, so which of them will trade is visible before you ask. Every monitor gets its own wallpaper, fitted to its own size, its own status strip reporting its own desktop, and its own desktop strip (`expo`) — opening one leaves the other screen working. Sending a window to a desktop puts it on whichever monitor is showing it. Monitors can be plugged and unplugged while fwm runs; a new one comes up on the lowest desktop nobody else has.
@@ -868,6 +870,11 @@ blank_after = 600
 #lock_after = 900             # and the locker after fifteen; 0 = never
 #lock       = "swaylock -f"   # fwm serves the protocol, it does not draw a lock
 
+[clipboard]
+# Keep the last copied TEXT after the window that copied it closes — Wayland's
+# clipboard is a promise by that window, so closing it would empty the board.
+persist = true
+max_kb  = 1024               # bigger selections are left alone, not truncated
 
 # Per-window rules, applied once when the window opens. app_id and title are
 # POSIX extended regexes; a rule with both needs both to match, and later rules

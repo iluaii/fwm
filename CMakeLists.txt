@@ -129,6 +129,7 @@ set(SOURCES
     src/rotate.c
     src/snapshot.c
     src/screenshot.c
+    src/clipboard.c
     src/expo.c
     src/expo_geom.c
     src/expo_cards.c

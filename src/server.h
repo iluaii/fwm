@@ -552,6 +552,10 @@ typedef struct FwmServer {
      * copies of the same one. */
     int warned_window_limit;
 
+    /* The seat's selection: fwm's own offers (a screenshot), and the text a
+     * dead client left behind ([clipboard] persist). See clipboard.h. */
+    struct FwmClipboard *clipboard;
+
     struct wlr_session_lock_manager_v1 *lock_manager;
     struct wlr_session_lock_v1 *lock;      /* NULL once the client is gone */
     int locked;

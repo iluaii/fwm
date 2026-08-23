@@ -1104,6 +1104,31 @@ static bool toml_number_in(toml_table_t *tbl, const char *key, double *out) {
     return false;
 }
 
+/* ── clipboard section ───────────────────────────────────────────────── */
+
+static void load_clipboard(toml_table_t *root, FwmConfig *cfg) {
+    ClipboardConfig *c = &cfg->clipboard;
+    /* On by default, because the behaviour it replaces is one everybody reads
+     * as a bug the first time it happens to them. A megabyte is more text than
+     * anyone copies on purpose and small enough that holding it is free. */
+    c->persist = 1;
+    c->max_kb  = 1024.0;
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "clipboard");
+    if (!tbl) return;
+
+    toml_datum_t b = toml_bool_in(tbl, "persist");
+    if (b.ok) c->persist = b.u.b ? 1 : 0;
+
+    double v;
+    if (toml_number_in(tbl, "max_kb", &v)) {
+        if (v >= 1.0 && v <= 65536.0) c->max_kb = v;
+        else config_report_error(cfg, "[clipboard] max_kb %.0f out of range 1..65536 — using %.0f",
+                                 v, c->max_kb);
+    }
+}
+
 /* ── idle section ────────────────────────────────────────────────────── */
 
 static void load_idle(toml_table_t *root, FwmConfig *cfg) {
@@ -1741,6 +1766,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_sound(NULL, cfg);
     load_volume(NULL, cfg);
     load_idle(NULL, cfg);
+    load_clipboard(NULL, cfg);
     load_mixer(NULL, cfg);
     load_stats(NULL, cfg);
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
@@ -1781,6 +1807,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_input(root, cfg);
     load_focus(root, &cfg->focus, cfg);
     load_idle(root, cfg);
+    load_clipboard(root, cfg);
     load_effects(root, &cfg->effects);
     load_session(root, &cfg->session, cfg);
     load_startup(root, &cfg->startup, cfg);

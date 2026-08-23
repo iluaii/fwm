@@ -420,6 +420,21 @@ blank_after = 600
 #lock_after = 900
 #lock       = "swaylock -f"
 
+# The clipboard, and the thing about Wayland's that surprises everybody: it is
+# not a place where text is kept, it is a PROMISE by the window you copied
+# from. Close that window and the promise goes with it — copy a command out of
+# a terminal, close the terminal, paste, and there is nothing there.
+#
+# persist is fwm reading the text once, while the window is still alive, and
+# offering it again when the window is gone. Text only, and only up to max_kb:
+# what this is for is the command you copied out of a terminal you have since
+# closed, not a silent cache of every image anybody ever copied. What survives
+# is the last thing copied, not a history — cliphist and friends are a
+# different feature with a window attached.
+#[clipboard]
+#persist = true
+#max_kb  = 1024
+
 # Impact effects, both scaled by collision speed so gentle bumps stay subtle.
 #
 # camera_shake jolts the wallpaper and windows when something lands hard (the

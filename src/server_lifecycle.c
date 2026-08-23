@@ -16,6 +16,7 @@
  * it all down again in the reverse order. Split out of server.c; see
  * server_internal.h. */
 #include "server.h"
+#include "clipboard.h"
 #include "view.h"
 #include "rotate.h"
 #include "shadow.h"
@@ -466,6 +467,12 @@ bool server_init(FwmServer *server) {
 
     server->seat = wlr_seat_create(server->wl_display, "seat0");
 
+    /* Straight after the seat, because it listens to the seat's selection and
+     * a client could take it as soon as one exists. Its [clipboard] settings
+     * arrive further down — the config file has not been read yet at this
+     * point, and the module's own defaults hold until it has. */
+    server->clipboard = clipboard_create(server->wl_display, server->seat);
+
     // Xwayland (lazy: the X server starts on the first X11 client). Managed
     // windows become FwmViews, override-redirect ones bare scene surfaces.
     server->xwayland = wlr_xwayland_create(server->wl_display, server->compositor, true);
@@ -530,6 +537,11 @@ bool server_init(FwmServer *server) {
     server_settings_notify(server);
     // Palette for every overlay and window border; may sample the wallpaper.
     theme_build(&server->config);
+
+    /* And the clipboard's settings, now that there is a config to read them
+     * from — the module has been listening since the seat existed. */
+    clipboard_configure(server->clipboard, server->config.clipboard.persist != 0,
+                        (size_t)(server->config.clipboard.max_kb * 1024.0));
 
     /* The tray's readouts. Created after the config and before the first frame:
      * the pill is drawn on that frame, and a handle that appeared later would
@@ -644,6 +656,8 @@ void server_destroy(FwmServer *server) {
     stats_destroy(server->stats);
     server->stats = NULL;
     screenshot_cleanup(server);
+    clipboard_destroy(server->clipboard);
+    server->clipboard = NULL;
     launcher_destroy(server->launcher);
     server->launcher = NULL;
     radial_destroy(server->radial);

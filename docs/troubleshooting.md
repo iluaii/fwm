@@ -242,6 +242,22 @@ locker that is not installed the session log has the shell's complaint about it.
 numbers can (dim first, blank later, a different timeout on battery). Set
 `blank_after = 0` and `lock_after = 0` so the two are not both counting.
 
+## The clipboard emptied when I closed the window
+
+That is Wayland's clipboard: a promise by the window you copied from. fwm keeps
+the last copied **text** across that window closing ([`[clipboard]`](configuration.md#clipboard),
+on by default), which covers the usual case — a command copied out of a terminal
+that has since been closed.
+
+What is deliberately *not* kept: images and file drags (the point is text, not a
+silent cache of every screenshot), selections over `max_kb` (dropped whole
+rather than pasted half), and the primary selection — middle-click paste belongs
+to a text cursor that closed with the window.
+
+`fwmctl set clipboard.persist=0` turns it off live, and doing so drops whatever
+is being held. A clipboard *history* is a different feature and an external one:
+`cliphist` and friends speak `data-control`, which fwm serves.
+
 ## Nested runs
 
 fwm runs inside your session, which is how it is developed:

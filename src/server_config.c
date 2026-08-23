@@ -17,6 +17,7 @@
  * remembers (the picked wallpaper, the modes menu) without ever rewriting the
  * user's config. Split out of server.c; see server_internal.h. */
 #include "server.h"
+#include "clipboard.h"
 #include "view.h"
 #include "physics.h"
 #include "bsp.h"
@@ -670,6 +671,13 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
         if (server->desktop_mode[d] == DESKTOP_MODE_TILING) server_apply_tiling(server, d);
     }
 
+    /* The clipboard's two settings, live. Here rather than in
+     * server_reload_config because `fwmctl set clipboard.persist=0` never
+     * reaches that function — a socket set writes the value and calls this one,
+     * so anything that must follow a set belongs on this path. */
+    clipboard_configure(server->clipboard, server->config.clipboard.persist != 0,
+                        (size_t)(server->config.clipboard.max_kb * 1024.0));
+
     server_request_tray_redraw(server);
 
     /* Last: whatever this changed, the subscribers hear about it here and
@@ -721,6 +729,7 @@ void server_reload_config(FwmServer *server) {
      * their value and their on/off, so a reload does not blank the pill for an
      * interval nor undo what the menu was used to choose. */
     stats_reconfigure(server->stats, &server->config.stats);
+
     /* An open menu is a list of the OLD sensors, and the click that would arrive
      * next is indexed into it. */
     server_close_stats_menu(server);

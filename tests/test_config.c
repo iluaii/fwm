@@ -1357,9 +1357,9 @@ static void test_camera_back_and_forth(void) {
     drop_config();
 }
 
-/* [idle] is a table whose defaults DO something, which makes it worth pinning
- * hardest of all: a refactor that quietly turned blanking off would leave a
- * monitor burning all night and no test would have noticed. */
+/* [idle] and [clipboard]: two tables whose defaults DO something, which makes
+ * them the two worth pinning hardest. A refactor that quietly turned blanking
+ * off would leave a monitor burning all night and no test would have noticed. */
 static void test_idle(void) {
     CASE("[idle] defaults and values");
     FwmConfig cfg;
@@ -1412,6 +1412,36 @@ static void test_idle(void) {
     drop_config();
 }
 
+static void test_clipboard(void) {
+    CASE("[clipboard] defaults and values");
+    FwmConfig cfg;
+
+    config_load(&cfg, "/nonexistent/fwm-test.toml");
+    CHECK_INT(cfg.clipboard.persist, 1);
+    CHECK(fabs(cfg.clipboard.max_kb - 1024.0) < 0.001);
+    config_free(&cfg);
+
+    const char *p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[clipboard]\n"
+        "persist = false\n"
+        "max_kb = 64\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.clipboard.persist, 0);
+    CHECK(fabs(cfg.clipboard.max_kb - 64.0) < 0.001);
+    CHECK_INT(cfg.error_count, 0);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("an out-of-range cap is refused, not clamped silently");
+    p = write_config("[clipboard]\nmax_kb = 0\n");
+    config_load(&cfg, p);
+    CHECK(fabs(cfg.clipboard.max_kb - 1024.0) < 0.001);
+    CHECK(cfg.error_count > 0);
+    config_free(&cfg);
+    drop_config();
+}
+
 int main(void) {
     test_missing_file();
     test_values_parse();
@@ -1438,6 +1468,7 @@ int main(void) {
     test_outputs();
     test_stats();
     test_idle();
+    test_clipboard();
     test_startup();
     test_camera_back_and_forth();
     return t_report("config");

@@ -20,7 +20,8 @@ Three promises about this file:
 
 Contents: [physics](#physics) · [per-desktop physics](#per-desktop-physics) ·
 [window rules](#window-rules) · [tiling](#tiling) · [camera](#camera) ·
-[decor](#decor) · [input](#input) · [focus](#focus) · [idle](#idle) · [effects](#effects) ·
+[decor](#decor) · [input](#input) · [focus](#focus) · [idle](#idle) ·
+[clipboard](#clipboard) · [effects](#effects) ·
 [session](#session) · [binds](#binds) · [modes](#modes) · [mouse](#mouse) ·
 [gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_picker](#wallpaper_picker) ·
 [cava](#cava) · [grass](#grass) · [sound](#sound) · [volume](#volume) ·
@@ -483,6 +484,39 @@ Both timers are live through `fwmctl set idle.blank_after=…` and
 config it is reload-only. Setting `blank_after` to 0 while the screens are dark
 lights them again — the dial that put them out is the dial that brings them
 back.
+
+## clipboard
+
+```toml
+[clipboard]
+persist = true    # keep the last copied text after its window closes
+max_kb  = 1024    # biggest selection kept; larger ones are left alone
+```
+
+Wayland's clipboard is not a place where text is kept — it is a *promise* by the
+window you copied from to hand the bytes over when somebody asks. Close that
+window and the promise goes with it: copy a command out of a terminal, close the
+terminal, paste, and there is nothing there. Every desktop answers this with a
+daemon (`wl-clip-persist`, `cliphist`, `clipman`); fwm answers it here, because
+the compositor is already the one holding the promise.
+
+`persist` is fwm reading the text once, while the window is alive, and offering
+it again the moment the selection would go empty. **Text only**, deliberately:
+what this is for is the command copied out of a terminal since closed, not a
+silent cache of every image anybody ever put on the clipboard. An image or a
+file drag is left exactly as it always was, and a selection over `max_kb` is
+dropped rather than truncated — half a copied file is not a smaller copy of it.
+
+What survives is the **last thing copied, not a history**. A history is a
+different feature with a UI attached; this one has no window and no keybinding.
+Both settings are live through `fwmctl set clipboard.persist=0` and
+`clipboard.max_kb=…`, and switching persistence off drops what is being held.
+
+XWayland is included, X11's own names for the same bytes with it
+(`UTF8_STRING`, `STRING`, `TEXT`), so a paste into an X11 application that only
+knows those still works. The primary selection — middle-click paste — is not
+kept: it belongs to a text cursor that is gone with the window, and reading
+every drag-select would mean copying text nobody asked to copy.
 
 ## effects
 

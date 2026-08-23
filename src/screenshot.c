@@ -13,6 +13,7 @@
  */
 
 #include "screenshot.h"
+#include "clipboard.h"
 #include "server.h"
 #include "rotate.h"
 #include "snapshot.h"
@@ -166,137 +167,16 @@ static void toast_show(FwmServer *server, bool bad, const char *fmt, ...) {
 /* ── the clipboard ───────────────────────────────────────────────────
  *
  * fwm IS the clipboard: a compositor owns the seat's selection, so the PNG is
- * offered from here directly and there is no wl-copy to install and no
- * helper process to keep alive holding the bytes.
+ * offered from here directly and there is no wl-copy to install and no helper
+ * process to keep alive holding the bytes.
  *
- * Handing them over cannot be one blocking write. The receiving end is a pipe
- * with 64K of room and a screenshot is most of a megabyte, so a write that
- * insisted on finishing would park the whole compositor until the pasting
- * application got round to reading — and a paste into a slow application
- * would look exactly like a freeze. Each transfer therefore gets its own
- * event-loop writer and its own copy of the bytes, and the compositor keeps
- * running through all of it. */
-
-typedef struct {
-    struct wlr_data_source base;
-    struct wl_event_loop *loop;
-    unsigned char *png;
-    size_t len;
-} ShotSource;
-
-typedef struct {
-    int fd;
-    unsigned char *data;
-    size_t len, sent;
-    struct wl_event_source *src;
-} ShotXfer;
-
-static void xfer_finish(ShotXfer *x) {
-    if (x->src) wl_event_source_remove(x->src);
-    close(x->fd);
-    free(x->data);
-    free(x);
-}
-
-/* write(2) to a pipe whose reader has gone raises SIGPIPE, and the default
- * disposition of that would take the display server down with it — the same
- * trap ipc.c avoids with MSG_NOSIGNAL, which a pipe has no equivalent for.
- * Block it for the length of the call and eat the one we caused, rather than
- * ignoring SIGPIPE process-wide: that disposition survives exec, and every
- * application fwm spawns would inherit it. */
-static ssize_t write_nosigpipe(int fd, const void *buf, size_t len) {
-    sigset_t pipe_only, prev;
-    sigemptyset(&pipe_only);
-    sigaddset(&pipe_only, SIGPIPE);
-    pthread_sigmask(SIG_BLOCK, &pipe_only, &prev);
-
-    ssize_t n = write(fd, buf, len);
-    int err = errno;
-    if (n < 0 && err == EPIPE) {
-        /* Ours, and pending on this thread: take it off before unblocking. */
-        struct timespec zero = { 0, 0 };
-        while (sigtimedwait(&pipe_only, NULL, &zero) >= 0) {}
-    }
-
-    pthread_sigmask(SIG_SETMASK, &prev, NULL);
-    errno = err;
-    return n;
-}
-
-static int xfer_writable(int fd, uint32_t mask, void *data) {
-    ShotXfer *x = data;
-    if (mask & (WL_EVENT_ERROR | WL_EVENT_HANGUP)) {
-        xfer_finish(x);
-        return 0;
-    }
-    while (x->sent < x->len) {
-        ssize_t n = write_nosigpipe(fd, x->data + x->sent, x->len - x->sent);
-        if (n > 0) {
-            x->sent += (size_t)n;
-            continue;
-        }
-        if (n < 0 && (errno == EAGAIN || errno == EINTR)) return 0;  /* later */
-        break;   /* the reader gave up mid-paste; nothing to be done about it */
-    }
-    xfer_finish(x);
-    return 0;
-}
-
-static void source_send(struct wlr_data_source *source, const char *mime_type,
-                        int32_t fd) {
-    ShotSource *s = (ShotSource *)source;
-    ShotXfer *x = NULL;
-    if (strcmp(mime_type, "image/png") == 0 && s->png)
-        x = calloc(1, sizeof(*x));
-    if (!x) { close(fd); return; }
-
-    x->data = malloc(s->len);
-    if (!x->data) { free(x); close(fd); return; }
-    memcpy(x->data, s->png, s->len);
-    x->len = s->len;
-    x->fd  = fd;
-
-    /* Non-blocking, because the writer above is only allowed to write what
-     * fits right now. */
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-
-    x->src = wl_event_loop_add_fd(s->loop, fd, WL_EVENT_WRITABLE, xfer_writable, x);
-    if (!x->src) { free(x->data); free(x); close(fd); }
-}
-
-static void source_destroy(struct wlr_data_source *source) {
-    ShotSource *s = (ShotSource *)source;
-    /* Transfers in flight are NOT touched: each owns its own copy of the
-     * bytes, so a paste survives the next screenshot replacing the selection
-     * — or the session's last one being cleared. */
-    free(s->png);
-    free(s);
-}
-
-static const struct wlr_data_source_impl shot_source_impl = {
-    .send = source_send,
-    .destroy = source_destroy,
-};
-
-/* Take ownership of `png` and offer it as the selection. */
+ * The handing-over lives in src/clipboard.c, which does the same job for text
+ * a dead client left behind — one place that knows how to feed a pipe without
+ * stalling the compositor, rather than two copies of the same event-loop
+ * writer. */
 static bool clipboard_put(FwmServer *server, unsigned char *png, size_t len) {
-    ShotSource *s = calloc(1, sizeof(*s));
-    if (!s) { free(png); return false; }
-    wlr_data_source_init(&s->base, &shot_source_impl);
-    s->loop = wl_display_get_event_loop(server->wl_display);
-    s->png = png;
-    s->len = len;
-
-    char **mime = wl_array_add(&s->base.mime_types, sizeof(char *));
-    if (!mime || !(*mime = strdup("image/png"))) {
-        wlr_data_source_destroy(&s->base);   /* frees the png with it */
-        return false;
-    }
-
-    wlr_seat_set_selection(server->seat, &s->base,
-                           wl_display_next_serial(server->wl_display));
-    return true;
+    static const char *const mimes[] = { "image/png" };
+    return clipboard_offer(server->clipboard, mimes, 1, png, len);
 }
 
 /* ── reading the frame back ──────────────────────────────────────────── */

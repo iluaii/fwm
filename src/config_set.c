@@ -53,6 +53,9 @@ static const ConfigOption config_option_table[] = {
      * never blank says 0, and everything else is a coffee break. The locker's
      * command line is a string and therefore reload-only, like every other
      * string in this table. */
+    { "clipboard.persist",              CFG_OPT_INT,    offsetof(FwmConfig, clipboard.persist),               0.0,     1.0,    "1 = keep the last copied text after its window closes" },
+    { "clipboard.max_kb",               CFG_OPT_DOUBLE, offsetof(FwmConfig, clipboard.max_kb),                1.0, 65536.0,    "biggest selection kept, KB" },
+
     { "idle.blank_after",               CFG_OPT_DOUBLE, offsetof(FwmConfig, idle.blank_after),                0.0, 86400.0,    "seconds of no input before the screens go dark; 0 = never" },
     { "idle.lock_after",                CFG_OPT_DOUBLE, offsetof(FwmConfig, idle.lock_after),                 0.0, 86400.0,    "seconds before [idle] lock is run; 0 = never" },
 

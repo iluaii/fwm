@@ -454,6 +454,23 @@ typedef struct {
     char   lock[256];     /* the locker's command line; "" = no locking */
 } IdleConfig;
 
+/* ── clipboard ───────────────────────────────────────────────────────── */
+
+/*
+ * Wayland's clipboard is a promise by the window you copied from, so closing
+ * that window empties it. `persist` is fwm reading the text once, while the
+ * client is still there, and offering it again when the client is gone — see
+ * src/clipboard.h for the whole of it.
+ *
+ * Text only, and only up to `max_kb`: what this is for is the command copied
+ * out of a terminal that has since been closed, not a silent cache of every
+ * image anybody ever put on the clipboard.
+ */
+typedef struct {
+    int persist;    /* 1 = keep the last text after its window dies */
+    double max_kb;  /* biggest selection kept; larger ones are left alone */
+} ClipboardConfig;
+
 /* ── effects ─────────────────────────────────────────────────────────── */
 
 typedef struct {
@@ -1215,6 +1232,7 @@ typedef struct {
     InputConfig     input;
     FocusConfig     focus;
     IdleConfig      idle;
+    ClipboardConfig clipboard;
     EffectsConfig   effects;
     SessionConfig   session;
     StartupConfig   startup;
