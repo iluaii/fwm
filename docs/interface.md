@@ -123,6 +123,10 @@ Five sensors are built in:
 | `bat` | charge, `87%` — or `87%+` while it is filling | the machine's own battery, never a mouse's or a headset's (`scope = Device` is skipped). Sampled every ten seconds: a charge does not move faster than that |
 | `net` | what is moving right now, `↓1.2M ↑340K` | bytes per second both ways, summed over interfaces with real hardware behind them — `lo`, `docker0`, bridges and veth pairs are left out, since a bridge counts bytes its members already counted |
 
+The charge also has a half that does not wait to be looked at: see
+[`[battery]`](configuration.md#battery) for the line that appears at 15% and
+the red one at 5%.
+
 `bat` is in the default pill and `net` is not, for one reason: a sensor the
 machine cannot answer is dropped from the pill entirely, so the charge appears
 by itself on a laptop and changes nothing on a desktop — while a network rate is

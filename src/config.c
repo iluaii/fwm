@@ -1104,6 +1104,45 @@ static bool toml_number_in(toml_table_t *tbl, const char *key, double *out) {
     return false;
 }
 
+/* ── battery section ─────────────────────────────────────────────────── */
+
+static void load_battery(toml_table_t *root, FwmConfig *cfg) {
+    BatteryConfig *b = &cfg->battery;
+    memset(b, 0, sizeof(*b));
+    /* On by default and quiet on a desktop, which is the same trade the `bat`
+     * readout makes: a machine with no battery never reaches this code, and a
+     * laptop that would otherwise die mid-sentence gets told twice. */
+    b->low      = 15;
+    b->critical = 5;
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "battery");
+    if (!tbl) return;
+
+    double v;
+    if (toml_number_in(tbl, "low", &v)) {
+        if (v >= 0.0 && v <= 100.0) b->low = (int)v;
+        else config_report_error(cfg, "[battery] low %.0f out of range 0..100 — using %d",
+                                 v, b->low);
+    }
+    if (toml_number_in(tbl, "critical", &v)) {
+        if (v >= 0.0 && v <= 100.0) b->critical = (int)v;
+        else config_report_error(cfg, "[battery] critical %.0f out of range 0..100 — using %d",
+                                 v, b->critical);
+    }
+
+    toml_datum_t d = toml_string_in(tbl, "command");
+    if (d.ok) { snprintf(b->command, sizeof(b->command), "%s", d.u.s); free(d.u.s); }
+
+    /* The two thresholds the wrong way round is a config that warns you about
+     * the last 30% and never about the last 5. Reported rather than sorted out
+     * silently: which of the two the user meant is not fwm's to guess. */
+    if (b->low > 0 && b->critical > 0 && b->critical >= b->low)
+        config_report_error(cfg, "[battery] critical %d is not below low %d — "
+                                 "the critical warning will never be the first one",
+                            b->critical, b->low);
+}
+
 /* ── clipboard section ───────────────────────────────────────────────── */
 
 static void load_clipboard(toml_table_t *root, FwmConfig *cfg) {
@@ -1767,6 +1806,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_volume(NULL, cfg);
     load_idle(NULL, cfg);
     load_clipboard(NULL, cfg);
+    load_battery(NULL, cfg);
     load_mixer(NULL, cfg);
     load_stats(NULL, cfg);
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
@@ -1808,6 +1848,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_focus(root, &cfg->focus, cfg);
     load_idle(root, cfg);
     load_clipboard(root, cfg);
+    load_battery(root, cfg);
     load_effects(root, &cfg->effects);
     load_session(root, &cfg->session, cfg);
     load_startup(root, &cfg->startup, cfg);

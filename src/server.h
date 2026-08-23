@@ -33,6 +33,7 @@
 #include "physics.h"
 #include "bsp.h"
 #include "config.h"
+#include "battery.h"
 #include "star.h"
 #include "sun.h"
 #include "gestures.h"
@@ -533,6 +534,10 @@ typedef struct FwmServer {
      * keeps the locker from being started twice for one stretch of idleness;
      * `idle_woke` marks the one press that lit the screens, so it is not also
      * typed into the window under it. */
+    /* The charge watcher's memory: when the next read is due and which
+     * warnings this discharge has already used up. See battery.h. */
+    BatteryWatch battery;
+
     double idle_secs;
     int idle_blanked;
     int idle_locked;

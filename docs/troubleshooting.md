@@ -242,6 +242,30 @@ locker that is not installed the session log has the shell's complaint about it.
 numbers can (dim first, blank later, a different timeout on battery). Set
 `blank_after = 0` and `lock_after = 0` so the two are not both counting.
 
+## The battery said nothing, or says it constantly
+
+`fwmctl config | grep battery` shows both thresholds as they are now. `0` on
+either turns that warning off.
+
+**Nothing at all.** The charge has to be readable first: `fwmctl config` will
+list the thresholds either way, but `[stats]` is where you find out whether the
+machine answers — if `bat` shows a number in the tray, the warning path has the
+same number. A battery reported with `scope = Device` (a wireless mouse, a
+headset) is skipped on purpose and is not the machine's.
+
+**It warned once and then went quiet as the charge kept falling.** That is the
+design: one line per threshold per discharge. The second, red one still comes
+at `critical`.
+
+**It warns every few minutes.** Something is charging and discharging in turns —
+a dock, a worn battery reporting a percent either way — and each climb clear of
+the threshold arms the warning again. Widen the gap between `low` and where the
+charge sits, or set `low = 0` and keep only the critical one.
+
+**`command` did not run.** It runs at `critical` only, once per discharge, and
+never when `command` is empty (the default). The session log has the shell's
+complaint if the command itself failed.
+
 ## The clipboard emptied when I closed the window
 
 That is Wayland's clipboard: a promise by the window you copied from. fwm keeps

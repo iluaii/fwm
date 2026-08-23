@@ -1442,6 +1442,58 @@ static void test_clipboard(void) {
     drop_config();
 }
 
+static void test_battery(void) {
+    CASE("[battery] defaults and values");
+    FwmConfig cfg;
+
+    config_load(&cfg, "/nonexistent/fwm-test.toml");
+    CHECK_INT(cfg.battery.low, 15);
+    CHECK_INT(cfg.battery.critical, 5);
+    CHECK_STR(cfg.battery.command, "");
+    config_free(&cfg);
+
+    const char *p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[battery]\n"
+        "low = 25\n"
+        "critical = 8\n"
+        "command = \"systemctl suspend\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.battery.low, 25);
+    CHECK_INT(cfg.battery.critical, 8);
+    CHECK_STR(cfg.battery.command, "systemctl suspend");
+    CHECK_INT(cfg.error_count, 0);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("0 is how a warning is turned off, and is not an error");
+    p = write_config("[binds]\n\"super+q\" = \"killclient\"\n"
+                     "[battery]\nlow = 0\ncritical = 0\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.battery.low, 0);
+    CHECK_INT(cfg.battery.critical, 0);
+    CHECK_INT(cfg.error_count, 0);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("thresholds the wrong way round are reported, not sorted out");
+    p = write_config("[battery]\nlow = 5\ncritical = 20\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.battery.low, 5);        /* both still parsed ... */
+    CHECK_INT(cfg.battery.critical, 20);
+    CHECK(cfg.error_count > 0);           /* ... and the user told */
+    config_free(&cfg);
+    drop_config();
+
+    CASE("a percentage outside 0..100 keeps the default");
+    p = write_config("[battery]\nlow = 150\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.battery.low, 15);
+    CHECK(cfg.error_count > 0);
+    config_free(&cfg);
+    drop_config();
+}
+
 int main(void) {
     test_missing_file();
     test_values_parse();
@@ -1469,6 +1521,7 @@ int main(void) {
     test_stats();
     test_idle();
     test_clipboard();
+    test_battery();
     test_startup();
     test_camera_back_and_forth();
     return t_report("config");

@@ -354,6 +354,8 @@ Runs the software you already use: **XWayland** (X11 apps as ordinary physics wi
 
 **The screen goes out by itself.** `[idle] blank_after` (ten minutes out of the box) turns the monitors off after that long with no input, and `lock_after` runs whatever `lock` names — swaylock, gtklock, waylock, since fwm serves the session-lock protocol but does not draw a lock screen. Any key, click or touch lights the screens again, and the press that does it is spent on that rather than reaching the window underneath. An idle inhibitor freezes both timers where they stand instead of resetting them, so a film holds the screen for exactly as long as it plays. None of this displaces swayidle: it still works, on its own timers, and `blank_after = 0` hands the whole question back to it. Blanking is not `output_off` — nothing leaves the layout, no desktop is handed back, the pointer does not move, and a screen already dark for another reason is not lit by the next keystroke.
 
+**The battery says something before it stops.** `bat` in the tray is a number you have to be looking at, so [`[battery]`](docs/configuration.md#battery) is the half that comes to you: one line at the bottom of the screen at 15%, a red one at 5%, and optionally a command at the second — `systemctl suspend`, or whatever you would rather it did. Once per discharge, not once a tick: plugging in arms both again, and so does the charge climbing clear of the threshold on its own. It is the same line a screenshot uses to say where it went, and it is deliberately not a notification system — no queue, no history, nothing to click.
+
 **The clipboard survives the window you copied from.** Wayland's selection is a promise by that window to hand the bytes over later, so closing a terminal takes the command you copied out of it with it. fwm reads the text once, while the window is alive, and offers it again when the selection would go empty ([`[clipboard]`](docs/configuration.md#clipboard)) — no `wl-clip-persist` in the session. Text only and capped at `max_kb`: this is for the command you copied, not a silent cache of every image on the clipboard, and it keeps the last thing copied rather than a history. X11's names for the same bytes are offered too, so a paste into an XWayland application works the same way.
 
 **Cursor theme** is chosen rather than left to chance: `XCURSOR_THEME`/`XCURSOR_SIZE` are honoured as named, and with nothing asked for fwm goes looking for an installed theme that actually has the shapes clients ask for (resize arrows, grab hand, crosshair) instead of falling back to wlroots' built-in four. The name it settles on is exported, so GTK and Xwayland load the same one and the pointer keeps its style across windows.
@@ -875,6 +877,13 @@ blank_after = 600
 # clipboard is a promise by that window, so closing it would empty the board.
 persist = true
 max_kb  = 1024               # bigger selections are left alone, not truncated
+
+[battery]
+# A line at the bottom of the screen at 15%, a red one at 5%. Once per
+# discharge; 0 turns either off. `command` runs at the critical one only.
+low      = 15
+critical = 5
+#command = "systemctl suspend"
 
 # Per-window rules, applied once when the window opens. app_id and title are
 # POSIX extended regexes; a rule with both needs both to match, and later rules

@@ -23,6 +23,8 @@
 
 #include "stats.h"
 
+#include "battery.h"
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -51,7 +53,6 @@
 #define STATS_CMD_TIMEOUT_S 5.0
 
 #define GPU_BUSY_GLOB "/sys/class/drm/card%d/device/gpu_busy_percent"
-#define POWER_SUPPLY_DIR "/sys/class/power_supply"
 #define NET_DEV_PATH     "/proc/net/dev"
 
 /* Long enough for a machine with a wall of veth interfaces: /proc/net/dev is
@@ -86,8 +87,6 @@ struct FwmStats {
     int    cpu_primed;   /* one sample is a total, not a load: skip the first */
 
     char   gpu_path[64]; /* "" when no card exposes a busy percentage */
-
-    char   bat_path[288]; /* "" when the machine has no battery of its own */
 
     /* The counters behind the network rate, and the clock they were read on.
      * Like the CPU load this is a difference between two reads, so the first
@@ -202,66 +201,15 @@ static int sample_gpu(FwmStats *s, char *out, size_t out_size) {
     return 1;
 }
 
-/* ── the battery ─────────────────────────────────────────────────────
- *
- * The one readout on this list that is not about load, and the one a laptop
- * actually wants: a compositor that draws a status strip and leaves the charge
- * out of it sends its user to install a second bar for one number.
- *
- * `scope = Device` is what keeps a wireless mouse out of the tray. Peripherals
- * report themselves as batteries here too — hidpp_battery_0, a headset, a
- * stylus — and they are batteries, just not the one the machine runs on. A
- * supply with no `capacity` at all is skipped for the same reason: nothing to
- * show but a name. */
-static void find_battery(FwmStats *s) {
-    s->bat_path[0] = '\0';
-
-    DIR *d = opendir(POWER_SUPPLY_DIR);
-    if (!d) return;
-
-    struct dirent *e;
-    while ((e = readdir(d))) {
-        if (e->d_name[0] == '.') continue;
-
-        char path[384], buf[64];
-        snprintf(path, sizeof(path), POWER_SUPPLY_DIR "/%s/type", e->d_name);
-        if (!read_small(path, buf, sizeof(buf))) continue;
-        if (strncmp(buf, "Battery", 7) != 0) continue;
-
-        snprintf(path, sizeof(path), POWER_SUPPLY_DIR "/%s/scope", e->d_name);
-        if (read_small(path, buf, sizeof(buf)) && strncmp(buf, "Device", 6) == 0)
-            continue;   /* a mouse, not the machine */
-
-        snprintf(path, sizeof(path), POWER_SUPPLY_DIR "/%s/capacity", e->d_name);
-        if (access(path, R_OK) != 0) continue;
-
-        snprintf(s->bat_path, sizeof(s->bat_path), POWER_SUPPLY_DIR "/%s", e->d_name);
-        break;
-    }
-    closedir(d);
-}
-
 /* "87%" on the way down, "87%+" on the way up. A trailing plus rather than a
- * bolt or an arrow: the tray already gambles on two glyphs (see ui/modes.h)
- * and a charge readout is not the place to add a third — everything here has
- * to be legible in whatever "sans" resolves to on the machine. */
-static int sample_bat(FwmStats *s, char *out, size_t out_size) {
-    if (!s->bat_path[0]) return 0;
-
-    char path[sizeof(s->bat_path) + 16], buf[64];
-    snprintf(path, sizeof(path), "%s/capacity", s->bat_path);
-    if (!read_small(path, buf, sizeof(buf))) return 0;
-    int pct = atoi(buf);
-    if (pct < 0) pct = 0;
-    if (pct > 100) pct = 100;
-
-    /* "Full" is deliberately NOT a plus: a battery that has finished charging
-     * is not filling, and a plug left in overnight should read the same as one
-     * that was never in. */
-    snprintf(path, sizeof(path), "%s/status", s->bat_path);
-    int charging = read_small(path, buf, sizeof(buf)) && strncmp(buf, "Charging", 8) == 0;
-
-    snprintf(out, out_size, "%d%%%s", pct, charging ? "+" : "");
+ * bolt or an arrow: the tray already gambles on two glyphs (see ui/modes.h) and
+ * a charge readout is not the place to add a third — everything here has to be
+ * legible in whatever "sans" resolves to on the machine. Where the number comes
+ * from, and why a wireless mouse is not it, is battery.c's business. */
+static int sample_bat(char *out, size_t out_size) {
+    BatteryReading r;
+    if (!battery_read(&r) || !r.present) return 0;
+    snprintf(out, out_size, "%d%%%s", r.percent, r.charging ? "+" : "");
     return 1;
 }
 
@@ -545,9 +493,12 @@ void stats_reconfigure(FwmStats *s, const StatsConfig *cfg) {
         }
         if (it->pub.source == STATS_SRC_GPU && !s->gpu_path[0]) it->pub.available = 0;
         /* A desktop has no battery, and the menu greys the row out rather than
-         * leaving a readout that never fills in. Looked for once per reload,
-         * not once per sample: a machine does not grow one. */
-        if (it->pub.source == STATS_SRC_BAT && !s->bat_path[0]) it->pub.available = 0;
+         * leaving a readout that never fills in. Asked once per reload, not
+         * once per sample: a machine does not grow one. */
+        if (it->pub.source == STATS_SRC_BAT) {
+            BatteryReading r;
+            if (!battery_read(&r)) it->pub.available = 0;
+        }
         if (it->pub.source == STATS_SRC_NET && access(NET_DEV_PATH, R_OK) != 0)
             it->pub.available = 0;
 
@@ -573,7 +524,6 @@ FwmStats *stats_create(const StatsConfig *cfg) {
     FwmStats *s = calloc(1, sizeof(*s));
     if (!s) return NULL;
     find_gpu(s);
-    find_battery(s);
     stats_reconfigure(s, cfg);
     return s;
 }
@@ -624,7 +574,7 @@ bool stats_tick(FwmStats *s, double dt) {
              * repainted when a value actually changes, so a slower sensor is
              * also a quieter one. */
             it->due = BAT_PERIOD_S;
-            have = sample_bat(s, value, sizeof(value));
+            have = sample_bat(value, sizeof(value));
             break;
         case STATS_SRC_NET:
             it->due = BUILTIN_PERIOD_S;

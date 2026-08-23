@@ -124,6 +124,7 @@ set(SOURCES
     src/wav.c
     src/ram.c
     src/stats.c
+    src/battery.c
     src/view.c
     src/view_effects.c
     src/rotate.c
@@ -404,7 +405,7 @@ if(FWM_TESTS)
     # place the process handling can be checked at all: a leaked child or a
     # blocking read shows up here and nowhere else. It reaches wlroots for its
     # log line and for nothing else.
-    add_executable(test_stats tests/test_stats.c src/stats.c)
+    add_executable(test_stats tests/test_stats.c src/stats.c src/battery.c)
     target_include_directories(test_stats PRIVATE src tests ${WLROOTS_INCLUDE_DIRS}
         ${WAYLAND_SERVER_INCLUDE_DIRS} ${PIXMAN_INCLUDE_DIRS} ${XKBCOMMON_INCLUDE_DIRS})
     target_compile_definitions(test_stats PRIVATE WLR_USE_UNSTABLE)

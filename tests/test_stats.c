@@ -22,12 +22,15 @@
 
 #include "test.h"
 #include "stats.h"
+#include "battery.h"
 
 #include <string.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 
 /* Drive the engine as the frame loop would, for at most `budget` seconds of
  * simulated time, until `name` has a value. Real time passes too (the child has
@@ -252,6 +255,121 @@ static void test_battery_and_network(void) {
     stats_destroy(s);
 }
 
+/* The charge watcher: when it speaks, and — the part that matters — when it
+ * shuts up. A warning that repeats every ten seconds is one people turn off,
+ * which leaves them with no warning at all. Driven with a battery-free machine
+ * in mind: where there is nothing to read, battery_watch must answer NONE
+ * forever and cost nothing, and that is what runs in CI. */
+static void test_battery_watch(void) {
+    CASE("a machine with no battery is never warned about one");
+    BatteryConfig cfg = { .low = 15, .critical = 5, .command = "" };
+    BatteryWatch w = {0};
+
+    BatteryReading r;
+    int has_battery = battery_read(&r) && r.present;
+
+    if (!has_battery) {
+        for (int i = 0; i < 20; i++)
+            CHECK_INT(battery_watch(&w, &cfg, 11.0, NULL), BATTERY_ALERT_NONE);
+    }
+
+    CASE("thresholds off mean silence whatever the charge is");
+    BatteryConfig off = { .low = 0, .critical = 0, .command = "" };
+    w = (BatteryWatch){0};
+    for (int i = 0; i < 5; i++)
+        CHECK_INT(battery_watch(&w, &off, 11.0, NULL), BATTERY_ALERT_NONE);
+
+    CASE("a read only happens when it is due");
+    w = (BatteryWatch){0};
+    /* Ten seconds apart, so nine one-second ticks must not sample at all — the
+     * `due` countdown is the whole of the cost control here. */
+    battery_watch(&w, &cfg, 0.0, NULL);        /* first call: due, and sampled */
+    double before = w.due;
+    battery_watch(&w, &cfg, 1.0, NULL);
+    CHECK(w.due < before);                     /* counted down ... */
+    CHECK(w.due > 0.0);                        /* ... and not re-armed */
+}
+
+/* The rules themselves, over a battery of our own: FWM_BATTERY_DIR points the
+ * reader at two files we write, so a discharge that would take a laptop four
+ * hours takes four lines here. */
+static void write_file(const char *dir, const char *name, const char *body) {
+    char path[512];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fputs(body, f);
+    fclose(f);
+}
+
+static void set_charge(const char *dir, int pct, int charging) {
+    char n[16];
+    snprintf(n, sizeof(n), "%d\n", pct);
+    write_file(dir, "capacity", n);
+    write_file(dir, "status", charging ? "Charging\n" : "Discharging\n");
+}
+
+static void test_battery_thresholds(void) {
+    CASE("a discharge warns twice and repeats neither");
+    char dir[256];
+    snprintf(dir, sizeof(dir), "/tmp/fwm-test-battery-%d", (int)getpid());
+    if (mkdir(dir, 0700) != 0 && errno != EEXIST) return;
+    setenv("FWM_BATTERY_DIR", dir, 1);
+
+    BatteryConfig cfg = { .low = 15, .critical = 5, .command = "" };
+    BatteryWatch w = {0};
+    int pct = 0;
+
+    /* Comfortable: nothing to say, however many times it is asked. */
+    set_charge(dir, 80, 0);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_NONE);
+    CHECK_INT(pct, 80);
+
+    /* Down through the first threshold: said once, then not again while it
+     * sits there — the failure mode this whole test exists for. */
+    set_charge(dir, 14, 0);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_LOW);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_NONE);
+    set_charge(dir, 13, 0);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_NONE);
+
+    /* And through the second. */
+    set_charge(dir, 4, 0);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_CRITICAL);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_NONE);
+
+    CASE("the plug going in arms both warnings again");
+    set_charge(dir, 30, 1);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_NONE);
+    set_charge(dir, 12, 0);   /* unplugged again, already low */
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_LOW);
+
+    CASE("a fall past both thresholds says the worse one, once");
+    w = (BatteryWatch){0};
+    set_charge(dir, 60, 0);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_NONE);
+    set_charge(dir, 3, 0);    /* asleep through the middle of the range */
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_CRITICAL);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_NONE);
+
+    CASE("climbing clear of a threshold arms it again without a charger");
+    w = (BatteryWatch){0};
+    set_charge(dir, 15, 0);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_LOW);
+    set_charge(dir, 16, 0);   /* inside the margin: still the same warning */
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_NONE);
+    set_charge(dir, 25, 0);   /* well clear: armed */
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_NONE);
+    set_charge(dir, 15, 0);
+    CHECK_INT(battery_watch(&w, &cfg, 11.0, &pct), BATTERY_ALERT_LOW);
+
+    unsetenv("FWM_BATTERY_DIR");
+    char path[512];
+    snprintf(path, sizeof(path), "%s/capacity", dir); unlink(path);
+    snprintf(path, sizeof(path), "%s/status", dir);   unlink(path);
+    rmdir(dir);
+}
+
 int main(void) {
     test_builtins();
     test_custom_command();
@@ -259,5 +377,7 @@ int main(void) {
     test_slow_command();
     test_reconfigure_keeps_values();
     test_battery_and_network();
+    test_battery_watch();
+    test_battery_thresholds();
     return t_report("stats");
 }

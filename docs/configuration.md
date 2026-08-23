@@ -21,7 +21,7 @@ Three promises about this file:
 Contents: [physics](#physics) · [per-desktop physics](#per-desktop-physics) ·
 [window rules](#window-rules) · [tiling](#tiling) · [camera](#camera) ·
 [decor](#decor) · [input](#input) · [focus](#focus) · [idle](#idle) ·
-[clipboard](#clipboard) · [effects](#effects) ·
+[clipboard](#clipboard) · [battery](#battery) · [effects](#effects) ·
 [session](#session) · [binds](#binds) · [modes](#modes) · [mouse](#mouse) ·
 [gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_picker](#wallpaper_picker) ·
 [cava](#cava) · [grass](#grass) · [sound](#sound) · [volume](#volume) ·
@@ -517,6 +517,39 @@ XWayland is included, X11's own names for the same bytes with it
 knows those still works. The primary selection — middle-click paste — is not
 kept: it belongs to a text cursor that is gone with the window, and reading
 every drag-select would mean copying text nobody asked to copy.
+
+## battery
+
+```toml
+[battery]
+low      = 15                    # % at or below which the plain line shows; 0 = never
+critical = 5                     # % for the red one; 0 = never
+command  = "systemctl suspend"   # run once when critical is crossed; "" = nothing
+```
+
+When the machine interrupts you about its charge. The `bat` sensor in
+[`[stats]`](interface.md#the-stats-menu) is a number you have to be looking at
+to see; this is the one that comes to you — one line at the bottom of the
+screen, the same line a screenshot uses to say where it went, held for about
+two seconds and gone. There is no notification daemon in fwm and this is not
+one: no queue, no history, nothing to click.
+
+Two thresholds because they mean different things — "finish what you are
+doing" and "it is about to stop" — and only the second one may run a command,
+since suspending a machine is not a thing to do at 15%. `command` is empty by
+default: what should happen at 3% is your call, not fwm's.
+
+**Said once per discharge.** Plugging in clears both warnings, so unplugging
+arms them again; so does the charge climbing clear of a threshold by a few
+percent on its own, which happens when a heavy load lets up. A fall straight
+past both between two reads says the worse of the two once, rather than both in
+a row. The charge is read every ten seconds — it does not move faster than
+that, and a machine with no battery reads nothing at all.
+
+`critical` at or above `low` is reported as a config problem rather than
+silently swapped: which of the two you meant is not fwm's to guess. Both
+thresholds are live through `fwmctl set battery.low=…`; the command is a
+string, so like every other string here it is reload-only.
 
 ## effects
 

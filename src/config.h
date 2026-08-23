@@ -454,6 +454,26 @@ typedef struct {
     char   lock[256];     /* the locker's command line; "" = no locking */
 } IdleConfig;
 
+/* ── battery ─────────────────────────────────────────────────────────── */
+
+/*
+ * When a laptop should interrupt you about its charge.
+ *
+ * The tray's `bat` readout is a number you have to be looking at; this is the
+ * one that comes to you. Two thresholds rather than one because they mean
+ * different things — "finish what you are doing" and "it is about to stop" —
+ * and only the second one is allowed to run a command, since suspending a
+ * machine is not something to do at 15%.
+ *
+ * Either at 0 turns that warning off. A machine with no battery never reads
+ * any of this.
+ */
+typedef struct {
+    int  low;         /* % at or below which the first warning shows; 0 = never */
+    int  critical;    /* ... and the second, red one; 0 = never */
+    char command[256];/* run once when critical is crossed; "" = nothing */
+} BatteryConfig;
+
 /* ── clipboard ───────────────────────────────────────────────────────── */
 
 /*
@@ -1233,6 +1253,7 @@ typedef struct {
     FocusConfig     focus;
     IdleConfig      idle;
     ClipboardConfig clipboard;
+    BatteryConfig   battery;
     EffectsConfig   effects;
     SessionConfig   session;
     StartupConfig   startup;

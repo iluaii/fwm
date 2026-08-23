@@ -17,6 +17,7 @@
  * renderer draws), and the two timers that pace the compositor when nothing
  * else is damaging the scene. Split out of server.c; see server_internal.h. */
 #include "server.h"
+#include "ui/toast.h"
 #include "view.h"
 #include "physics.h"
 #include "layer.h"
@@ -1950,6 +1951,32 @@ static int physics_tick_cb(void *data) {
      * it reads the flag that call just set, so a film that started this tick
      * holds the screen from this tick. */
     server_idle_tick(server, elapsed);
+
+    /* And the charge. A line at the bottom of the screen rather than a number
+     * in the corner, because the number in the corner is one you have to
+     * already be looking at — and the moment worth interrupting somebody over
+     * is exactly the moment they are looking at something else. */
+    {
+        int pct = 0;
+        switch (battery_watch(&server->battery, &server->config.battery, elapsed, &pct)) {
+        case BATTERY_ALERT_LOW:
+            wlr_log(WLR_INFO, "battery: %d%% — low", pct);
+            toast_show(server, false, "Battery low — %d%%", pct);
+            break;
+        case BATTERY_ALERT_CRITICAL:
+            wlr_log(WLR_INFO, "battery: %d%% — critical", pct);
+            toast_show(server, true, "Battery critical — %d%%", pct);
+            /* The one warning allowed to act rather than only speak. Once per
+             * discharge, like the line itself: a suspend command that fired
+             * every ten seconds would fight whoever was trying to plug the
+             * machine in. */
+            if (server->config.battery.command[0])
+                server_spawn(server->config.battery.command);
+            break;
+        case BATTERY_ALERT_NONE:
+            break;
+        }
+    }
 
     // Parallax: shift each wallpaper layer by a fraction of its own monitor's
     // camera offset.

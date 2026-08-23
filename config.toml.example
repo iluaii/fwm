@@ -393,6 +393,26 @@ back_and_forth = true
 [focus]
 on_activate = "same_desktop"
 
+# When the laptop should interrupt you about its charge.
+#
+# The `bat` readout in [stats] is a number you have to be looking at; this is
+# the one that comes to you — a line at the bottom of the screen, held for a
+# couple of seconds, with no notification daemon involved.
+#
+# low       % at or below which the plain line shows. 0 = never.
+# critical  % for the red one. 0 = never.
+# command   run ONCE when critical is crossed. Empty = nothing runs, which is
+#           the default: suspending a machine is not something to do without
+#           being asked for it.
+#
+# Said once per discharge, not once a tick: plugging in arms both warnings
+# again, and so does the charge climbing a few percent clear of the threshold
+# on its own. A machine with no battery reads none of this.
+[battery]
+low      = 15
+critical = 5
+#command = "systemctl suspend"
+
 # What an unattended session does with itself.
 #
 # fwm speaks ext-idle-notify, so swayidle can drive this from outside and still
