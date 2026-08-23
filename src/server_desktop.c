@@ -34,6 +34,7 @@
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "group.h"
+#include "expo.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -218,9 +219,44 @@ void server_move_view_to_desktop(FwmServer *server, FwmView *view, int target,
     int src = b ? b->desktop_id : view->x / server->screen_width;
     if (src == target) return;
 
+    /* Between the two ends of a closed ring this is one step, not nine: the
+     * camera jumps the join rather than sliding back across every desktop in
+     * between, and a window crossing it goes the same way — there is no
+     * picture of the join to fly through, so there is nothing to fly through
+     * it. */
+    int seam = server->config.camera.wrap
+            && ((src == FWM_DESKTOPS - 1 && target == 0)
+             || (src == 0 && target == FWM_DESKTOPS - 1));
+
     /* A tab-stack is a single stack on a single desktop; pulling a member out
      * of it is the only sensible reading of "move this window away". */
-    if (view->group) group_remove(server, view);
+    if (view->group) {
+        group_remove(server, view);
+        /* Popping the front window out of a stack hands the stack's physics
+         * body to whichever tab came up behind it (group.c), so the body this
+         * window had a line ago is not its own any more — and it may have none
+         * at all until the next commit builds one. */
+        b = physics_find_body(&server->physics, view->id);
+    }
+
+    /* A send moves a window a whole screen at least, and moving it there
+     * outright is a teleport: the window is simply gone, and on the desktop it
+     * landed on it was simply always there. So the bookkeeping below happens
+     * at once — the layouts, the focus, the body's desktop — and the flight
+     * armed at the end walks only the PICTURE back to where the window stood
+     * and eases it across the strip.
+     *
+     * Never the window in your hand: a drag owns its position frame by frame
+     * and would spend the whole flight fighting it for the same field. That
+     * one still teleports, and still carries its wobble with it. Nor under
+     * expo, which has every desktop on screen at once and moves a window by
+     * carrying its card there — a flight would be a second, contradictory
+     * picture of the same move, drawn from the position the card is read
+     * back from. */
+    int animate = b && !seam && server->config.camera.anim_ms > 0.0
+               && server->interactive.view != view && !expo_active(server);
+    double from_x = b ? b->x : (double)view->x;
+    double from_y = b ? b->y : (double)view->y;
 
     /* Leave the old layout before the coordinates move, or the re-tile would
      * lay out the window that is on its way out. */
@@ -242,10 +278,13 @@ void server_move_view_to_desktop(FwmServer *server, FwmView *view, int target,
     } else {
         view->x += (target - src) * server->screen_width;
     }
-    view->tile_anim = 0;
+    view->tile_anim = TILE_ANIM_NONE;
     /* Sent a screen sideways without travelling: a window still wobbling from
-     * the drag that sent it must not be shoved by the coordinate change. */
-    view_jelly_carry(view, (double)(target - src) * server->screen_width, 0.0);
+     * the drag that sent it must not be shoved by the coordinate change. A
+     * flight is not a coordinate change — it travels, and the wobble is
+     * entitled to feel it. */
+    if (!animate)
+        view_jelly_carry(view, (double)(target - src) * server->screen_width, 0.0);
     view_sync_position(view);
 
     if (server->desktop_mode[target] == DESKTOP_MODE_TILING) {
@@ -259,17 +298,40 @@ void server_move_view_to_desktop(FwmServer *server, FwmView *view, int target,
          * arrival handler from handing the keyboard to whatever else lives on
          * the destination. */
         server->focus_desktop = target;
-        /* Between the two ends of a closed ring this is one step, not nine:
-         * jump the join and slide across it, the same as any other step. */
-        int seam = server->config.camera.wrap
-                && ((src == FWM_DESKTOPS - 1 && target == 0)
-                 || (src == 0 && target == FWM_DESKTOPS - 1));
+        /* At the ring's join that is one step, not nine — jump it and slide
+         * across the jump, the same as any other step (see `seam` above). */
         server_goto_desktop(server, target, seam);
         server_focus_view(server, view);
     } else if (server->focused_view == view) {
         /* The camera stays put (i3/sway convention: moving is not following),
          * so the keyboard must not follow the window off-screen either. */
         server_refocus(server, src, view);
+    }
+
+    /* Last, so the window flies to whatever everything above settled on: a tile
+     * slot on the destination, the nudge a monitor change applied to it, or
+     * just the same spot one desktop over. */
+    if (animate) {
+        view->tile_tx = view->tile_anim ? view->tile_tx : b->x;
+        view->tile_ty = view->tile_anim ? view->tile_ty : b->y;
+        view->tile_fx = from_x;
+        view->tile_fy = from_y;
+        view->tile_t = 0.0;
+        view->tile_anim = TILE_ANIM_FLIGHT;
+        /* Back where it stood — the picture, and only the picture. The body
+         * goes on saying `target` for the whole crossing: a physics step
+         * derives a desktop from a position and would hand back whichever
+         * column the window is passing over, which is the right answer for a
+         * window dragged across the boundary by hand and the wrong one for a
+         * window that has already been sent (flight_desktop, server_tick.c). */
+        b->x = from_x;
+        b->y = from_y;
+        view->x = (int)lround(from_x);
+        view->y = (int)lround(from_y);
+        /* A key press has already left the idle heartbeat behind; a send that
+         * came down the control socket has not, and would spend its first
+         * fifth of a second standing still. */
+        server_tick_wake(server);
     }
 
     server_request_tray_redraw(server);

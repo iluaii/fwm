@@ -142,7 +142,12 @@ static void tile_move_to(FwmServer *server, FwmView *view, PhysicsBody *pb, int 
     if (!view) { pb->x = nx; pb->y = ny; return; }
 
     if (animate) {
-        view->tile_anim = 1;
+        /* A window still crossing the strip toward this desktop keeps its
+         * flight and is simply re-aimed: the layout it is arriving into may
+         * shuffle a slot out from under it mid-air, and dropping to the glide
+         * there would hand a screen-wide crossing to the curve that cannot
+         * carry one. */
+        if (view->tile_anim != TILE_ANIM_FLIGHT) view->tile_anim = TILE_ANIM_GLIDE;
         view->tile_tx = nx;
         view->tile_ty = ny;
     } else {

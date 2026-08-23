@@ -234,10 +234,18 @@ way out and back.
 
 ```toml
 [camera]
-anim_ms    = 350.0  # desktop-switch slide; 0 = instant
+anim_ms    = 350.0  # desktop-switch slide, and a sent window's flight; 0 = instant
 free_speed = 14.0   # how tightly a held move_camera follows, 1/s
 wrap       = false  # the strip is a ring
 ```
+
+`anim_ms` times the camera's slide between desktops, and with it the flight of
+a window sent to one (`move_to:`, `move_to_view:`): the window crosses the strip
+on the camera's own curve rather than disappearing from one desktop and being
+found on another. Sent with `move_to_view:` it therefore travels alongside the
+camera and stands still on the screen while the world slides under it. At `0`
+both are instant. The ring's join is the exception — there is no picture of it
+to fly through, so a window crossing it is put down on the far side.
 
 `wrap` closes the strip into a ring: stepping right off the last desktop arrives
 at the first, and a window thrown off one end flies on and appears at the other.

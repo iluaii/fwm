@@ -34,6 +34,13 @@ typedef enum {
     FWM_VIEW_XWAYLAND, /* X11 window under Xwayland */
 } FwmViewType;
 
+/* What a window's tile_anim is doing (see FwmView below). */
+typedef enum {
+    TILE_ANIM_NONE = 0,
+    TILE_ANIM_GLIDE,   /* eased toward a slot on its own desktop */
+    TILE_ANIM_FLIGHT,  /* sent across the strip to another desktop */
+} FwmTileAnim;
+
 typedef struct FwmView {
     uint32_t id; /* Unique ID matching the ID in physics */
     FwmViewType type;
@@ -61,9 +68,26 @@ typedef struct FwmView {
     int width, height;
 
     /* Tile-glide animation: when tile_anim is set, the physics tick eases the
-     * window toward (tile_tx, tile_ty) instead of snapping it there. */
+     * window toward (tile_tx, tile_ty) instead of snapping it there.
+     *
+     * GLIDE is a move within a desktop — a re-tile, a window pulled back onto
+     * a screen — and chases the target exponentially, which is right for a
+     * short hop of unpredictable length.
+     *
+     * FLIGHT is a window SENT to another desktop, which is a screen or more of
+     * travel and needs the other curve: an exponential chase over that
+     * distance spends nearly all of it in the first two frames, so a window
+     * sent six desktops away left the screen within a frame and was a teleport
+     * again. A flight is a timed cubic ease-in-out from (tile_fx, tile_fy) over
+     * [camera] anim_ms — the camera's own curve and the camera's own duration,
+     * so a window that travels WITH the camera (move_to_view:) sits still on
+     * the screen while the world slides under it, and one sent without you
+     * leaves at the speed a desktop switch moves at. `tile_t` is how far
+     * through it is, 0..1. */
     int tile_anim;
     double tile_tx, tile_ty;
+    double tile_fx, tile_fy;
+    double tile_t;
 
     /* Size this view was last aligned against. The layout re-runs when a
      * client commits a different one; without this it would re-run on every

@@ -240,6 +240,7 @@ void server_move_view_to_desktop(FwmServer *server, FwmView *view, int target,
 void server_input_register(FwmServer *server);
 uint32_t get_active_modifiers(FwmServer *server);
 void server_notify_activity(FwmServer *server);
+void server_tick_wake(FwmServer *server);
 void launcher_grab_sync(FwmServer *server, bool was_open);
 void radial_grab_sync(FwmServer *server, bool was_open);
 void mixer_grab_sync(FwmServer *server, bool was_open);

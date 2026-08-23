@@ -290,7 +290,10 @@ gaps_out   = 14
 anim_speed = 12.0
 pickup     = 0.28
 
-# Desktop-switch camera slide (ease-in-out). 0 = instant snap.
+# Desktop-switch camera slide (ease-in-out). 0 = instant snap. A window SENT to
+# another desktop (move_to:, move_to_view:) crosses the strip on the same curve
+# over the same time, so it flies there instead of vanishing; at 0 it is put
+# down on the far desktop outright, as it always was.
 # free_speed is a different motion: how tightly the camera follows a HELD
 # move_camera: bind (1/s, higher = tighter, lower = more coasting).
 # wrap makes the ten desktops a ring: going right off the last one arrives on

@@ -103,10 +103,20 @@ void server_notify_activity(FwmServer *server) {
         wlr_idle_notifier_v1_notify_activity(server->idle_notifier, server->seat);
     }
     /* Input may set something moving (a throw, a drag, a bind), so leave the
-     * idle heartbeat at once rather than waiting it out.
-     * ONLY on the idle->busy edge: re-arming the timer on every motion event
-     * would push its expiry out again each time, and a 1000Hz mouse would
-     * starve the tick completely. */
+     * idle heartbeat at once rather than waiting it out. */
+    server_tick_wake(server);
+}
+
+/* Something that has to be drawn frame by frame just started. Between two of
+ * them the tick drops to a 200ms heartbeat, and an animation armed in that gap
+ * would stand still for up to a fifth of a second before its first frame —
+ * which is what a window sent to another desktop by `fwmctl` (rather than by a
+ * key, which comes through the input path above) did.
+ *
+ * ONLY on the idle->busy edge: re-arming the timer on every motion event would
+ * push its expiry out again each time, and a 1000Hz mouse would starve the
+ * tick completely. */
+void server_tick_wake(FwmServer *server) {
     if (server->tick_idle && server->physics_timer) {
         server->tick_idle = 0;
         wl_event_source_timer_update(server->physics_timer, 1);

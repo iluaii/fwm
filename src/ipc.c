@@ -208,6 +208,20 @@ static const char *mode_name(int m) {
     return (m >= 0 && m <= 2) ? names[m] : "?";
 }
 
+/* Which desktop a window is ON, for every report that names one.
+ *
+ * The body's answer, not the picture's: a window sent to another desktop is
+ * put there at once and then shown crossing the strip (server_desktop.c), and
+ * for the third of a second that takes, dividing its x by the screen width
+ * would report the desktop it is flying OVER — so a script that asked for the
+ * move would be told it had not happened. `x` still says where the window is
+ * being drawn, which is the other half of the truth. */
+static int view_desktop(FwmServer *server, FwmView *view) {
+    PhysicsBody *body = physics_find_body(&server->physics, view->id);
+    if (body) return body->desktop_id;
+    return server->screen_width > 0 ? view->x / server->screen_width : 0;
+}
+
 /* One window, in full. Shared by `windows` and by the reply to a `window`
  * change, so a script can see the result of what it just asked for without a
  * round trip — the same bargain `output` and `outputs` make. */
@@ -218,8 +232,7 @@ static void buf_window(struct Buf *b, FwmServer *server, FwmView *view) {
     buf_json_string(b, view_app_id(view));
     buf_printf(b, ",\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d",
                view->x, view->y, view->width, view->height);
-    buf_printf(b, ",\"desktop\":%d", server->screen_width > 0
-                                     ? view->x / server->screen_width : 0);
+    buf_printf(b, ",\"desktop\":%d", view_desktop(server, view));
     buf_printf(b, ",\"focused\":%s", view == server->focused_view ? "true" : "false");
     /* Physics flags: the only way to see whether a [[rule]] (or a manual
      * toggle) actually took hold on this window. */
@@ -774,6 +787,10 @@ static void cmd_window(FwmServer *server, const char *arg, struct Buf *b) {
             body->vx = body->vy = 0;
             body->flying = 0;
         }
+        /* Put HERE beats on the way somewhere else: a desktop= in the same
+         * request has just armed a flight across the strip, and leaving it
+         * armed would carry the window off the spot this asked for. */
+        view->tile_anim = TILE_ANIM_NONE;
         /* And the window itself, rather than waiting for the tick to notice.
          * Not merely for a truthful reply: the tick does not carry a PINNED
          * body back to its view at all — being pinned is what "the simulation
@@ -1209,8 +1226,7 @@ void ipc_emit_window(FwmIpc *ipc, uint32_t event, struct FwmView *view) {
         buf_json_string(&b, view_title(view));
         buf_puts(&b, ",\"app_id\":");
         buf_json_string(&b, view_app_id(view));
-        buf_printf(&b, ",\"desktop\":%d",
-                   server->screen_width > 0 ? view->x / server->screen_width : 0);
+        buf_printf(&b, ",\"desktop\":%d", view_desktop(server, view));
         buf_puts(&b, "}\n");
     }
 

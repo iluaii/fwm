@@ -882,7 +882,7 @@ static void desktop_refit_clamp(FwmServer *server, int d) {
          * for being put somewhere it did not walk to. */
         v->tile_tx = x;
         v->tile_ty = y;
-        v->tile_anim = 1;
+        v->tile_anim = TILE_ANIM_GLIDE;
     }
 }
 

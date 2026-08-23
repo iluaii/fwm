@@ -100,7 +100,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `tile_move:l|r|u|d` | move the window inside the layout |
 | `view:<0-9>` | show that desktop; asking for the one already on screen returns to the one before it (`[camera] back_and_forth`) |
 | `view:back` | that same way back, whatever desktop is on screen now |
-| `move_to:<0-9>` | send the focused window there |
+| `move_to:<0-9>` | send the focused window there — it flies across the strip rather than vanishing (`[camera] anim_ms`) |
 | `move_to_view:next|prev` | send the focused window one desktop over (`next`/`prev` relative to the one on screen) |
 | `move_camera:<px>` | pan by that many px (negative = left); holdable |
 | `expo` | the desktop strip |

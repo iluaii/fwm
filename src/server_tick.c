@@ -1380,6 +1380,22 @@ void server_camera_settled(FwmServer *server) {
     }
 }
 
+/* The desktop a window in flight belongs to: the one its DESTINATION sits in.
+ *
+ * The step derives a body's desktop from where the body is, which is right for
+ * a window drifting or dragged across the boundary and wrong for one that was
+ * sent: a send is decided when the key is pressed, and the layouts, the focus
+ * and the bsp tree the window now sits in were all settled against that answer
+ * while the picture is still catching up. Read off tile_tx rather than kept in
+ * a field of its own, so re-aiming a flight (server_tiling.c) re-aims this too. */
+static int flight_desktop(FwmServer *server, FwmView *view) {
+    if (server->screen_width <= 0) return 0;
+    int d = (int)((view->tile_tx + view->width / 2.0) / server->screen_width);
+    if (d < 0) d = 0;
+    if (d >= FWM_DESKTOPS) d = FWM_DESKTOPS - 1;
+    return d;
+}
+
 static int physics_tick_cb(void *data) {
     FwmServer *server = data;
 
@@ -1575,25 +1591,50 @@ static int physics_tick_cb(void *data) {
     // Tile-glide animations: ease windows toward their tile slots (Hyprland-
     // style) instead of teleporting. Exponential approach is frame-rate
     // independent; the physics bridge sees these as external writes and keeps
-    // the Box2D body glued to the glide.
+    // the Box2D body glued to the glide. A window sent to another desktop is
+    // the same machinery on a timed curve — see tile_anim in view.h.
     {
         double k = 1.0 - exp(-server->config.tiling.anim_speed * dt);
+        double cam_ms = server->config.camera.anim_ms;
         FwmView *av;
         wl_list_for_each(av, &server->views, link) {
             if (!av->tile_anim) continue;
             PhysicsBody *pb = physics_find_body(&server->physics, av->id);
             if (!pb) { av->tile_anim = 0; continue; }
             int settled = 0;
-            double dx = av->tile_tx - pb->x;
-            double dy = av->tile_ty - pb->y;
-            if (fabs(dx) < 1.0 && fabs(dy) < 1.0) {
-                pb->x = av->tile_tx;
-                pb->y = av->tile_ty;
-                av->tile_anim = 0;
-                settled = 1;
+            if (av->tile_anim == TILE_ANIM_FLIGHT) {
+                /* A window crossing the strip rides the camera's curve, for
+                 * the whole of the camera's duration — see tile_anim in
+                 * view.h. Cubic ease-in-out, the same one server_goto_desktop's
+                 * slide is drawn with, written out again here rather than
+                 * shared: this eases a pair of doubles in world coordinates and
+                 * that one eases an integer camera, and the two have wandered
+                 * apart before. */
+                av->tile_t += cam_ms > 0.0 ? dt * 1000.0 / cam_ms : 1.0;
+                double t = av->tile_t;
+                if (t >= 1.0) {
+                    pb->x = av->tile_tx;
+                    pb->y = av->tile_ty;
+                    av->tile_anim = 0;
+                    settled = 1;
+                } else {
+                    double e = t < 0.5 ? 4.0 * t * t * t
+                                       : 1.0 - pow(-2.0 * t + 2.0, 3.0) / 2.0;
+                    pb->x = av->tile_fx + (av->tile_tx - av->tile_fx) * e;
+                    pb->y = av->tile_fy + (av->tile_ty - av->tile_fy) * e;
+                }
             } else {
-                pb->x += dx * k;
-                pb->y += dy * k;
+                double dx = av->tile_tx - pb->x;
+                double dy = av->tile_ty - pb->y;
+                if (fabs(dx) < 1.0 && fabs(dy) < 1.0) {
+                    pb->x = av->tile_tx;
+                    pb->y = av->tile_ty;
+                    av->tile_anim = 0;
+                    settled = 1;
+                } else {
+                    pb->x += dx * k;
+                    pb->y += dy * k;
+                }
             }
             pb->vx = 0; pb->vy = 0; pb->flying = 0;
             av->x = pb->x;
@@ -1806,6 +1847,8 @@ static int physics_tick_cb(void *data) {
                 view->y = body->y;
                 server_place_view(server, view, body->x, body->y);
             }
+            if (body && view->tile_anim == TILE_ANIM_FLIGHT)
+                body->desktop_id = flight_desktop(server, view);
         }
         /* Which screen a panel sees this window on. Here because a window
          * changes desktop by crossing the seam under its own momentum — there
