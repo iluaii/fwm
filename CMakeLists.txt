@@ -130,6 +130,7 @@ set(SOURCES
     src/snapshot.c
     src/screenshot.c
     src/clipboard.c
+    src/ui/toast.c
     src/expo.c
     src/expo_geom.c
     src/expo_cards.c
