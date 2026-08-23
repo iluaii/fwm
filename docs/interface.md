@@ -148,6 +148,27 @@ to say.
 draws real icons from your icon theme (`[decor] icon_theme`, or auto-detected from
 the gtk3 setting and then hicolor).
 
+Filtering tries to be the shape of what people type rather than a substring
+test. A row is matched on its name first, then on what it does not display —
+its generic name, its `Keywords=`, and the program its `Exec=` runs, which is
+why `browser` finds Firefox and `nvim` finds Neovim. Failing both, the letters
+count if they appear in order with gaps between them (`ffx`), fenced so that
+three letters cannot "match" a two-hundred-character filename in the wallpaper
+folder. Everything is compared case-folded and stripped of accents, so `БРАУЗ`
+finds `Веб-браузер` and `telegram` finds `Télégram` — and the name a row shows
+is the one your locale asks for, `Name[ru]` ahead of `Name`, which is what puts
+the Russian names in the list to be searched at all.
+
+Order, within one class of match, is what you have been launching. Each launch
+is written to `~/.local/state/fwm/launcher` as a single number that halves
+every ten days, so an application opened twice this week outranks one opened
+thirty times last spring, and nothing has to be cleared by hand when what you
+use changes. Match quality still comes first — a habit never outranks a better
+match, or typing would stop steering the list — but on an empty bar every row
+ties and the panel opens on the handful you actually use. The file is keyed by
+command rather than by name, since two entries can share a name and the name
+changes with the locale.
+
 The tiles have physics of their own — they settle as the list filters — and the
 launcher owns the keyboard while it is open, so no keystroke reaches a client you
 cannot see. A keyboard knob drives it as well: turning it walks the list,

@@ -16,6 +16,7 @@
 #include "../theme.h"
 #include "cairo_overlay.h"
 #include "icons.h"
+#include "launcher_search.h"
 #include "../server.h"
 #include "../video.h"
 
@@ -51,6 +52,10 @@
 #define SPAWN_STEP  30.0  /* extra per rank: staggers arrivals */
 #define SPRING_W    14.0  /* spring frequency toward the slot, rad/s */
 #define SPRING_Z    0.5   /* damping ratio: < 1 = springy overshoot */
+/* The listing is one flat array of this many slots, allocated whole. A row is
+ * ~1.1 KB now that it carries its folded name and alias, so the array is
+ * ~2.2 MB against ~1.5 MB before the search side needed them — the price of
+ * folding once at scan time instead of on every keystroke. */
 #define MAX_APPS    2048
 /* XDG_DATA_HOME plus however many XDG_DATA_DIRS a distribution sets; the
  * longest seen in the wild is a handful. */
@@ -75,6 +80,14 @@ typedef struct {
     cairo_surface_t *icon_surf; /* lazily resolved+loaded; NULL if none */
     int  icon_tried;
     int  is_video;              /* wallpaper row backed by a video file */
+    /* Everything the search side needs, prepared once at scan time: the name
+     * case-folded, and the text you might type that is not the name (generic
+     * name, keywords, binary) folded into one string. Folding here rather
+     * than per keystroke is what lets a query be matched with plain strstr
+     * over a couple of thousand rows. */
+    char fold[LS_FOLD_MAX];
+    char alias[LS_ALIAS_MAX];
+    double frec;                /* how much this row has been used lately */
 } LApp;
 
 enum { LMODE_APPS = 0, LMODE_WALLPAPERS = 1 };
@@ -95,9 +108,19 @@ struct Launcher {
     bool  wall_scanned;
 
     char query[QUERY_MAX + 8];
+    char qfold[QUERY_MAX * 4 + 8]; /* the query, folded; case folding can grow it */
     int *match;      /* indices into apps, ranked */
+    /* Rank of every item, keyed by item index rather than by position in
+     * `match`, because qsort permutes that. Filled by the filter pass so the
+     * comparator only compares — a fuzzy rank is not cheap enough to redo the
+     * O(n log n) times qsort would ask for it. */
+    int *mtier;
+    int *mscore;
     int  match_count;
     int  sel;        /* selection among the first MAX_SHOW matches */
+
+    LsFrec *frec;              /* launch history, loaded per open */
+    char    frec_path[512];
 
     struct wlr_scene_buffer *overlay;
     /* Panel that is fading out. It is no longer ours to draw into — the
@@ -136,11 +159,18 @@ static void strip_field_codes(char *exec) {
     while (dst > exec && dst[-1] == ' ') *--dst = '\0';
 }
 
-static void scan_desktop_file(Launcher *l, const char *path) {
+static void scan_desktop_file(Launcher *l, const LsLocale *loc, const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) return;
 
     LApp app = {0};
+    /* Not stored on the row: they exist only to be folded into the alias. */
+    char generic[128] = "", keywords[256] = "";
+    /* How well the locale suffix of the best Name=/GenericName=/Keywords= seen
+     * so far matches ours. -1 is "nothing yet", and a strictly-greater test
+     * keeps the first of equals — the same first-wins rule the other keys
+     * have always had. */
+    int name_prec = -1, gen_prec = -1, kw_prec = -1;
     int in_entry = 0, hidden = 0, is_app = 1;
     char line[600];
     while (fgets(line, sizeof(line), f)) {
@@ -151,8 +181,21 @@ static void scan_desktop_file(Launcher *l, const char *path) {
         }
         if (!in_entry) continue;
         line[strcspn(line, "\r\n")] = '\0';
-        if (!app.name[0] && strncmp(line, "Name=", 5) == 0) {
-            snprintf(app.name, sizeof(app.name), "%s", line + 5);
+
+        const char *v;
+        int prec;
+        /* Name is read through the locale so a Russian session lists (and
+         * searches) "Настройки" rather than "Settings" — the entry carries
+         * both, and only one of them is the one on screen. */
+        if ((prec = ls_entry_value(loc, line, "Name", &v)) > name_prec) {
+            name_prec = prec;
+            snprintf(app.name, sizeof(app.name), "%s", v);
+        } else if ((prec = ls_entry_value(loc, line, "GenericName", &v)) > gen_prec) {
+            gen_prec = prec;
+            snprintf(generic, sizeof(generic), "%s", v);
+        } else if ((prec = ls_entry_value(loc, line, "Keywords", &v)) > kw_prec) {
+            kw_prec = prec;
+            snprintf(keywords, sizeof(keywords), "%s", v);
         } else if (!app.exec[0] && strncmp(line, "Exec=", 5) == 0) {
             snprintf(app.exec, sizeof(app.exec), "%s", line + 5);
         } else if (!app.icon[0] && strncmp(line, "Icon=", 5) == 0) {
@@ -172,10 +215,23 @@ static void scan_desktop_file(Launcher *l, const char *path) {
     if (hidden || !is_app || !app.name[0] || !app.exec[0]) return;
     if (l->app_count >= MAX_APPS) return;
     strip_field_codes(app.exec);
+
+    ls_fold(app.fold, sizeof(app.fold), app.name);
+    /* The alias is everything else you might reasonably type: what the entry
+     * calls itself generically ("Web Browser"), the keywords it advertises,
+     * and the binary. It ranks below every match on the name, so it widens
+     * the net without ever pushing a name match down the list. */
+    for (char *c = keywords; *c; c++) if (*c == ';') *c = ' ';
+    char bin[128];
+    ls_exec_binary(app.exec, bin, sizeof(bin));
+    ls_fold_append(app.alias, sizeof(app.alias), generic);
+    ls_fold_append(app.alias, sizeof(app.alias), keywords);
+    ls_fold_append(app.alias, sizeof(app.alias), bin);
+
     l->apps[l->app_count++] = app;
 }
 
-static void scan_dir(Launcher *l, const char *dir,
+static void scan_dir(Launcher *l, const LsLocale *loc, const char *dir,
                      char ***seen, int *seen_count) {
     DIR *d = opendir(dir);
     if (!d) return;
@@ -194,7 +250,7 @@ static void scan_dir(Launcher *l, const char *dir,
 
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
-        scan_desktop_file(l, path);
+        scan_desktop_file(l, loc, path);
     }
     closedir(d);
 }
@@ -285,7 +341,9 @@ static void scan_apps(Launcher *l) {
 
     char *dirs[APP_DIRS_MAX];
     int ndirs = app_dirs(dirs, APP_DIRS_MAX);
-    for (int i = 0; i < ndirs; i++) scan_dir(l, dirs[i], &seen, &seen_count);
+    LsLocale loc;
+    ls_locale_init(&loc);
+    for (int i = 0; i < ndirs; i++) scan_dir(l, &loc, dirs[i], &seen, &seen_count);
     app_dirs_free(dirs, ndirs);
 
     for (int i = 0; i < seen_count; i++) free(seen[i]);
@@ -399,6 +457,10 @@ static void scan_wallpapers(Launcher *l) {
         if (base_len >= sizeof(it->name)) base_len = sizeof(it->name) - 1;
         memcpy(it->name, base, base_len);
         it->name[base_len] = '\0';
+        /* No alias: a file has nothing to advertise beyond what it is called.
+         * Folding it still buys the picker case-insensitive Cyrillic and the
+         * fuzzy pass. */
+        ls_fold(it->fold, sizeof(it->fold), it->name);
 
         /* Reuse a previously decoded thumbnail for the same file. */
         for (int k = 0; k < old_count; k++) {
@@ -423,49 +485,54 @@ static void scan_wallpapers(Launcher *l) {
 
 /* ── filtering ───────────────────────────────────────────────────────── */
 
-/* Case-insensitive substring; returns match offset or -1. */
-static int ci_find(const char *hay, const char *needle) {
-    if (!needle[0]) return 0;
-    size_t nl = strlen(needle);
-    for (const char *p = hay; *p; p++) {
-        if (strncasecmp(p, needle, nl) == 0) return (int)(p - hay);
-    }
-    return -1;
-}
+/* Matching itself lives in launcher_search.c; what is here is the policy for
+ * putting the matches in an order. */
 
-static LApp *g_sort_apps;
-static const char *g_sort_query;
-
-static int match_rank(const LApp *a, const char *q, int *pos) {
-    int p = ci_find(a->name, q);
-    *pos = p;
-    if (p < 0) return -1;
-    if (p == 0) return 0;                                    /* prefix */
-    char prev = a->name[p - 1];
-    if (prev == ' ' || prev == '-' || prev == '_') return 1; /* word start */
-    return 2;                                                /* substring */
-}
+static const LApp *g_sort_apps;
+static const int  *g_sort_tier;
+static const int  *g_sort_score;
 
 static int match_cmp(const void *va, const void *vb) {
     int ia = *(const int *)va, ib = *(const int *)vb;
-    int pa, pb;
-    int ra = match_rank(&g_sort_apps[ia], g_sort_query, &pa);
-    int rb = match_rank(&g_sort_apps[ib], g_sort_query, &pb);
-    if (ra != rb) return ra - rb;
-    if (pa != pb) return pa - pb;
-    return strcasecmp(g_sort_apps[ia].name, g_sort_apps[ib].name);
+
+    /* How well the query matched decides first. Anything else ahead of it and
+     * typing would stop steering the list — the row you use most would sit on
+     * top no matter what letters were in the bar. */
+    if (g_sort_tier[ia] != g_sort_tier[ib]) return g_sort_tier[ia] - g_sort_tier[ib];
+
+    /* Then what you actually run. This is the whole of what frecency buys:
+     * among matches that are equally good, the one you reach for wins, and on
+     * an empty query — where every row ties at the top tier — the list opens
+     * on what you have been using rather than on whatever is alphabetically
+     * first. */
+    double fa = g_sort_apps[ia].frec, fb = g_sort_apps[ib].frec;
+    if (fa != fb) return fa > fb ? -1 : 1;
+
+    if (g_sort_score[ia] != g_sort_score[ib]) return g_sort_score[ia] - g_sort_score[ib];
+    /* Folded, not strcasecmp: that one only knows how to lower an ASCII
+     * letter, and a list of Russian names sorted by it comes out in byte
+     * order with the capitals in a block of their own. */
+    return strcmp(g_sort_apps[ia].fold, g_sort_apps[ib].fold);
 }
 
 static void refilter(Launcher *l) {
+    ls_fold(l->qfold, sizeof(l->qfold), l->query);
+
+    LApp *list = items(l);
+    int n = item_count(l);
     l->match_count = 0;
-    for (int i = 0; i < item_count(l); i++) {
-        int pos;
-        if (match_rank(&items(l)[i], l->query, &pos) >= 0) {
-            l->match[l->match_count++] = i;
-        }
+    for (int i = 0; i < n; i++) {
+        int score;
+        int tier = ls_rank(list[i].fold, list[i].alias, l->qfold, &score);
+        if (tier == LS_TIER_NONE) continue;
+        l->mtier[i] = tier;
+        l->mscore[i] = score;
+        l->match[l->match_count++] = i;
     }
-    g_sort_apps = items(l);
-    g_sort_query = l->query;
+
+    g_sort_apps = list;
+    g_sort_tier = l->mtier;
+    g_sort_score = l->mscore;
     qsort(l->match, l->match_count, sizeof(int), match_cmp);
     l->sel = 0;
 }
@@ -755,6 +822,10 @@ static void launcher_close_ex(Launcher *l, bool animate) {
         l->world_ok = false;
         l->tile_count = 0;
     }
+    /* Already written to disk by the launch that changed it; this is only the
+     * copy in memory, and the next open reads a fresh one. */
+    ls_frec_free(l->frec);
+    l->frec = NULL;
 }
 
 static void launcher_close(Launcher *l) {
@@ -799,6 +870,18 @@ static void launcher_open(Launcher *l) {
     l->px = screen.x + (screen.width - l->panel_w) / 2;
     l->py = screen.y + screen.height / 5;
 
+    if (l->mode == LMODE_APPS) {
+        /* Read on every open rather than held for the session: it is a few
+         * hundred short lines, and a launch recorded by another fwm — a
+         * nested one, or a session on another tty — should be visible here
+         * rather than overwritten by whatever this instance last had. */
+        ls_frec_free(l->frec);
+        l->frec = ls_frec_load(l->frec_path);
+        time_t now = time(NULL);
+        for (int i = 0; i < l->app_count; i++)
+            l->apps[i].frec = ls_frec_score(l->frec, l->apps[i].exec, now);
+    }
+
     l->query[0] = '\0';
     refilter(l);
 
@@ -825,7 +908,14 @@ Launcher *launcher_create(struct FwmServer *server) {
     /* Shared by both modes, so it cannot live in scan_apps: the wallpaper
      * picker never runs that and refilter() would write through NULL. */
     l->match = calloc(MAX_APPS, sizeof(int));
-    if (!l->match) { free(l); return NULL; }
+    l->mtier = calloc(MAX_APPS, sizeof(int));
+    l->mscore = calloc(MAX_APPS, sizeof(int));
+    if (!l->match || !l->mtier || !l->mscore) {
+        free(l->match); free(l->mtier); free(l->mscore);
+        free(l);
+        return NULL;
+    }
+    ls_frec_path(l->frec_path, sizeof(l->frec_path));
     return l;
 }
 
@@ -842,6 +932,12 @@ void launcher_destroy(Launcher *l) {
     }
     free(l->walls);
     free(l->match);
+    free(l->mtier);
+    free(l->mscore);
+    /* launcher_close_ex above returns early when the panel was never open —
+     * which is exactly the path an overlay that failed to allocate takes — so
+     * the history is dropped here as well as there. */
+    ls_frec_free(l->frec);
     free(l);
 }
 
@@ -880,6 +976,17 @@ static void launch_selected(Launcher *l) {
     if (l->mode == LMODE_WALLPAPERS) {
         server_set_wallpaper(l->server, app->exec);
         return;
+    }
+
+    /* Recorded against the command, not the display name: two entries can
+     * carry the same Name, and the Name a session shows changes with its
+     * locale — history that evaporated when you switched to a Russian desktop
+     * would not be history. Written through now rather than at close, so a
+     * compositor that dies before it shuts down cleanly still remembers. */
+    if (l->frec) {
+        time_t now = time(NULL);
+        ls_frec_bump(l->frec, app->exec, now);
+        ls_frec_save(l->frec, l->frec_path, now);
     }
 
     char cmd[600];

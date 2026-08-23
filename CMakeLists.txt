@@ -45,6 +45,9 @@ pkg_check_modules(CAIRO REQUIRED cairo)
 pkg_check_modules(PANGO REQUIRED pango)
 pkg_check_modules(PANGOCAIRO REQUIRED pangocairo)
 pkg_check_modules(GDK_PIXBUF REQUIRED gdk-pixbuf-2.0)
+# Named on its own, not taken along with gdk-pixbuf, so the launcher's search
+# module can be linked by the test suite without dragging in an image decoder.
+pkg_check_modules(GLIB REQUIRED glib-2.0)
 # Used directly for pointer-constraint regions (pixman_region32_contains_point);
 # wlroots exposes pixman types in its API but does not link it for us.
 pkg_check_modules(PIXMAN REQUIRED pixman-1)
@@ -167,6 +170,7 @@ set(SOURCES
     src/ui/errors.c
     src/ui/welcome.c
     src/ui/launcher.c
+    src/ui/launcher_search.c
     src/ui/radial.c
     src/ui/mixer.c
     src/ui/osd.c
@@ -404,6 +408,14 @@ if(FWM_TESTS)
     target_link_libraries(test_stats PRIVATE ${WLROOTS_LIBRARIES} m)
     target_link_directories(test_stats PRIVATE ${WLROOTS_LIBRARY_DIRS})
 
+    # What the launcher does with what you type: which rows a query matches,
+    # which of them comes first, and what the launch history is worth a week
+    # later. All of it is text and arithmetic — the panel it feeds is not — so
+    # the rules can be pinned without a compositor, a display or an X server.
+    add_executable(test_launcher tests/test_launcher.c src/ui/launcher_search.c)
+    target_include_directories(test_launcher PRIVATE src src/ui tests ${GLIB_INCLUDE_DIRS})
+    target_link_libraries(test_launcher PRIVATE ${GLIB_LIBRARIES} m)
+
     add_test(NAME bsp        COMMAND test_bsp)
     add_test(NAME config     COMMAND test_config)
     add_test(NAME input      COMMAND test_input)
@@ -419,4 +431,5 @@ if(FWM_TESTS)
     add_test(NAME ram        COMMAND test_ram)
     add_test(NAME wav        COMMAND test_wav)
     add_test(NAME stats      COMMAND test_stats)
+    add_test(NAME launcher   COMMAND test_launcher)
 endif()
