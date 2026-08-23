@@ -263,6 +263,9 @@ void server_idle_set_blanked(FwmServer *server, FwmOutput *out, int blanked);
 
 /* ── server_output.c ──────────────────────────────────────────────────── */
 void server_output_register(FwmServer *server);
+/* Which monitor a panel (the modes menu, the stats menu) is standing on, from
+ * where its node actually is. NULL if it is nowhere on screen. */
+FwmOutput *server_panel_output(FwmServer *server, struct wlr_scene_buffer *buf);
 /* Re-place every monitor from the current [[output]] entries. Called on reload;
  * a monitor arriving applies its own entry as it joins. */
 void server_outputs_apply_config(FwmServer *server);

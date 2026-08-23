@@ -1892,7 +1892,6 @@ static int physics_tick_cb(void *data) {
     // also covers desktop switches and the fullscreen window closing.
     /* Per monitor: a fullscreen window on one screen must not blank the other
      * screen's tray or freeze its wallpaper. */
-    bool any_real_fs = false;
     FwmOutput *fo;
     wl_list_for_each(fo, &server->outputs, link) {
         bool real_fs = false;    /* hides this monitor's tray */
@@ -1918,17 +1917,27 @@ static int physics_tick_cb(void *data) {
         /* The grass is behind the same window, and swaying where nobody can see
          * it is the one cost of the feature worth refusing to pay. */
         grass_set_paused(fo->grass, wp_covered);
-        any_real_fs |= real_fs;
     }
-    bool real_fs = any_real_fs;
 
-    /* The modes menu hangs off a pill that is no longer on screen — and unlike
-     * the tray it is not merely disabled, it is a panel floating over a
-     * fullscreen window with nothing left to explain it. */
-    if (server->modes_buffer && (real_fs || server->tray_hidden))
-        server_close_modes_menu(server);
-    if (server->stats_buffer && (real_fs || server->tray_hidden))
-        server_close_stats_menu(server);
+    /* A menu hangs off a pill, and goes when that pill does — it is not merely
+     * disabled like the strip, it is a panel floating over a fullscreen window
+     * with nothing left to explain it.
+     *
+     * ITS OWN pill, on the monitor it is standing on. The tray above is decided
+     * per monitor and this was not: any fullscreen window anywhere closed the
+     * menu, so on two screens a game on the first one made the second one's
+     * pills open a menu that vanished on the next tick — a pill that did
+     * nothing at all, from the far side of the desk. */
+    if (server->modes_buffer) {
+        FwmOutput *mo = server_panel_output(server, server->modes_buffer);
+        if (server->tray_hidden || !mo || !mo->tray_buffer || !mo->tray_buffer->node.enabled)
+            server_close_modes_menu(server);
+    }
+    if (server->stats_buffer) {
+        FwmOutput *so = server_panel_output(server, server->stats_buffer);
+        if (server->tray_hidden || !so || !so->tray_buffer || !so->tray_buffer->node.enabled)
+            server_close_stats_menu(server);
+    }
 
     server_video_sync(server); /* (dis)arm the video-frame timer for the new state */
 

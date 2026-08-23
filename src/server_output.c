@@ -479,6 +479,24 @@ FwmOutput *server_output_at(FwmServer *server, double lx, double ly) {
     return NULL;
 }
 
+/* The monitor a panel is standing on, asked of the scene rather than remembered.
+ *
+ * A panel that hangs off one monitor's tray — the modes menu, the stats menu —
+ * has to be able to answer "whose pill am I under?" long after it was opened: a
+ * fullscreen window arriving on ANOTHER screen must not take it away, and the
+ * pill it belongs to has to be told apart from the identical pill on the screen
+ * next door. Holding an FwmOutput * instead would be a pointer to remember to
+ * clear on every unplug; its position is already the truth and cannot go
+ * stale. */
+FwmOutput *server_panel_output(FwmServer *server, struct wlr_scene_buffer *buf) {
+    if (!buf) return NULL;
+    int lx, ly;
+    if (!wlr_scene_node_coords(&buf->node, &lx, &ly)) return NULL;
+    /* One pixel in, because the node's own corner sits exactly on the edge and
+     * a box test is half-open on that side. */
+    return server_output_at(server, lx + 1, ly + 1);
+}
+
 FwmOutput *server_active_output(FwmServer *server) {
     /* Debug: FWM_TEST_OUTPUT=<name> pins "the monitor the user is at". A nested
      * run cannot move the pointer onto the second screen, so without this there

@@ -968,6 +968,16 @@ void server_kill_modes_menu(FwmServer *server) {
 }
 
 void server_toggle_modes_menu(FwmServer *server) {
+    /* One menu exists at a time, and on two screens that made the pill on the
+     * OTHER monitor a button that only ever closed things: the click shut the
+     * menu standing on the first screen and opened nothing, and it took a
+     * second click to get the menu you asked for. A pill answers for its own
+     * strip — asking a different one for its menu moves the menu there. */
+    if (server->modes_buffer &&
+        server_panel_output(server, server->modes_buffer) != server_active_output(server)) {
+        server_close_modes_menu(server);
+    }
+
     if (server->modes_buffer) {
         server_close_modes_menu(server);
     } else {
@@ -1160,6 +1170,14 @@ void server_kill_stats_menu(FwmServer *server) {
 }
 
 void server_toggle_stats_menu(FwmServer *server) {
+    /* Same rule as the modes menu's: a pill belongs to the strip it is drawn
+     * on, so asking the second monitor's pill moves the menu rather than
+     * closing the first monitor's. */
+    if (server->stats_buffer &&
+        server_panel_output(server, server->stats_buffer) != server_active_output(server)) {
+        server_close_stats_menu(server);
+    }
+
     if (server->stats_buffer) {
         server_close_stats_menu(server);
     } else {
