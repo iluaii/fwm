@@ -1059,8 +1059,8 @@ static void load_stats(toml_table_t *root, FwmConfig *cfg) {
             /* Reported rather than dropped in silence: a misspelt sensor and a
              * sensor with nothing to say look identical in the tray. */
             config_report_error(cfg, "[stats] items: no sensor called \"%s\" — "
-                                     "built-ins are cpu, ram, gpu; anything else "
-                                     "needs a line of its own in [stats]", d.u.s);
+                                     "built-ins are cpu, ram, gpu, bat, net; anything "
+                                     "else needs a line of its own in [stats]", d.u.s);
         } else if (s->item_count >= STATS_MAX_ITEMS) {
             config_report_error(cfg, "[stats] items: more than %d shown — \"%s\" dropped",
                                 STATS_MAX_ITEMS, d.u.s);
