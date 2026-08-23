@@ -83,6 +83,11 @@ typedef struct FwmOutput {
     struct wlr_output *wlr_output;
     struct wlr_box box;      /* position and size in layout coordinates */
     int enabled;             /* 0 while this screen is dark */
+    /* Dark because the session went idle, which is NOT the same as `enabled`:
+     * everything about the monitor stays exactly as it was and only the light
+     * is off. Remembered per screen so waking lights the ones idle put out and
+     * leaves alone the ones the lid or `output_off` did. */
+    int idle_blanked;
     /* Turned off at RUNTIME (the lid, `output_off`) rather than by the config.
      * A reload re-applies the file to every monitor, and without this it would
      * light the panel inside a closed laptop back up. */
@@ -522,6 +527,17 @@ typedef struct FwmServer {
     struct wlr_idle_inhibit_manager_v1 *idle_inhibit;
     int idle_inhibited;                    /* last state pushed to the notifier */
 
+    /* fwm's own idle timers ([idle]) — see server_idle.c. `idle_secs` is time
+     * since the last input, frozen while an inhibitor is up; `idle_blanked` is
+     * "the screens are dark and only input will light them"; `idle_locked`
+     * keeps the locker from being started twice for one stretch of idleness;
+     * `idle_woke` marks the one press that lit the screens, so it is not also
+     * typed into the window under it. */
+    double idle_secs;
+    int idle_blanked;
+    int idle_locked;
+    int idle_woke;
+
     /* ext-session-lock-v1. `locked` stays set if the lock client dies, which
      * is what keeps a crashed locker from becoming an unlock — see src/lock.h. */
     /* Control socket (src/ipc.h). NULL if it could not be created. */
@@ -581,7 +597,9 @@ typedef struct FwmServer {
     uint32_t repeat_keycode;     /* raw event keycode currently repeating */
     unsigned char key_consumed[768]; /* per-keycode: press was eaten by a bind,
                                         swallow the matching release too */
-    int group_click; /* tab-bar click consumed; swallow its release */
+    int click_consumed; /* a press was eaten (a tab-bar click, the click that
+                         * woke a blanked screen); swallow its release too, or
+                         * the client sees a release it never saw a press for */
 
     /* When the last physics step finished. The tick timer and the display's
      * vsync are different clocks — the timer is armed in whole milliseconds, so

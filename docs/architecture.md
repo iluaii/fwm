@@ -89,7 +89,8 @@ price to pay for turning a feature *off*.
 | Wallpaper | `wallpaper.c`, `video.c` |
 | Audio | `audio.c` (capture), `cava.c` (FFT + bars), `sound.c` (mixer), `wav.c` |
 | Light | `sun.c` (where the sun is — arithmetic, no scene), `shadow.c` (what it draws: one shared nine-patch image, nine slices per window) |
-| Extras | `ram.c` (memory footprints), `theme.c` (palette), `lock.c`, `layer.c`, `foreign.c` |
+| Session | `server_idle.c` (the blank and lock timers), `lock.c` (the lock protocol) |
+| Extras | `ram.c` (memory footprints), `theme.c` (palette), `layer.c`, `foreign.c` |
 | UI | `ui/*.c` — see below |
 
 `server.c` was split by area rather than by size; `server_internal.h` is the

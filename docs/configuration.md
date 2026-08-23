@@ -20,7 +20,7 @@ Three promises about this file:
 
 Contents: [physics](#physics) · [per-desktop physics](#per-desktop-physics) ·
 [window rules](#window-rules) · [tiling](#tiling) · [camera](#camera) ·
-[decor](#decor) · [input](#input) · [focus](#focus) · [effects](#effects) ·
+[decor](#decor) · [input](#input) · [focus](#focus) · [idle](#idle) · [effects](#effects) ·
 [session](#session) · [binds](#binds) · [modes](#modes) · [mouse](#mouse) ·
 [gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_picker](#wallpaper_picker) ·
 [cava](#cava) · [grass](#grass) · [sound](#sound) · [volume](#volume) ·
@@ -435,6 +435,54 @@ a link opening in a running browser. Split three ways because on fwm the
 disruptive part is not the focus change but the **camera** leaving the desktop you
 are working on. `same_desktop` (the default) focuses the window only if it is
 already on the visible desktop.
+
+## idle
+
+```toml
+[idle]
+blank_after = 600            # seconds of no input before the screens go dark; 0 = never
+lock_after  = 900            # seconds before `lock` is run; 0 = never
+lock        = "swaylock -f"  # what locks the session; "" = nothing does
+```
+
+What an unattended session does with itself. fwm speaks
+[ext-idle-notify](fwmctl.md), so swayidle can drive this from outside and still
+can — `blank_after = 0` leaves the whole question to whatever is listening
+there. These two numbers exist because a machine with no idle daemon installed
+has a monitor that burns all night: the physics tick keeps scheduling frames
+forever, and nothing else was ever going to turn the screen off.
+
+**Waking is any input**, and the press that does it is spent on it. A key or a
+click that lights a dark screen does not also reach the window underneath —
+otherwise the space that brought the desktop back would be typed into whatever
+had focus ten minutes ago, and the click would land on a button nobody could
+see. Moving the mouse wakes the screen and swallows nothing, there being nothing
+to swallow.
+
+**Blanking is not `output_off`.** That action means "I am not using this
+screen": the monitor leaves the layout, hands its desktop back and the pointer
+moves off it. Idle means the opposite — everything stays exactly where it is and
+only the light goes out, so windows do not move and the desktop is still there
+when it comes back. A screen already dark for another reason (the lid, an
+`output_off`) is left alone and is *not* lit by the next keystroke.
+
+**An idle inhibitor freezes both timers where they stand** rather than resetting
+them: a video player asking not to be interrupted holds the screen for as long
+as it plays, and the session goes dark a minute after the film ends rather than
+being handed a fresh ten. Only an inhibitor on a desktop somebody is looking at
+counts — a video paused on desktop 7 keeps nothing awake.
+
+**Locking is a command**, because fwm does not draw a lock screen: it serves
+the session-lock protocol and something else (swaylock, gtklock, waylock) draws
+the screen behind it. `lock_after` with no `lock` is reported as a config
+problem rather than quietly doing nothing. The locker is started once per
+stretch of idleness, not once a tick.
+
+Both timers are live through `fwmctl set idle.blank_after=…` and
+`idle.lock_after=…`; the command is a string, so like every other string in the
+config it is reload-only. Setting `blank_after` to 0 while the screens are dark
+lights them again — the dial that put them out is the dial that brings them
+back.
 
 ## effects
 

@@ -332,6 +332,10 @@ static void process_cursor_motion(FwmServer *server, uint32_t time_msec) {
     double ly = server->cursor->y;
 
     server_notify_activity(server);
+    /* Cleared, not acted on: moving the mouse is how you wake a screen without
+     * pressing anything, so the motion that did it is nothing to swallow — but
+     * it must not leave the mark standing for the next click either. */
+    server_idle_consume_wake(server);
     if (lock_is_active(server)) return; /* nothing under the lock may be reached */
     drag_icon_update_position(server);
 
@@ -512,6 +516,14 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
     struct wlr_pointer_button_event *event = data;
 
     server_notify_activity(server);
+    /* Same rule as the keyboard's: the click that lit a blanked screen does not
+     * also land on whatever happens to be under the pointer — and the release
+     * that follows it is swallowed with it, like every other eaten click. */
+    if (event->state == WL_POINTER_BUTTON_STATE_PRESSED &&
+        server_idle_consume_wake(server)) {
+        server->click_consumed = 1;
+        return;
+    }
     if (lock_is_active(server)) return; /* no clicks reach anything under the lock */
 
     /* The selector's own drag. Ahead of everything: the press that starts it
@@ -549,7 +561,7 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         FwmOutput *to = tray_under_pointer(server, &tx, &ty);
         if (to && tray_error_pill_hit(&to->tray_strip, tx, ty)) {
             server_dispatch_action(server, "show_errors");
-            server->group_click = 1; /* swallow the matching release */
+            server->click_consumed = 1; /* swallow the matching release */
             return;
         }
     }
@@ -567,7 +579,7 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
             int seg = -1;
             int row = modes_menu_hit(mx, my, &seg);
             if (row != MODES_ROW_NONE) server_modes_menu_click(server, row, seg);
-            server->group_click = 1; /* swallow the matching release */
+            server->click_consumed = 1; /* swallow the matching release */
             return;
         }
         /* Outside: dismiss, unless the click is on the pill itself — that is a
@@ -594,7 +606,7 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         FwmOutput *to = tray_under_pointer(server, &tx, &ty);
         if (to && tray_modes_pill_hit(&to->tray_strip, tx, ty)) {
             server_toggle_modes_menu(server);
-            server->group_click = 1;
+            server->click_consumed = 1;
             return;
         }
     }
@@ -612,7 +624,7 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         if (mx >= 0 && mx < mw && my >= 0 && my < mh) {
             int row = stats_menu_hit(server->stats, mx, my);
             if (row >= 0) server_stats_menu_click(server, row);
-            server->group_click = 1; /* swallow the matching release */
+            server->click_consumed = 1; /* swallow the matching release */
             return;
         }
         int on_pill = 0;
@@ -638,7 +650,7 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         FwmOutput *to = tray_under_pointer(server, &tx, &ty);
         if (to && tray_stats_pill_hit(&to->tray_strip, tx, ty)) {
             server_toggle_stats_menu(server);
-            server->group_click = 1;
+            server->click_consumed = 1;
             return;
         }
     }
@@ -656,7 +668,7 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
                 to->prev_desktop >= 0)
                 d = to->prev_desktop;
             server_goto_desktop(server, d, 0);
-            server->group_click = 1; /* swallow the matching release */
+            server->click_consumed = 1; /* swallow the matching release */
             return;
         }
     }
@@ -679,12 +691,12 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         FwmGroup *bg = group_bar_at(server, server->cursor->x, server->cursor->y, &tab);
         if (bg) {
             group_set_active(server, bg, tab);
-            server->group_click = 1;
+            server->click_consumed = 1;
             return;
         }
     }
-    if (server->group_click && event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
-        server->group_click = 0;
+    if (server->click_consumed && event->state == WL_POINTER_BUTTON_STATE_RELEASED) {
+        server->click_consumed = 0;
         return;
     }
 

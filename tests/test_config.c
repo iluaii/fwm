@@ -1357,6 +1357,61 @@ static void test_camera_back_and_forth(void) {
     drop_config();
 }
 
+/* [idle] is a table whose defaults DO something, which makes it worth pinning
+ * hardest of all: a refactor that quietly turned blanking off would leave a
+ * monitor burning all night and no test would have noticed. */
+static void test_idle(void) {
+    CASE("[idle] defaults and values");
+    FwmConfig cfg;
+
+    /* No file at all: the screens still go out, and nothing locks. Ten minutes
+     * is the shipped default and the reason this test exists. */
+    config_load(&cfg, "/nonexistent/fwm-test.toml");
+    CHECK(fabs(cfg.idle.blank_after - 600.0) < 0.001);
+    CHECK(fabs(cfg.idle.lock_after) < 0.001);
+    CHECK_STR(cfg.idle.lock, "");
+    config_free(&cfg);
+
+    const char *p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[idle]\n"
+        "blank_after = 45\n"
+        "lock_after = 90.5\n"
+        "lock = \"swaylock -f\"\n");
+    config_load(&cfg, p);
+    CHECK(fabs(cfg.idle.blank_after - 45.0) < 0.001);    /* an integer is a number */
+    CHECK(fabs(cfg.idle.lock_after - 90.5) < 0.001);
+    CHECK_STR(cfg.idle.lock, "swaylock -f");
+    CHECK_INT(cfg.error_count, 0);
+    config_free(&cfg);
+    drop_config();
+
+    /* 0 is how you say never, and it is not an error. */
+    p = write_config("[binds]\n\"super+q\" = \"killclient\"\n"
+                     "[idle]\nblank_after = 0\n");
+    config_load(&cfg, p);
+    CHECK(fabs(cfg.idle.blank_after) < 0.001);
+    CHECK_INT(cfg.error_count, 0);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("a lock timer with nothing to run is reported");
+    p = write_config("[idle]\nlock_after = 300\n");
+    config_load(&cfg, p);
+    CHECK(fabs(cfg.idle.lock_after - 300.0) < 0.001);   /* still parsed ... */
+    CHECK(cfg.error_count > 0);                         /* ... and still said */
+    config_free(&cfg);
+    drop_config();
+
+    CASE("a negative timer keeps the default rather than counting backwards");
+    p = write_config("[idle]\nblank_after = -5\n");
+    config_load(&cfg, p);
+    CHECK(fabs(cfg.idle.blank_after - 600.0) < 0.001);
+    CHECK(cfg.error_count > 0);
+    config_free(&cfg);
+    drop_config();
+}
+
 int main(void) {
     test_missing_file();
     test_values_parse();
@@ -1382,6 +1437,7 @@ int main(void) {
     test_output_spellings();
     test_outputs();
     test_stats();
+    test_idle();
     test_startup();
     test_camera_back_and_forth();
     return t_report("config");

@@ -153,6 +153,7 @@ set(SOURCES
     src/server_shell.c
     src/server_output.c
     src/server_input.c
+    src/server_idle.c
     src/server_pointer.c
     src/server_seat.c
     src/server_drag.c

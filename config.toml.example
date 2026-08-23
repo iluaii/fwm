@@ -393,6 +393,33 @@ back_and_forth = true
 [focus]
 on_activate = "same_desktop"
 
+# What an unattended session does with itself.
+#
+# fwm speaks ext-idle-notify, so swayidle can drive this from outside and still
+# can — set blank_after = 0 and the whole question is whatever is listening
+# there. These two numbers exist because a machine with no idle daemon on it
+# has a monitor that burns all night: the physics tick keeps scheduling frames
+# forever, and nothing else was ever going to turn the screen off.
+#
+# blank_after   seconds of no input before the screens go dark. 0 = never.
+#               Any key, click or touch lights them again — and that first
+#               press is spent on the waking, not typed into the window that
+#               had focus ten minutes ago.
+# lock_after    seconds before `lock` is run. 0 = never.
+# lock          the locker's command line. fwm serves the session-lock
+#               protocol but does not lock by itself, so this is where you name
+#               what draws it: swaylock, gtklock, waylock. Empty = no locking,
+#               and lock_after without it is reported as a config problem.
+#
+# An idle inhibitor (a video player asking not to be interrupted) FREEZES both
+# timers where they stand rather than resetting them: a film that runs for two
+# hours holds the screen for two hours, and the session goes dark a minute
+# after it ends rather than handing out a fresh ten.
+[idle]
+blank_after = 600
+#lock_after = 900
+#lock       = "swaylock -f"
+
 # Impact effects, both scaled by collision speed so gentle bumps stay subtle.
 #
 # camera_shake jolts the wallpaper and windows when something lands hard (the

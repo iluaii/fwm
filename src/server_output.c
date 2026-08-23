@@ -1309,6 +1309,11 @@ static int output_set_enabled(FwmServer *server, FwmOutput *out, int on) {
     wlr_output_state_finish(&state);
     out->enabled = on;
 
+    /* Whichever way this went, the screen is no longer the idle timer's: one
+     * turned off as a screen stays off until something turns it back on, and
+     * one turned on has been lit by a hand rather than by a keystroke. */
+    server_idle_set_blanked(server, out, 0);
+
     if (on) {
         /* Lit with the preferred mode above, which is only a starting point:
          * a screen coming back has to come back the shape the file asked for,
@@ -1731,20 +1736,32 @@ static void server_output_first_layout(FwmServer *server) {
     }
 }
 
-/* swayidle and friends turning the display off. Without this nothing can blank
- * the screen: fwm has no idle blanking of its own and the physics tick keeps
- * scheduling frames forever, so the monitor would stay lit indefinitely. */
+/* swayidle and friends turning the display off.
+ *
+ * fwm now blanks on its own timer as well ([idle], src/server_idle.c), and this
+ * stays for the sessions that would rather drive it from outside: an external
+ * daemon can do more than two numbers can — dim first, blank later, a different
+ * timeout on battery — and the way it reaches the monitor is this protocol.
+ * Setting [idle] blank_after = 0 leaves the whole question to whatever is
+ * listening here. */
 static void handle_output_power_set_mode(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, output_power_set_mode);
-    (void)server;
     const struct wlr_output_power_v1_set_mode_event *event = data;
     if (!event->output || !event->output->allocator) return;
 
+    int on = event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON;
+
     struct wlr_output_state state;
     wlr_output_state_init(&state);
-    wlr_output_state_set_enabled(&state, event->mode == ZWLR_OUTPUT_POWER_V1_MODE_ON);
+    wlr_output_state_set_enabled(&state, on);
     wlr_output_commit_state(event->output, &state);
     wlr_output_state_finish(&state);
+
+    /* Tell the idle timer what was done behind its back, so the two agree on
+     * which screens are dark. This one path DOES hand a screen to it: a daemon
+     * blanking on idle means the same thing fwm's own timer means, and the next
+     * keystroke should light it. */
+    server_idle_set_blanked(server, server_output_for(server, event->output), !on);
 }
 
 

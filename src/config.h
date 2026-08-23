@@ -425,6 +425,35 @@ typedef struct {
     FocusActivatePolicy on_activate;
 } FocusConfig;
 
+/* ── idle ────────────────────────────────────────────────────────────── */
+
+/*
+ * What an unattended session does with itself.
+ *
+ * fwm has always spoken ext-idle-notify, so swayidle could do this from
+ * outside — and it still can, on exactly the same timers. What it could not do
+ * was happen on a machine where nobody installed swayidle, which is every
+ * machine on its first evening: a compositor whose physics tick schedules
+ * frames forever leaves the monitor lit all night unless something else tells
+ * it not to. Two numbers here are cheaper than a second daemon in the session,
+ * and the daemon still works if you prefer it.
+ *
+ * `blank_after` is the screens; `lock_after` runs `lock`, because locking is
+ * not fwm's to do — it serves the session-lock protocol and something else
+ * (swaylock, gtklock, waylock) draws the screen behind it. With `lock` empty
+ * the timer does nothing at all rather than pretending to lock.
+ *
+ * An idle inhibitor freezes both: a client asking to be left alone while a
+ * video plays is asking about exactly this. So does a locker's own surface —
+ * the count starts again from the moment the screen locks, so `blank_after`
+ * measures from the lock rather than from the last keystroke before it.
+ */
+typedef struct {
+    double blank_after;   /* seconds of no input before the screens go dark; 0 = never */
+    double lock_after;    /* seconds before `lock` is run; 0 = never */
+    char   lock[256];     /* the locker's command line; "" = no locking */
+} IdleConfig;
+
 /* ── effects ─────────────────────────────────────────────────────────── */
 
 typedef struct {
@@ -1185,6 +1214,7 @@ typedef struct {
     StarConfig      star;
     InputConfig     input;
     FocusConfig     focus;
+    IdleConfig      idle;
     EffectsConfig   effects;
     SessionConfig   session;
     StartupConfig   startup;

@@ -1104,6 +1104,51 @@ static bool toml_number_in(toml_table_t *tbl, const char *key, double *out) {
     return false;
 }
 
+/* ── idle section ────────────────────────────────────────────────────── */
+
+static void load_idle(toml_table_t *root, FwmConfig *cfg) {
+    IdleConfig *i = &cfg->idle;
+    memset(i, 0, sizeof(*i));
+
+    /* Ten minutes, on by default, and the only default here that DOES
+     * something: a monitor left burning all night is not a preference anybody
+     * holds, and every other desktop the user has ever run turned it off
+     * without being asked. `0` is how you say never — see [idle] in the
+     * example config.
+     *
+     * Locking is the opposite and stays off: it needs a locker fwm cannot
+     * choose for you, and a session that locked itself unasked would be a
+     * surprise with a password prompt on it. */
+    i->blank_after = 600.0;
+    i->lock_after  = 0.0;
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "idle");
+    if (!tbl) return;
+
+    double v;
+    if (toml_number_in(tbl, "blank_after", &v)) {
+        if (v >= 0.0) i->blank_after = v;
+        else config_report_error(cfg, "[idle] blank_after %.0f is negative — using %.0f",
+                                 v, i->blank_after);
+    }
+    if (toml_number_in(tbl, "lock_after", &v)) {
+        if (v >= 0.0) i->lock_after = v;
+        else config_report_error(cfg, "[idle] lock_after %.0f is negative — using %.0f",
+                                 v, i->lock_after);
+    }
+
+    toml_datum_t d = toml_string_in(tbl, "lock");
+    if (d.ok) { snprintf(i->lock, sizeof(i->lock), "%s", d.u.s); free(d.u.s); }
+
+    /* A timer with nothing to run is the one combination that silently does
+     * nothing, so it is worth a line in the error panel rather than a puzzle
+     * at the end of a lunch break. */
+    if (i->lock_after > 0.0 && !i->lock[0])
+        config_report_error(cfg, "[idle] lock_after is set but lock is empty — "
+                                 "nothing will lock the session");
+}
+
 static void load_volume(toml_table_t *root, FwmConfig *cfg) {
     VolumeConfig *v = &cfg->volume;
     memset(v, 0, sizeof(*v));
@@ -1695,6 +1740,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_grass(NULL, cfg);
     load_sound(NULL, cfg);
     load_volume(NULL, cfg);
+    load_idle(NULL, cfg);
     load_mixer(NULL, cfg);
     load_stats(NULL, cfg);
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
@@ -1734,6 +1780,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_star(root, &cfg->star);
     load_input(root, cfg);
     load_focus(root, &cfg->focus, cfg);
+    load_idle(root, cfg);
     load_effects(root, &cfg->effects);
     load_session(root, &cfg->session, cfg);
     load_startup(root, &cfg->startup, cfg);

@@ -49,6 +49,13 @@ static const ConfigOption config_option_table[] = {
     { "camera.wrap",                    CFG_OPT_INT,    offsetof(FwmConfig, camera.wrap),                     0.0,     1.0,    "the strip is a ring: stepping past the last desktop arrives on the first" },
     { "camera.back_and_forth",          CFG_OPT_INT,    offsetof(FwmConfig, camera.back_and_forth),           0.0,     1.0,    "the bind for the desktop you are on returns to the one you came from" },
 
+    /* [idle]. Seconds, and the top of the range is a day: a machine that must
+     * never blank says 0, and everything else is a coffee break. The locker's
+     * command line is a string and therefore reload-only, like every other
+     * string in this table. */
+    { "idle.blank_after",               CFG_OPT_DOUBLE, offsetof(FwmConfig, idle.blank_after),                0.0, 86400.0,    "seconds of no input before the screens go dark; 0 = never" },
+    { "idle.lock_after",                CFG_OPT_DOUBLE, offsetof(FwmConfig, idle.lock_after),                 0.0, 86400.0,    "seconds before [idle] lock is run; 0 = never" },
+
     { "decor.border_width",             CFG_OPT_INT,    offsetof(FwmConfig, decor.border_width),              0.0,    64.0,    "focus border, px; 0 disables" },
     { "decor.col_active",               CFG_OPT_COLOR,  offsetof(FwmConfig, decor.col_active),                0.0,     0.0,    "focused border colour" },
     { "decor.col_inactive",             CFG_OPT_COLOR,  offsetof(FwmConfig, decor.col_inactive),              0.0,     0.0,    "unfocused border colour" },

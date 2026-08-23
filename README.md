@@ -350,7 +350,9 @@ since a rectangle cannot bend along with it. The effect needs the GLES2
 renderer.
 
 ### Desktop integration
-Runs the software you already use: **XWayland** (X11 apps as ordinary physics windows), **layer-shell** (waybar, mako, rofi, swaybg), **ext-session-lock** (hyprlock, swaylock), **idle protocols** (swayidle, no blanking during video), **xdg-activation**, **screencopy** and **ext-image-copy-capture** (screenshots, screen share — the old protocol for the tools that still speak it, the new one for the portals moving off it), **security-context** (a Flatpak app is never shown the privileged protocols), **gamma-control** (wlsunset), **pointer constraints** (games and mouse-look), **pointer-gestures** (touchpad swipes and pinches reach the app when fwm has no bind for them), **foreign-toplevel** (taskbars), **ext-workspace** (desktop strips in external bars), **data-control** (clipboard managers), **hyprland-global-shortcuts** (an external shell can own a keybind), plus drag-and-drop and primary selection.
+Runs the software you already use: **XWayland** (X11 apps as ordinary physics windows), **layer-shell** (waybar, mako, rofi, swaybg), **ext-session-lock** (hyprlock, swaylock), **idle protocols** (swayidle, no blanking during video — and fwm's own [`[idle]`](docs/configuration.md#idle) timers when nothing else is installed), **xdg-activation**, **screencopy** and **ext-image-copy-capture** (screenshots, screen share — the old protocol for the tools that still speak it, the new one for the portals moving off it), **security-context** (a Flatpak app is never shown the privileged protocols), **gamma-control** (wlsunset), **pointer constraints** (games and mouse-look), **pointer-gestures** (touchpad swipes and pinches reach the app when fwm has no bind for them), **foreign-toplevel** (taskbars), **ext-workspace** (desktop strips in external bars), **data-control** (clipboard managers), **hyprland-global-shortcuts** (an external shell can own a keybind), plus drag-and-drop and primary selection.
+
+**The screen goes out by itself.** `[idle] blank_after` (ten minutes out of the box) turns the monitors off after that long with no input, and `lock_after` runs whatever `lock` names — swaylock, gtklock, waylock, since fwm serves the session-lock protocol but does not draw a lock screen. Any key, click or touch lights the screens again, and the press that does it is spent on that rather than reaching the window underneath. An idle inhibitor freezes both timers where they stand instead of resetting them, so a film holds the screen for exactly as long as it plays. None of this displaces swayidle: it still works, on its own timers, and `blank_after = 0` hands the whole question back to it. Blanking is not `output_off` — nothing leaves the layout, no desktop is handed back, the pointer does not move, and a screen already dark for another reason is not lit by the next keystroke.
 
 **Cursor theme** is chosen rather than left to chance: `XCURSOR_THEME`/`XCURSOR_SIZE` are honoured as named, and with nothing asked for fwm goes looking for an installed theme that actually has the shapes clients ask for (resize arrows, grab hand, crosshair) instead of falling back to wlroots' built-in four. The name it settles on is exported, so GTK and Xwayland load the same one and the pointer keeps its style across windows.
 
@@ -857,6 +859,15 @@ on_activate = "same_desktop"
 
 [session]
 restore = "crash"    # "crash" (default) | "always" | "never" — see above
+
+[idle]
+# The screens after ten minutes with nobody at the keyboard; 0 = never, and the
+# question goes back to swayidle. Any input lights them again, and that first
+# press is spent waking rather than reaching the window under it.
+blank_after = 600
+#lock_after = 900             # and the locker after fifteen; 0 = never
+#lock       = "swaylock -f"   # fwm serves the protocol, it does not draw a lock
+
 
 # Per-window rules, applied once when the window opens. app_id and title are
 # POSIX extended regexes; a rule with both needs both to match, and later rules

@@ -211,6 +211,37 @@ off the last lit screen.
 **Names** are what fwm logs at startup (`output eDP-1: 1920x1080, scale 1.00`) and
 what `[[output]] name` expects.
 
+## The screen goes dark, or refuses to
+
+`[idle] blank_after` is the timer, ten minutes out of the box, and `0` turns it
+off entirely. `fwmctl set idle.blank_after=0` does it for the session without
+touching the file — and if the screens are already dark when you do, they come
+back on the spot.
+
+**It blanked during a film.** The player has to say so: a client that asks for
+an idle inhibitor freezes the timer where it stands, and one that does not is
+indistinguishable from a still window. mpv needs `--stop-screensaver` (its
+default) and browsers only inhibit while a video is actually playing fullscreen.
+The inhibitor also has to be on a desktop you are looking at — a video paused on
+desktop 7 keeps nothing awake, by design.
+
+**It never blanks.** Something is holding an inhibitor, or `blank_after` is 0.
+`fwmctl config | grep idle` shows the timers as they are now, including anything
+`fwmctl set` changed.
+
+**A screen stayed dark after it came back.** Only the screens fwm put out are
+lit again by input — one turned off by the lid, by `output_off` or by an
+external tool is left where it was on purpose. `outputs_on` brings everything
+back.
+
+**It locked and nothing appeared.** `[idle] lock` names a command, and fwm does
+not draw a lock screen itself: with an empty `lock` nothing locks, and with a
+locker that is not installed the session log has the shell's complaint about it.
+
+**swayidle instead.** It still works, on its own timers, and can do more than two
+numbers can (dim first, blank later, a different timeout on battery). Set
+`blank_after = 0` and `lock_after = 0` so the two are not both counting.
+
 ## Nested runs
 
 fwm runs inside your session, which is how it is developed:

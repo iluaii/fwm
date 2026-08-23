@@ -154,7 +154,7 @@ bool server_can_spin(const PhysicsBody *b) {
 /* Run a command as a detached child. Through a shell, so a bind can carry
  * quoting, arguments and $VARIABLES — `spawn:$BROWSER --new-window` works for
  * exactly the reason it looks like it should. */
-static void server_spawn(const char *cmd) {
+void server_spawn(const char *cmd) {
     pid_t pid = fork();
 
     if (pid == 0) {

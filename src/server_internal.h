@@ -230,6 +230,12 @@ void server_settings_notify(FwmServer *server);
  * a heavy price for taking back one line. 0 if there is no baseline. */
 int server_settings_file_value(const ConfigOption *opt, char *out, size_t cap);
 
+/* ── server_actions.c ─────────────────────────────────────────────────── */
+/* Run a command line through a shell, orphaned so it outlives the key that
+ * asked for it. `spawn:`, the terminal action, and the idle locker all use it —
+ * there is one way fwm starts a process, not three. */
+void server_spawn(const char *cmd);
+
 /* ── server_desktop.c ─────────────────────────────────────────────────── */
 void server_toggle_desktop_tiling(FwmServer *server, int d);
 void server_toggle_desktop_floating(FwmServer *server, int d);
@@ -246,6 +252,14 @@ void radial_grab_sync(FwmServer *server, bool was_open);
 void mixer_grab_sync(FwmServer *server, bool was_open);
 void keyboard_apply_input_config(FwmServer *server, struct wlr_keyboard *kb);
 void pointer_apply_input_config(FwmServer *server, struct wlr_input_device *device);
+
+/* ── server_idle.c ────────────────────────────────────────────────────── */
+/* fwm's own idle timers: the screens after [idle] blank_after, the locker after
+ * lock_after. Driven by the tick's clock and reset by every input path. */
+void server_idle_tick(FwmServer *server, double dt);
+void server_idle_activity(FwmServer *server);
+int  server_idle_consume_wake(FwmServer *server);
+void server_idle_set_blanked(FwmServer *server, FwmOutput *out, int blanked);
 
 /* ── server_output.c ──────────────────────────────────────────────────── */
 void server_output_register(FwmServer *server);

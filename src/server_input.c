@@ -102,6 +102,9 @@ void server_notify_activity(FwmServer *server) {
     if (server->idle_notifier) {
         wlr_idle_notifier_v1_notify_activity(server->idle_notifier, server->seat);
     }
+    /* And fwm's own timers, which answer the same question with their own
+     * hands: the screens it put out come back here. */
+    server_idle_activity(server);
     /* Input may set something moving (a throw, a drag, a bind), so leave the
      * idle heartbeat at once rather than waiting it out. */
     server_tick_wake(server);
@@ -338,7 +341,7 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
     FwmServer *server = keyboard->server;
 
     server_notify_activity(server);
-    
+
     // VT switching (Ctrl+Alt+F1..F12): xkb maps the chord to XF86Switch_VT_*
     // keysyms; only meaningful on the DRM backend where we own a session
     // (nested backends have none). Checked before the lock gate below on
@@ -360,6 +363,22 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
                 return;
             }
         }
+    }
+
+    /* The press that lit a dark screen is spent doing exactly that. Without
+     * this the key that woke the session would also be typed into whatever had
+     * focus when it went dark — and the whole point of waking a screen is to
+     * look at it before touching anything.
+     *
+     * Presses only, and marked consumed so the release goes the same way: a
+     * client that never saw the press must not be handed the release. After
+     * the VT chord above deliberately — switching to another TTY is not
+     * "touching what is on this screen", so it works from a dark one. */
+    if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+        server_idle_consume_wake(server)) {
+        if (event->keycode < sizeof(server->key_consumed))
+            server->key_consumed[event->keycode] = 1;
+        return;
     }
 
     /* Locked: the lock surface owns the keyboard. No binds, no launcher, no

@@ -496,6 +496,11 @@ static int server_is_busy(FwmServer *server) {
 void server_schedule_frames(FwmServer *server) {
     struct FwmOutput *output;
     wl_list_for_each(output, &server->outputs, link) {
+        /* A screen the idle timer put out has nothing to present and no vblank
+         * to present it on; asking it for a frame every beat would be the
+         * compositor talking to a monitor that is switched off. It gets one
+         * asked for by hand the moment it comes back (server_idle.c). */
+        if (output->idle_blanked) continue;
         wlr_output_schedule_frame(output->wlr_output);
     }
 }
@@ -1931,6 +1936,11 @@ static int physics_tick_cb(void *data) {
     server_request_tray_redraw(server);
 
     idle_inhibit_refresh(server);
+
+    /* And fwm's own idle clock, immediately after the inhibitors are counted:
+     * it reads the flag that call just set, so a film that started this tick
+     * holds the screen from this tick. */
+    server_idle_tick(server, elapsed);
 
     // Parallax: shift each wallpaper layer by a fraction of its own monitor's
     // camera offset.
