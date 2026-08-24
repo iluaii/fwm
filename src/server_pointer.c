@@ -466,7 +466,6 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
                 return;
             }
         }
-        }
     }
 
     /* Across the seam, or the ordinary move — the crossing has already put the
