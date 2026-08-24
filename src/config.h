@@ -376,6 +376,17 @@ typedef struct {
     int  repeat_rate;      /* key repeat, chars/s */
     int  repeat_delay;     /* ms before repeat starts */
 
+    /* How long CapsLock has to be HELD before it locks anything. 0 (default):
+     * it works the way it always has, locking the moment it goes down.
+     *
+     * The key is enormous, it sits under the little finger on the home row,
+     * and everything it does is done to the next sentence rather than to the
+     * one being typed — so the cost of brushing it is paid several words after
+     * the mistake. Asking for a deliberate hold takes the accident out of it
+     * without taking the key away: a tap does nothing at all, and nothing at
+     * all is what a tap was already worth. */
+    int  caps_hold_ms;
+
     /* How far one detent of a knob may carry a menu when it is being spun
      * rather than clicked: 1 is off, and the steps in between are earned by
      * keeping the turn going. A knob is the one input fwm has that can be

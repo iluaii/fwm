@@ -58,6 +58,12 @@ struct FwmKeyboard {
     struct wl_listener modifiers;
     struct wl_listener key;
     struct wl_listener destroy;
+    /* [input] caps_hold_ms: the CapsLock being held right now, as keycode + 1
+     * so that 0 is "none", and the timer counting out the hold. Per keyboard
+     * rather than per server — two keyboards are two hands, and a key held on
+     * one says nothing about the other. */
+    uint32_t caps_key;
+    struct wl_event_source *caps_timer;
 };
 
 /* ── server.c ─────────────────────────────────────────────────────────── */

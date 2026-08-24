@@ -1494,6 +1494,62 @@ static void test_battery(void) {
     drop_config();
 }
 
+/* CapsLock only locks when it is held, and only when the file asks for it. */
+static void test_caps_hold(void) {
+    CASE("caps_hold_ms is off unless the file sets it");
+    const char *p = write_config("[binds]\n\"super+q\" = \"killclient\"\n");
+    FwmConfig cfg;
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_INT(cfg.input.caps_hold_ms, 0);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("a hold in milliseconds is taken as given");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[input]\ncaps_hold_ms = 400\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_INT(cfg.input.caps_hold_ms, 400);
+    config_free(&cfg);
+    drop_config();
+
+    /* Zero is a real answer — "lock on the press, as it always did" — and has
+     * to survive being written out explicitly, not be read as unset. */
+    CASE("zero is a setting, not an absence");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[input]\ncaps_hold_ms = 0\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_INT(cfg.input.caps_hold_ms, 0);
+    config_free(&cfg);
+    drop_config();
+
+    /* A hold nobody could sit through is a typo, and a key that stopped
+     * working with no word said is the worst way to find out. */
+    CASE("a hold out of range is reported and the default kept");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[input]\ncaps_hold_ms = 90000\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 1);
+    CHECK_INT(cfg.input.caps_hold_ms, 0);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("and so is a negative one");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[input]\ncaps_hold_ms = -1\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 1);
+    CHECK_INT(cfg.input.caps_hold_ms, 0);
+    config_free(&cfg);
+    drop_config();
+}
+
 int main(void) {
     test_missing_file();
     test_values_parse();
@@ -1524,5 +1580,6 @@ int main(void) {
     test_battery();
     test_startup();
     test_camera_back_and_forth();
+    test_caps_hold();
     return t_report("config");
 }

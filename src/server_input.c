@@ -37,6 +37,10 @@
 #include "wallpaper.h"
 #include "group.h"
 #include "expo.h"
+/* wlr_keyboard_notify_modifiers: the only public way to put a modifier state
+ * into a keyboard that no key press produced. Backend-facing header, used here
+ * for the same reason a backend would — see caps_lock_toggle. */
+#include <wlr/interfaces/wlr_keyboard.h>
 
 static int key_repeat_cb(void *data);
 
@@ -335,6 +339,83 @@ static int try_binds(FwmServer *server, struct wlr_keyboard_key_event *event,
     return 0;
 }
 
+/* ── CapsLock on a hold ──────────────────────────────────────────────────
+ *
+ * With [input] caps_hold_ms set, a tap on CapsLock does nothing whatsoever and
+ * only holding it down that long locks. Everything below turns on one fact
+ * about wlroots: the `key` signal is emitted BEFORE the xkb state is updated,
+ * and `update_state` is read after it comes back — so clearing that field is
+ * what stops the press from reaching the lock. Nothing else can: by the time a
+ * key has been through xkb, the lock has already turned over. */
+
+/* Turn the lock over by hand, which is what the swallowed press would have
+ * done. Only the Caps bit moves; depressed, latched and group are handed back
+ * exactly as they came, so nothing else in the modifier state is disturbed. */
+static void caps_lock_toggle(struct wlr_keyboard *kb) {
+    if (!kb || !kb->keymap) return;
+    xkb_mod_index_t idx = xkb_keymap_mod_get_index(kb->keymap, XKB_MOD_NAME_CAPS);
+    if (idx == XKB_MOD_INVALID) return;
+    wlr_keyboard_notify_modifiers(kb, kb->modifiers.depressed, kb->modifiers.latched,
+                                  kb->modifiers.locked ^ (uint32_t)(1u << idx),
+                                  kb->modifiers.group);
+}
+
+static int caps_hold_elapsed(void *data) {
+    struct FwmKeyboard *keyboard = data;
+    /* Still down — the hold was meant. The key stays claimed until it comes
+     * back up, so nothing here has to be undone by the release. */
+    caps_lock_toggle(keyboard->wlr_keyboard);
+    return 0;
+}
+
+static void caps_disarm(struct FwmKeyboard *keyboard) {
+    keyboard->caps_key = 0;
+    if (keyboard->caps_timer) wl_event_source_timer_update(keyboard->caps_timer, 0);
+}
+
+/* Is this the key that locks caps? Asked of the keymap, not of the keycode: a
+ * CapsLock moved elsewhere by [input] kbd_options is still this key, and a
+ * caps key remapped into an Escape is deliberately not. */
+static bool key_is_caps(struct FwmKeyboard *keyboard, uint32_t keycode) {
+    const xkb_keysym_t *syms;
+    int n = xkb_state_key_get_syms(keyboard->wlr_keyboard->xkb_state, keycode + 8, &syms);
+    for (int i = 0; i < n; i++)
+        if (syms[i] == XKB_KEY_Caps_Lock) return true;
+    return false;
+}
+
+/* True when the event was ours and nothing else may look at it. */
+static bool caps_hold_gate(struct FwmKeyboard *keyboard,
+                           struct wlr_keyboard_key_event *event) {
+    FwmServer *server = keyboard->server;
+    int hold = server->config.input.caps_hold_ms;
+
+    if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        if (hold <= 0 || !key_is_caps(keyboard, event->keycode)) return false;
+        /* xkb must not see this go down, and the client must not see it at
+         * all: a press nobody is told about is a press with no release owing. */
+        event->update_state = false;
+        if (!keyboard->caps_timer) {
+            keyboard->caps_timer = wl_event_loop_add_timer(
+                wl_display_get_event_loop(server->wl_display), caps_hold_elapsed, keyboard);
+            /* No timer, no hold to count — let the key work as it always did
+             * rather than swallowing it into a lock that can never turn. */
+            if (!keyboard->caps_timer) { event->update_state = true; return false; }
+        }
+        keyboard->caps_key = event->keycode + 1;
+        wl_event_source_timer_update(keyboard->caps_timer, hold);
+        return true;
+    }
+
+    /* The release of a press this gate took. Claimed by keycode rather than by
+     * keymap, so a layout switched while the key was down still gives the key
+     * back — and so a caps_hold_ms turned off mid-hold does too. */
+    if (keyboard->caps_key != event->keycode + 1) return false;
+    event->update_state = false;   /* xkb never saw the down; it gets no up */
+    caps_disarm(keyboard);
+    return true;
+}
+
 static void handle_keyboard_key(struct wl_listener *listener, void *data) {
     struct FwmKeyboard *keyboard = wl_container_of(listener, keyboard, key);
     struct wlr_keyboard_key_event *event = data;
@@ -380,6 +461,11 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
             server->key_consumed[event->keycode] = 1;
         return;
     }
+
+    /* Before the lock gate, and before every bind: what this key means is
+     * settled at the lowest level there is, so that a tap on it is nothing
+     * anywhere — in a window, in the launcher, in a password field alike. */
+    if (caps_hold_gate(keyboard, event)) return;
 
     /* Locked: the lock surface owns the keyboard. No binds, no launcher, no
      * overlay shortcuts — a bind still firing here (spawn:kitty, EXIT,
@@ -632,6 +718,9 @@ static void handle_keyboard_modifiers(struct wl_listener *listener, void *data) 
 
 static void handle_keyboard_destroy(struct wl_listener *listener, void *data) {
     struct FwmKeyboard *keyboard = wl_container_of(listener, keyboard, destroy);
+    /* A keyboard unplugged mid-hold leaves a timer that would fire into freed
+     * memory — and a lock turned over by a keyboard that is no longer there. */
+    if (keyboard->caps_timer) wl_event_source_remove(keyboard->caps_timer);
     wl_list_remove(&keyboard->modifiers.link);
     wl_list_remove(&keyboard->key.link);
     wl_list_remove(&keyboard->destroy.link);

@@ -608,6 +608,7 @@ static void load_input(toml_table_t *root, FwmConfig *cfg) {
     in->kbd_options[0] = '\0';
     in->repeat_rate  = 25;
     in->repeat_delay = 600;
+    in->caps_hold_ms = 0;
     in->knob_accel   = 4;
     in->seam_nearest = 1;
 
@@ -640,6 +641,12 @@ static void load_input(toml_table_t *root, FwmConfig *cfg) {
     if (d.ok && d.u.i > 0) in->repeat_rate = (int)d.u.i;
     d = toml_int_in(tbl, "repeat_delay");
     if (d.ok && d.u.i > 0) in->repeat_delay = (int)d.u.i;
+    d = toml_int_in(tbl, "caps_hold_ms");
+    if (d.ok) {
+        if (d.u.i >= 0 && d.u.i <= 5000) in->caps_hold_ms = (int)d.u.i;
+        else config_report_error(cfg, "[input] caps_hold_ms %lld out of range 0..5000 — using %d",
+                                 (long long)d.u.i, in->caps_hold_ms);
+    }
     d = toml_int_in(tbl, "knob_accel");
     if (d.ok) {
         if (d.u.i >= 1 && d.u.i <= 16) in->knob_accel = (int)d.u.i;

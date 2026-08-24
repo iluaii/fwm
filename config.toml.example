@@ -733,6 +733,16 @@ kbd_options = "grp:alt_shift_toggle"
 # kbd_variant = ""
 repeat_rate  = 25
 repeat_delay = 600
+# How long CapsLock has to be HELD before it locks anything, in milliseconds.
+# A tap then does nothing at all — and nothing at all is what a tap was already
+# worth, since the key is enormous, sits under the little finger on the home
+# row, and does its damage to the sentence AFTER the one being typed.
+#
+# 0 (default) leaves it alone: it locks the moment it goes down, as always.
+# Around 400 is a deliberate press without being a wait. The key is found by
+# what the keymap says it does, so a CapsLock moved by kbd_options moves with
+# it, and one remapped into an Escape is left out of this entirely.
+#caps_hold_ms = 400
 # How far one detent of a keyboard knob may step when it is SPUN rather than
 # clicked, in the ring, the launcher and the desktop strip: a turn that keeps
 # going earns up to this many rows per click, and one pause puts it back to

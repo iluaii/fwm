@@ -101,6 +101,7 @@ static const ConfigOption config_option_table[] = {
 
     { "input.repeat_rate",              CFG_OPT_INT,    offsetof(FwmConfig, input.repeat_rate),               0.0,   200.0,    "key repeat, chars/s" },
     { "input.repeat_delay",             CFG_OPT_INT,    offsetof(FwmConfig, input.repeat_delay),              0.0,  5000.0,    "ms before repeat starts" },
+    { "input.caps_hold_ms",             CFG_OPT_INT,    offsetof(FwmConfig, input.caps_hold_ms),              0.0,  5000.0,    "ms CapsLock must be held to lock; 0 = lock on the press" },
 
     { "gestures.sensitivity",           CFG_OPT_DOUBLE, offsetof(FwmConfig, gestures.sensitivity),            0.1,    10.0,    "camera px per finger px" },
     { "gestures.natural",               CFG_OPT_INT,    offsetof(FwmConfig, gestures.natural),                0.0,     1.0,    "1 = the strip follows the fingers" },
