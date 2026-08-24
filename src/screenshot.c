@@ -337,6 +337,58 @@ static struct wlr_buffer *freeze_region(FwmServer *server, struct wlr_buffer *sr
     return dst;
 }
 
+/* ── freezing the screen under the selector ──────────────────────────────
+ *
+ * A rectangle is dragged out over seconds, and for those seconds the desktop
+ * under it used to go on living: video played, windows settled, the tray
+ * ticked. What was then photographed was the frame AFTER the selection closed,
+ * so the picture never quite matched the thing that had been framed. Holding a
+ * still over the monitor makes the two the same by construction — the shot is
+ * read back from a screen that has not changed since the selector opened. */
+
+/* Put the still away. Safe at any time, and the only way the node ever goes:
+ * everything that ends a selection comes through here. */
+static void freeze_drop(FwmServer *server) {
+    if (!server->shot_freeze) return;
+    wlr_scene_node_destroy(&server->shot_freeze->node);
+    server->shot_freeze = NULL;
+}
+
+/* Hold `frame` — the monitor's own last frame — over that monitor, so the
+ * desktop underneath goes on running without any of it reaching the screen.
+ *
+ * The frame is copied rather than shown directly: it belongs to the output's
+ * swapchain and comes back around within a frame or two, and a scene node still
+ * holding it would by then be showing whatever was drawn into it next.
+ *
+ * False when there is no still to show, and the selector then works over the
+ * live screen exactly as it always did. A frozen picture is worth having and
+ * never worth failing the screenshot for. */
+static bool freeze_show(FwmServer *server, FwmOutput *out,
+                        struct wlr_buffer *frame) {
+    freeze_drop(server);
+    if (!out->wlr_output || out->box.width <= 0 || out->box.height <= 0) return false;
+    /* A turned monitor's frame is in its own turned space, and laying it back
+     * over that monitor unturned would show the desktop on its side. Nobody is
+     * served by a wrong picture, so a turned screen keeps the live selector. */
+    if (out->wlr_output->transform != WL_OUTPUT_TRANSFORM_NORMAL) return false;
+
+    struct wlr_buffer *copy = freeze_region(server, frame, &(struct wlr_box){
+        0, 0, out->wlr_output->width, out->wlr_output->height });
+    if (!copy) return false;
+
+    server->shot_freeze = wlr_scene_buffer_create(server->layer_overlay, copy);
+    wlr_buffer_drop(copy);   /* the scene holds a reference now */
+    if (!server->shot_freeze) return false;
+
+    /* Buffer pixels in, layout pixels out: the still is the size of the screen
+     * it came off, whatever that screen's scale makes of the two numbers. */
+    wlr_scene_buffer_set_dest_size(server->shot_freeze,
+                                   out->box.width, out->box.height);
+    wlr_scene_node_set_position(&server->shot_freeze->node, out->box.x, out->box.y);
+    return true;
+}
+
 /* Launch the effect for a shot of `box` (buffer pixels) on `out`. */
 static void fly_start(FwmServer *server, struct wlr_output *out,
                       struct wlr_buffer *frame, const struct wlr_box *box) {
@@ -465,6 +517,15 @@ static void pending_commit(struct wl_listener *listener, void *data) {
     pending_free(p);   /* before the work below: encoding a picture takes a
                         * while, and a second frame must not find this request
                         * still armed */
+    /* The frame in hand is the one the still was standing in, so the picture is
+     * already safe and the screen can start moving again. Every exit below is
+     * covered by dropping it here rather than at each return.
+     *
+     * Unless a selector is up: this shot is then somebody else's — the only way
+     * to ask for one mid-selection is over the control socket, since the
+     * selector swallows every key — and pulling the still out from under a
+     * rectangle still being dragged would leave it framing a moving screen. */
+    if (!server->shot_picker) freeze_drop(server);
 
     unsigned char *png = NULL;
     size_t len = 0;
@@ -481,7 +542,13 @@ static void pending_commit(struct wl_listener *listener, void *data) {
 
 static void pending_output_destroy(struct wl_listener *listener, void *data) {
     ShotPending *p = wl_container_of(listener, p, destroy);
+    FwmServer *server = p->server;
     pending_free(p);
+    /* No frame is coming now, so nothing is going to take the still down on the
+     * way past. Left standing it would be a photograph of a monitor that no
+     * longer exists, waiting in the scene for one to be plugged in where it
+     * used to be. */
+    if (!server->shot_picker) freeze_drop(server);
 }
 
 /* Ask `out` for a frame and photograph it when it arrives. `region` is
@@ -635,8 +702,12 @@ static void picker_redraw(struct FwmShotPicker *p) {
     wlr_scene_node_set_position(&p->label->node, lx, ly);
 }
 
-static void picker_close(FwmServer *server) {
+/* `keep_still` is for the one caller that has just taken a selection: the shot
+ * is read back from the frame the still is standing in, so it has to outlive
+ * the furniture by exactly one commit. Everywhere else the two go together. */
+static void picker_close(FwmServer *server, bool keep_still) {
     struct FwmShotPicker *p = server->shot_picker;
+    if (!keep_still) freeze_drop(server);
     if (!p) return;
     server->shot_picker = NULL;   /* first: the tree going away damages the
                                    * scene, and nothing may find a half-freed
@@ -649,21 +720,19 @@ static void picker_close(FwmServer *server) {
         wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
 }
 
-void screenshot_region(FwmServer *server) {
-    if (server->shot_picker) { picker_close(server); return; }
-
-    FwmOutput *out = server_active_output(server);
-    if (!out) {
-        toast_show(server, true, "screenshot failed: no screen to photograph");
-        return;
-    }
-
+/* The selector's own furniture, over `out`. Split out of screenshot_region
+ * because it goes up a frame later than the key that asked for it: the still
+ * has to be taken before any of this is on screen, or the dimming and the
+ * outline end up inside the picture it is a still of. */
+static bool picker_open(FwmServer *server, FwmOutput *out) {
     struct FwmShotPicker *p = calloc(1, sizeof(*p));
-    if (!p) return;
+    if (!p) return false;
     p->server = server;
     p->out = out;
+    /* After the still, so it draws over it: the scene stacks siblings in the
+     * order they were made, and the still went into this same layer first. */
     p->tree = wlr_scene_tree_create(server->layer_overlay);
-    if (!p->tree) { free(p); return; }
+    if (!p->tree) { free(p); return false; }
 
     const FwmTheme *thm = theme_get();
     const float dim[4] = { 0.0f, 0.0f, 0.0f, 0.38f };  /* premultiplied */
@@ -678,6 +747,80 @@ void screenshot_region(FwmServer *server) {
     server->shot_picker = p;
     picker_redraw(p);
     wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "crosshair");
+    return true;
+}
+
+/* ── the frame the still is taken from ───────────────────────────────────
+ *
+ * A monitor's own last frame is the only picture with everything in it: every
+ * cairo overlay hands its pixels to the scene and frees its copy, so walking
+ * the scene graph photographs a desktop with no furniture on it (see the note
+ * at the top of screenshot.h). That frame has to be asked for and waited on,
+ * which is why the selector opens one commit after the key rather than at it. */
+typedef struct {
+    FwmServer *server;
+    FwmOutput *out;
+    struct wl_listener commit;
+    struct wl_listener destroy;
+} ShotArm;
+
+/* At most one, for the same reason there is at most one selector. */
+static ShotArm *arming;
+
+static void arm_free(ShotArm *a) {
+    wl_list_remove(&a->commit.link);
+    wl_list_remove(&a->destroy.link);
+    if (arming == a) arming = NULL;
+    free(a);
+}
+
+static void arm_commit(struct wl_listener *listener, void *data) {
+    ShotArm *a = wl_container_of(listener, a, commit);
+    struct wlr_output_event_commit *event = data;
+
+    /* A commit that changed something other than the picture (a mode, the
+     * gamma ramp) carries no buffer; keep waiting for one that does. */
+    if (!(event->state->committed & WLR_OUTPUT_STATE_BUFFER) || !event->state->buffer)
+        return;
+
+    FwmServer *server = a->server;
+    FwmOutput *out = a->out;
+    freeze_show(server, out, event->state->buffer);
+    arm_free(a);   /* before the selector goes up: nothing may find this still
+                    * armed once the thing it was arming exists */
+    if (!picker_open(server, out)) freeze_drop(server);
+}
+
+static void arm_output_destroy(struct wl_listener *listener, void *data) {
+    ShotArm *a = wl_container_of(listener, a, destroy);
+    arm_free(a);
+}
+
+void screenshot_region(FwmServer *server) {
+    /* Pressing it again puts the selector away — whether it is up, or still
+     * waiting for the frame it is going to be drawn over. */
+    if (server->shot_picker) { picker_close(server, false); return; }
+    if (arming) { arm_free(arming); return; }
+
+    FwmOutput *out = server_active_output(server);
+    if (!out || !out->wlr_output || !out->enabled) {
+        toast_show(server, true, "screenshot failed: no screen to photograph");
+        return;
+    }
+
+    ShotArm *a = calloc(1, sizeof(*a));
+    if (!a) return;
+    a->server = server;
+    a->out = out;
+    a->commit.notify = arm_commit;
+    wl_signal_add(&out->wlr_output->events.commit, &a->commit);
+    a->destroy.notify = arm_output_destroy;
+    wl_signal_add(&out->wlr_output->events.destroy, &a->destroy);
+    arming = a;
+
+    /* Nothing may have changed on screen, and a frame nobody asks for never
+     * comes — so ask. */
+    wlr_output_schedule_frame(out->wlr_output);
 }
 
 bool screenshot_selecting(FwmServer *server) {
@@ -715,12 +858,17 @@ bool screenshot_handle_button(FwmServer *server, bool pressed) {
     struct wlr_box hit;
     bool on_screen = wlr_box_intersection(&hit, &sel, &out_box);
 
-    picker_close(server);   /* the overlay must be gone BEFORE the request: the
-                             * picture is the next frame, dimming and all */
+    picker_close(server, true);   /* the overlay must be gone BEFORE the request:
+                                   * the picture is the next frame, dimming and
+                                   * all. The still stays — that next frame is
+                                   * exactly the one it is standing in. */
 
     /* A click with no drag in it is how people cancel out of a selector, and
      * a one-pixel sliver is never what was meant. */
-    if (!on_screen || hit.width < 2 || hit.height < 2) return true;
+    if (!on_screen || hit.width < 2 || hit.height < 2) {
+        freeze_drop(server);   /* nothing is coming to photograph it */
+        return true;
+    }
 
     capture(server, out, &(struct wlr_box){
         hit.x - out_box.x, hit.y - out_box.y, hit.width, hit.height }, true);
@@ -729,13 +877,14 @@ bool screenshot_handle_button(FwmServer *server, bool pressed) {
 
 bool screenshot_handle_key(FwmServer *server, xkb_keysym_t sym) {
     if (!server->shot_picker) return false;
-    if (sym == XKB_KEY_Escape) picker_close(server);
+    if (sym == XKB_KEY_Escape) picker_close(server, false);
     return true;   /* everything else is swallowed: the windows a key would
                     * reach are under a selector the user is aiming with */
 }
 
 void screenshot_cleanup(FwmServer *server) {
-    picker_close(server);
+    if (arming) arm_free(arming);
+    picker_close(server, false);   /* takes the still with it */
     fly_stop();
     /* The line saying where the shot went is everybody's now (ui/toast.c), so
      * it is dropped as one thing rather than from here. */

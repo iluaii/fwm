@@ -733,6 +733,12 @@ typedef struct FwmServer {
     /* The screenshot region selector, on the same terms: NULL when it is not
      * up, and that NULL is what the input paths test (see src/screenshot.h). */
     struct FwmShotPicker *shot_picker;
+    /* The still the selector is aimed at: a copy of the monitor's last frame,
+     * held over that monitor for as long as the rectangle is being dragged, so
+     * the picture cannot move out from under the hand choosing it. NULL when
+     * nothing is frozen. It outlives the selector by one commit, because the
+     * shot is read back from the frame that still has it on screen. */
+    struct wlr_scene_buffer *shot_freeze;
     
     int running;
 } FwmServer;
