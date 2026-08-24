@@ -1370,6 +1370,9 @@ static void test_idle(void) {
     CHECK(fabs(cfg.idle.blank_after - 600.0) < 0.001);
     CHECK(fabs(cfg.idle.lock_after) < 0.001);
     CHECK_STR(cfg.idle.lock, "");
+    /* And a film keeps them on: off by default here means screens going dark
+     * mid-video, which is the whole reason the option was added. */
+    CHECK_INT(cfg.idle.audio_holds, 1);
     config_free(&cfg);
 
     const char *p = write_config(
@@ -1377,11 +1380,13 @@ static void test_idle(void) {
         "[idle]\n"
         "blank_after = 45\n"
         "lock_after = 90.5\n"
+        "audio_holds = false\n"
         "lock = \"swaylock -f\"\n");
     config_load(&cfg, p);
     CHECK(fabs(cfg.idle.blank_after - 45.0) < 0.001);    /* an integer is a number */
     CHECK(fabs(cfg.idle.lock_after - 90.5) < 0.001);
     CHECK_STR(cfg.idle.lock, "swaylock -f");
+    CHECK_INT(cfg.idle.audio_holds, 0);
     CHECK_INT(cfg.error_count, 0);
     config_free(&cfg);
     drop_config();

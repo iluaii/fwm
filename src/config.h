@@ -458,11 +458,19 @@ typedef struct {
  * video plays is asking about exactly this. So does a locker's own surface —
  * the count starts again from the moment the screen locks, so `blank_after`
  * measures from the lock rather than from the last keystroke before it.
+ *
+ * `audio_holds` is the same question asked of the machine rather than of a
+ * client, and it exists because the inhibitor is a courtesy plenty of players
+ * never pay: watch a video in a browser tab that does not raise one and the
+ * screens go out in the middle of it. While a sound card is playing, both
+ * timers start over. It sees anything that reaches a card — a browser, mpv, a
+ * game — and nothing that does not, Bluetooth output being the gap.
  */
 typedef struct {
     double blank_after;   /* seconds of no input before the screens go dark; 0 = never */
     double lock_after;    /* seconds before `lock` is run; 0 = never */
     char   lock[256];     /* the locker's command line; "" = no locking */
+    int    audio_holds;   /* 1 = sound playing counts as somebody being here */
 } IdleConfig;
 
 /* ── battery ─────────────────────────────────────────────────────────── */

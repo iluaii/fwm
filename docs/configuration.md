@@ -444,6 +444,7 @@ already on the visible desktop.
 blank_after = 600            # seconds of no input before the screens go dark; 0 = never
 lock_after  = 900            # seconds before `lock` is run; 0 = never
 lock        = "swaylock -f"  # what locks the session; "" = nothing does
+audio_holds = true           # sound playing starts both timers over
 ```
 
 What an unattended session does with itself. fwm speaks
@@ -473,6 +474,31 @@ as it plays, and the session goes dark a minute after the film ends rather than
 being handed a fresh ten. Only an inhibitor on a desktop somebody is looking at
 counts — a video paused on desktop 7 keeps nothing awake.
 
+**`audio_holds` is that same courtesy for the players that never ask.** Raising
+an inhibitor is optional and plenty of things skip it — a browser tab being the
+common one — which is how a session ends up dark in the middle of a video. With
+`audio_holds` on (the default), sound coming out of the machine puts both timers
+back to the start, so watching something without touching the keyboard keeps the
+screens on. Where an inhibitor freezes, this **resets**: an inhibitor is a
+client's promise and ends when the client says it ends, while this is a guess
+made from the sound card, and a guess that expired the instant the sound stopped
+would blank the screen in the pause between two songs. Every stretch of quiet
+gets the whole of `blank_after` to itself.
+
+It reads ALSA's own state (`/proc/asound`), not the sound server's, so it costs
+a handful of small reads and sees everything played through a sound card —
+built-in, USB, HDMI — whoever played it. It does not see what never reaches a
+card: **Bluetooth output is invisible to it**, and there an inhibitor (or
+swayidle) is still the answer. It is also not asked most of the time: the poll
+only runs in the few seconds around a threshold that is about to fire, once a
+second, which for a two-hour film is about five reads per ten minutes. Sound
+behind a lock screen holds nothing — a playlist somebody forgot to stop is not a
+reason to light the panels all night.
+
+It holds **fwm's own** timers and nothing else: ext-idle-notify keeps reporting
+the truth about input, so swayidle and anything else listening there run on
+their own timers as before, sound or no sound.
+
 **Locking is a command**, because fwm does not draw a lock screen: it serves
 the session-lock protocol and something else (swaylock, gtklock, waylock) draws
 the screen behind it. `lock_after` with no `lock` is reported as a config
@@ -480,7 +506,7 @@ problem rather than quietly doing nothing. The locker is started once per
 stretch of idleness, not once a tick.
 
 Both timers are live through `fwmctl set idle.blank_after=…` and
-`idle.lock_after=…`; the command is a string, so like every other string in the
+`idle.lock_after=…`, as is `idle.audio_holds=0|1`; the command is a string, so like every other string in the
 config it is reload-only. Setting `blank_after` to 0 while the screens are dark
 lights them again — the dial that put them out is the dial that brings them
 back.

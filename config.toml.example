@@ -430,15 +430,28 @@ critical = 5
 #               protocol but does not lock by itself, so this is where you name
 #               what draws it: swaylock, gtklock, waylock. Empty = no locking,
 #               and lock_after without it is reported as a config problem.
+# audio_holds   sound coming out of the machine puts both timers back to the
+#               start, so a film watched without touching the keyboard keeps
+#               the screens on. Default true.
 #
 # An idle inhibitor (a video player asking not to be interrupted) FREEZES both
 # timers where they stand rather than resetting them: a film that runs for two
 # hours holds the screen for two hours, and the session goes dark a minute
 # after it ends rather than handing out a fresh ten.
+#
+# audio_holds is the same idea for the players that never ask — a browser tab
+# being the usual one, and the screens going dark in the middle of a video the
+# usual result. It reads ALSA's own state (/proc/asound), so it sees anything
+# played through a sound card, whoever played it, and nothing that skips one:
+# Bluetooth output is invisible to it. Turn it off on a machine whose sound
+# server is told never to suspend an idle device — wireplumber's
+# session.suspend-timeout-seconds = 0, usually set to stop a speaker popping —
+# because a device held open with nothing playing looks exactly like a film.
 [idle]
 blank_after = 600
 #lock_after = 900
 #lock       = "swaylock -f"
+#audio_holds = true
 
 # The clipboard, and the thing about Wayland's that surprises everybody: it is
 # not a place where text is kept, it is a PROMISE by the window you copied

@@ -218,16 +218,26 @@ off entirely. `fwmctl set idle.blank_after=0` does it for the session without
 touching the file — and if the screens are already dark when you do, they come
 back on the spot.
 
-**It blanked during a film.** The player has to say so: a client that asks for
-an idle inhibitor freezes the timer where it stands, and one that does not is
-indistinguishable from a still window. mpv needs `--stop-screensaver` (its
-default) and browsers only inhibit while a video is actually playing fullscreen.
-The inhibitor also has to be on a desktop you are looking at — a video paused on
-desktop 7 keeps nothing awake, by design.
+**It blanked during a film.** Sound holds the timers off by itself — while a
+sound card is playing, both start over, which covers every player that does not
+raise an idle inhibitor of its own (a browser tab, usually). Two things it
+cannot cover: a video with no sound, and sound sent over **Bluetooth**, which
+never touches an ALSA device and so cannot be seen. For those the player has to
+say so, and a client that asks for an inhibitor freezes the timer where it
+stands: mpv needs `--stop-screensaver` (its default), browsers inhibit only
+while a video is actually playing fullscreen. The inhibitor also has to be on a
+desktop you are looking at — a video paused on desktop 7 keeps nothing awake, by
+design. `fwmctl set idle.audio_holds=0` turns the sound half off.
 
-**It never blanks.** Something is holding an inhibitor, or `blank_after` is 0.
-`fwmctl config | grep idle` shows the timers as they are now, including anything
-`fwmctl set` changed.
+**It never blanks.** Something is holding an inhibitor, `blank_after` is 0, or
+the machine sounds like it is playing when it is not: a sound server told never
+to suspend an idle device (wireplumber's `session.suspend-timeout-seconds = 0`,
+usually set to stop a speaker popping) keeps a device open with silence going
+through it, and `audio_holds` cannot tell that from a film. `fwmctl set
+idle.audio_holds=0` settles which of the two it is. `fwmctl config | grep idle`
+shows the timers as they are now, including anything `fwmctl set` changed, and
+`cat /proc/asound/card*/pcm*p/sub*/status` shows what fwm is reading — `closed`
+on every line is a quiet machine.
 
 **A screen stayed dark after it came back.** Only the screens fwm put out are
 lit again by input — one turned off by the lid, by `output_off` or by an

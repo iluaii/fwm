@@ -533,7 +533,9 @@ typedef struct FwmServer {
      * "the screens are dark and only input will light them"; `idle_locked`
      * keeps the locker from being started twice for one stretch of idleness;
      * `idle_woke` marks the one press that lit the screens, so it is not also
-     * typed into the window under it. */
+     * typed into the window under it. `idle_audio` is the last thing the sound
+     * card said and `idle_audio_wait` how long until it is asked again — a poll
+     * that only runs in the seconds around a threshold. */
     /* The charge watcher's memory: when the next read is due and which
      * warnings this discharge has already used up. See battery.h. */
     BatteryWatch battery;
@@ -542,6 +544,8 @@ typedef struct FwmServer {
     int idle_blanked;
     int idle_locked;
     int idle_woke;
+    double idle_audio_wait;
+    int idle_audio;
 
     /* ext-session-lock-v1. `locked` stays set if the lock client dies, which
      * is what keeps a crashed locker from becoming an unlock — see src/lock.h. */

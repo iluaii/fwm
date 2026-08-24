@@ -61,6 +61,7 @@ static const ConfigOption config_option_table[] = {
 
     { "idle.blank_after",               CFG_OPT_DOUBLE, offsetof(FwmConfig, idle.blank_after),                0.0, 86400.0,    "seconds of no input before the screens go dark; 0 = never" },
     { "idle.lock_after",                CFG_OPT_DOUBLE, offsetof(FwmConfig, idle.lock_after),                 0.0, 86400.0,    "seconds before [idle] lock is run; 0 = never" },
+    { "idle.audio_holds",               CFG_OPT_INT,    offsetof(FwmConfig, idle.audio_holds),                0.0,     1.0,    "1 = sound playing puts both timers back to the start" },
 
     { "decor.border_width",             CFG_OPT_INT,    offsetof(FwmConfig, decor.border_width),              0.0,    64.0,    "focus border, px; 0 disables" },
     { "decor.col_active",               CFG_OPT_COLOR,  offsetof(FwmConfig, decor.col_active),                0.0,     0.0,    "focused border colour" },

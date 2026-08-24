@@ -1193,6 +1193,12 @@ static void load_idle(toml_table_t *root, FwmConfig *cfg) {
     i->blank_after = 600.0;
     i->lock_after  = 0.0;
 
+    /* On, because the alternative is the screens going dark in the middle of a
+     * film — the one idle behaviour nobody has ever wanted, and the reason this
+     * option exists. Off is for a machine whose sound server keeps a device
+     * open with nothing playing through it; see [idle] in the example config. */
+    i->audio_holds = 1;
+
     if (!root) return;
     toml_table_t *tbl = toml_table_in(root, "idle");
     if (!tbl) return;
@@ -1208,6 +1214,9 @@ static void load_idle(toml_table_t *root, FwmConfig *cfg) {
         else config_report_error(cfg, "[idle] lock_after %.0f is negative — using %.0f",
                                  v, i->lock_after);
     }
+
+    toml_datum_t b = toml_bool_in(tbl, "audio_holds");
+    if (b.ok) i->audio_holds = b.u.b ? 1 : 0;
 
     toml_datum_t d = toml_string_in(tbl, "lock");
     if (d.ok) { snprintf(i->lock, sizeof(i->lock), "%s", d.u.s); free(d.u.s); }

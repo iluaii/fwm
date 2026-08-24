@@ -22,6 +22,13 @@
  * is already being counted; a fourth wl_event_source to count the same
  * seconds would only be a second place for the two to disagree.
  *
+ * SOUND IS SOMEBODY BEING HERE. A film playing with nobody touching a key is
+ * the case every idle timer gets wrong, and the one that frightens you when it
+ * does: the screens went out in the middle of a video. A player that raises an
+ * idle inhibitor is already handled a paragraph below; the ones that do not —
+ * a browser tab being the usual — are handled by asking the sound card whether
+ * anything is coming out of it. See idle_audio_holds.
+ *
  * BLANKING IS NOT output_off. That action takes a monitor out of the layout,
  * hands its desktop back to the pool and moves the pointer off it, because it
  * means "I am not using this screen". Idle means the opposite: everything is
@@ -34,10 +41,19 @@
 #include "server.h"
 #include "view.h"
 
+#include <glob.h>
+#include <stdio.h>
+#include <string.h>
+
 #include <wlr/types/wlr_output.h>
 #include <wlr/util/log.h>
 
 #include "server_internal.h"
+
+/* How long before a threshold the sound card starts being asked about, and how
+ * long between two asks. Both in seconds; see idle_audio_holds. */
+#define IDLE_AUDIO_LOOKAHEAD 5.0
+#define IDLE_AUDIO_POLL      1.0
 
 /* How many screens the idle timer is currently holding dark. */
 static int idle_blanked_count(FwmServer *server) {
@@ -139,6 +155,101 @@ void server_idle_set_blanked(FwmServer *server, FwmOutput *out, int blanked) {
     server->idle_blanked = idle_blanked_count(server) > 0;
 }
 
+/* Is a sound card playing something right now?
+ *
+ * ALSA's own bookkeeping rather than the sound server's: every playback
+ * substream has a status file that reads "state: RUNNING" for exactly as long
+ * as the device is being fed, and both PipeWire and PulseAudio close the device
+ * a few seconds after the last stream falls quiet. A dozen tiny reads and
+ * nothing else — no client library, no connecting to a daemon that may not be
+ * there (src/audio.h has the story of what connecting can cost), and the same
+ * answer whether the sound came from a browser, mpv or a game.
+ *
+ * What it cannot see is sound that never reaches a card, which in practice
+ * means Bluetooth: the headset is fed over a socket of its own and no ALSA
+ * device is involved. Nothing here helps there — a player that raises an idle
+ * inhibitor still does, and so does swayidle.
+ *
+ * The other end of the same trade: a sound server told never to suspend an idle
+ * device (wireplumber's session.suspend-timeout-seconds = 0 is the usual
+ * reason, to stop a speaker popping) holds a device RUNNING all night, which is
+ * indistinguishable from a machine that never stops playing. Such a session
+ * wants [idle] audio_holds = false. */
+static int idle_audio_playing(void) {
+    glob_t g;
+    memset(&g, 0, sizeof(g));
+    if (glob("/proc/asound/card*/pcm*p/sub*/status", 0, NULL, &g) != 0) {
+        globfree(&g);   /* NOMATCH is a machine with no sound cards at all */
+        return 0;
+    }
+
+    int playing = 0;
+    for (size_t i = 0; i < g.gl_pathc && !playing; i++) {
+        FILE *f = fopen(g.gl_pathv[i], "r");
+        if (!f) continue;
+        /* One word, "closed", on a free device; on a busy one the state is the
+         * first line. Only RUNNING is sound actually coming out — SETUP,
+         * PREPARED and XRUN are a device that is open and moving no air. */
+        char line[64];
+        if (fgets(line, sizeof(line), f) && strstr(line, "RUNNING")) playing = 1;
+        fclose(f);
+    }
+    globfree(&g);
+    return playing;
+}
+
+/* Should the timers be held off because something is playing?
+ *
+ * ASKED ONLY WHEN THE ANSWER IS ABOUT TO MATTER — within a few seconds of a
+ * threshold that has not fired yet — and at most once a second even then. The
+ * tick runs at the monitor's refresh rate, and reading procfs a hundred times a
+ * second all day to settle a question that comes up twice an evening would be a
+ * poll with nothing to poll for. Holding puts the clock back to zero, so a film
+ * that runs for two hours asks about five times per ten minutes and no more.
+ *
+ * RESETS the clock rather than freezing it, which is where this parts company
+ * with an inhibitor. An inhibitor is a client's promise, and it ends when the
+ * client says it ends; this is a guess made from a sound card, and a guess that
+ * expired the instant the sound stopped would put the screens out in the pause
+ * between two songs, or while a film is held to answer the door. Every stretch
+ * of quiet gets the whole of blank_after to itself — including the one that
+ * begins the moment a poll first hears silence, which is why the tick that
+ * hears it still counts as a hold.
+ *
+ * Not while the session is locked: sound behind a lock screen is a radio
+ * playing in an empty room, and holding for it would leave the panels lit all
+ * night over a playlist somebody forgot to stop. */
+static int idle_audio_holds(FwmServer *server, double dt) {
+    const IdleConfig *cfg = &server->config.idle;
+
+    int pending =
+        (cfg->blank_after > 0.0 && !server->idle_blanked &&
+         server->idle_secs >= cfg->blank_after - IDLE_AUDIO_LOOKAHEAD) ||
+        (cfg->lock_after > 0.0 && cfg->lock[0] && !server->idle_locked &&
+         server->idle_secs >= cfg->lock_after - IDLE_AUDIO_LOOKAHEAD);
+
+    if (!cfg->audio_holds || server->locked || !pending) {
+        server->idle_audio = 0;
+        server->idle_audio_wait = 0.0;
+        return 0;
+    }
+
+    server->idle_audio_wait -= dt;
+    if (server->idle_audio_wait > 0.0) return server->idle_audio;
+    server->idle_audio_wait = IDLE_AUDIO_POLL;
+
+    int was = server->idle_audio;
+    server->idle_audio = idle_audio_playing();
+    /* Once per stretch of counting, not once a tick: the hold below puts the
+     * clock back to the start, which ends this stretch and clears the flag, so
+     * a film says this about as often as blank_after comes round. */
+    if (server->idle_audio != was)
+        wlr_log(WLR_DEBUG, "idle: %s, the timers start over",
+                server->idle_audio ? "sound is playing" : "the sound stopped");
+
+    return server->idle_audio || was;
+}
+
 void server_idle_tick(FwmServer *server, double dt) {
     const IdleConfig *cfg = &server->config.idle;
 
@@ -159,6 +270,15 @@ void server_idle_tick(FwmServer *server, double dt) {
      * watched something. idle_inhibit_refresh already decides which inhibitors
      * count (theirs must be on a desktop somebody is looking at). */
     if (server->idle_inhibited) return;
+
+    /* Sound coming out of the machine stands in for a keystroke, on the grounds
+     * that a session nobody is in makes no noise. This is the same "the user is
+     * here" the inhibitor above decides, arrived at from the other side: what a
+     * client says, and what the machine can be seen doing. */
+    if (idle_audio_holds(server, dt)) {
+        server->idle_secs = 0.0;
+        return;
+    }
 
     server->idle_secs += dt;
 
