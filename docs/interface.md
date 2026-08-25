@@ -305,7 +305,28 @@ tools that have moved on.
 ## Key hints
 
 `Super+Shift+?` draws the live bind list — read from your config, not from a
-hard-coded table, so it is accurate for whatever you have bound.
+hard-coded table, so it is accurate for whatever you have bound. Keyboard binds,
+`[mouse]` drags and `[gestures]` are all on it; gestures are there because they
+are the one part of the config nothing else on screen ever hints at.
+
+Everything you have bound appears. Where fwm has an English name for an action it
+uses it (`close window`), and where it has none the action is printed as you wrote
+it (`set:sun.blur+2`) rather than left out — a key that does something and shows
+up nowhere is precisely the key you open this panel to look for.
+
+Binds that differ only in which desktop or which direction they reach are folded
+into one row: `Super+1…0  switch desktop`, `Super+←→↑↓  focus tile`. A group is
+folded per **modifier**, so binds that share an action but not the modifier keep
+their own rows — one row saying `Super` over a key you bound to `Alt` would be a
+worse answer than two rows.
+
+The panel is measured against the text it holds rather than drawn at a fixed
+size, so a long key name (`Super+Shift+XF86AudioMute`) widens the column instead
+of running through the label beside it. Media keys are shown by the legend on the
+keycap — `Vol+`, `Mute`, `Bright−` — because their X keysym names are the longest
+strings a keyboard can produce. On a screen too short for the list it splits into
+three or four columns, and only if it still does not fit does anything get
+ellipsized.
 
 ## Config problems
 

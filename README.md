@@ -16,7 +16,7 @@
 
 A Wayland compositor written in C (wlroots) where windows behave as physical objects with **mass, momentum, inertia, and velocity** — simulated by a real rigid-body engine ([Box2D](https://box2d.org/) v3). Drag a window and throw it — it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
 
-Physics is the first thing you see, not the whole of it. Ten desktops sit on one continuous strip you scroll across, and each of them chooses for itself whether it is a physics desktop, a BSP tiling one, or plain floating. The launcher, the desktop strip, screenshots, the wallpaper picker, the sound panel and the spectrum visualiser are built in, so there is no `rofi`, `grim`, `slurp` or `cava` to install alongside. Multiple monitors, XWayland, layer-shell and session lock work the way you already expect. `fwmctl` reads the state, changes any setting live without touching your config file, and streams events a script can react to — and where a keybind belongs to an external shell rather than to fwm, it can have it.
+Physics is the first thing you see, not the whole of it. Ten desktops sit on one continuous strip you scroll across, and each of them chooses for itself whether it is a physics desktop, a BSP tiling one, or plain floating. The launcher, the desktop strip, screenshots, the wallpaper picker, the sound panel and the spectrum visualiser are built in, so there is no `rofi`, `grim`, `slurp` or `cava` to install alongside. Multiple monitors, layer-shell and session lock work the way you already expect, and so does XWayland apart from [one open bug](#a-known-xwayland-bug-an-invisible-window-that-takes-clicks). `fwmctl` reads the state, changes any setting live without touching your config file, and streams events a script can react to — and where a keybind belongs to an external shell rather than to fwm, it can have it.
 
 This is the primary, actively developed version. The legacy X11 version lives on the [`x11`](https://github.com/iluaii/fwm/tree/x11) branch and is no longer supported.
 
@@ -204,7 +204,7 @@ it finds on the other side can be a different gravity.
 - **Wallpaper picker** (`Super+Shift+P`) — browse a folder and apply an image instantly; the choice is remembered without ever rewriting your config.
 - **Screenshots** (`Print`, `Super+Shift+S` for a region) — built in, no `grim`/`slurp` to install. The PNG goes straight to the clipboard, ready to paste; nothing is written to disk. The region shot peels off the screen, tilts and flies away as it is taken, so you can see exactly which pixels were caught.
 - **Dial readout** — a `set:` bind (`set:sun.blur+2`) turns any runtime option from a key, and the name, the value and its place in its range appear low on the screen for a second while you turn. Built for a knob: spin it and the steps come faster, in this readout and in every menu the knob drives.
-- **Keybind cheat-sheet** (`Super+Shift+/`) — generated from your actual binds and gestures, not a static list.
+- **Keybind cheat-sheet** (`Super+Shift+/`) — generated from your actual binds, mouse drags and gestures, not a static list. Every bind you have is on it: the ones fwm can name in English are named, and one it cannot is printed as the action itself rather than left out, since a key that does something and appears nowhere is the one you go looking for. Binds that differ only in which desktop they reach are folded into one row (`Super+1…0`), and the sheet is sized to the text it holds.
 - **Config never costs you the session** — a broken file falls back to built-in binds and reports the problem in a tray pill; fix it and press `Super+Shift+R` to reload live.
 - **Window rules** — `[[rule]]` matches `app_id` / `title` with regexes and decides where a window opens and whether physics touches it.
 - **A crash no longer costs your layout** — fwm records which applications are running and on which desktop, and the `fwm-session` wrapper brings them back after an unclean exit. They are relaunched, not resumed.
@@ -378,13 +378,43 @@ Everything in one command is applied together or not at all: the whole change is
 
 The desktop's size is the primary monitor's, so a second monitor of a different size shows that same desktop letterboxed or clipped rather than a differently-shaped one. The **floor** is the exception, because a floor you can see under is worse than a clipped edge: each desktop gets the floor of whichever monitor is showing it, so windows land on the bottom of the screen you are looking at, and the visualiser bars and the grass stand at that same height.
 
-Known gaps: output scale is applied to the monitor and to client surfaces, but fwm's own chrome (status strip, launcher, expo) is still drawn at logical size and scaled up, so it is soft rather than crisp on a HiDPI screen. No IME (xkb layouts do work).
+Known gaps: output scale is applied to the monitor and to client surfaces, but fwm's own chrome (status strip, launcher, expo) is still drawn at logical size and scaled up, so it is soft rather than crisp on a HiDPI screen. No IME (xkb layouts do work). The number of desktops is ten because that is a compile-time constant, not a setting. And the XWayland bug below is open, not fixed.
+
+### A known XWayland bug: an invisible window that takes clicks
+
+This one is fwm's, it is diagnosed, and it is **not fixed yet**. It is written
+down here rather than left to be rediscovered, because the symptom points
+straight at the wrong thing.
+
+An X11 window is told where it is in *screen* coordinates, and a desktop that no
+monitor is currently showing has no screen position to give it. `view_set_size`
+(`src/view.c`) leaves the X window where it last was in that case, on the promise
+that `server_camera_settled` will resync it — but while the desktop stays off
+every monitor there is still nothing to resync it to, so the promise is never
+kept. The scene node is parked far off-screen and the X window is not, and what
+is left is an invisible X window lying across a monitor you are looking at.
+
+It matters because Xwayland in rootless mode routes pointer input through X's own
+root coordinates. The ghost is where X thinks it is, so it takes the clicks meant
+for whatever is underneath. Wayland clients are untouched. Managed X windows are
+raised above it (`wlr_xwayland_surface_restack`), which is why most X11
+applications never notice — but **override-redirect** windows cannot be restacked
+without tripping an assertion inside wlroots, and those are exactly Proton's game
+windows and Steam's popup menus.
+
+The symptom is intermittent in a way that hides the cause: the ghost exists for
+exactly as long as its window's desktop is off screen. Move that desktop onto a
+monitor and the clicks come back, which makes it look like the game, or the
+pointer, or luck.
+
+If clicks are landing nowhere over a game or a Steam menu, the thing to try is
+switching to the desktop holding whatever X11 window you last had elsewhere.
 
 ### Games under Wine and Proton: exclusive fullscreen and input
 
 A Windows game running under Proton that is set to **exclusive fullscreen** can go black and deaf the first time it stops being the focused window — switch to another desktop, come back, and the screen is black, the game takes no input, and the process sits there burning a core. Clicking it does not bring it back. Elite Dangerous with `FullScreen=1` does exactly this.
 
-It is worth writing down, because it looks like a compositor bug and is not one. The same failure is tracked upstream as [Wine bug 57585](https://bugs.winehq.org/show_bug.cgi?id=57585): alt-tab away from a fullscreen game, come back, and it ignores mouse and keyboard. Wine's X11 driver can hand the input focus over through `WM_TAKE_FOCUS` rather than accepting it directly — a window manager may then only *offer* the focus, and a client that declines never becomes interactive again. Which of the two paths Wine takes is controlled by the `UseTakeFocus` registry value, and the bug asks for it to default to `N` on Linux because the problem is so common.
+It is worth writing down, because it is a different fault from the one above and has a different fix. The bug above is fwm's and takes clicks away wherever the pointer is; this one takes both mouse and keyboard away from one game, and follows it across desktops because it is the game that has stopped listening. It is tracked upstream as [Wine bug 57585](https://bugs.winehq.org/show_bug.cgi?id=57585): alt-tab away from a fullscreen game, come back, and it ignores mouse and keyboard. Wine's X11 driver can hand the input focus over through `WM_TAKE_FOCUS` rather than accepting it directly — a window manager may then only *offer* the focus, and a client that declines never becomes interactive again. Which of the two paths Wine takes is controlled by the `UseTakeFocus` registry value, and the bug asks for it to default to `N` on Linux because the problem is so common.
 
 Two things help, and they fix different halves.
 

@@ -130,6 +130,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `terminal` | a terminal |
 | `toggle_tray` | hide/show the status strip |
 | `modes_menu` | open the modes menu (same as clicking the tray pill) |
+| `stats_menu` | open the stats menu (same as clicking the tray's stats pill) |
 | `radial_menu` | open the ring of actions from `[radial]` — see [below](#the-radial-menu) |
 | `mixer` | the sound panel: every application's volume, master at the top — see [below](#the-sound-panel) |
 | `show_hints` | the key hints overlay |
