@@ -184,7 +184,7 @@ void view_set_size(FwmView *view, int width, int height) {
         bool on_screen = server_world_to_screen(view->server, view->x, view->y, view->width, &sx, &sy);
         int isx = (int)lround(sx);
         int isy = (int)lround(sy);
-        
+
         // Only configure if something actually changed since last sync
         if (view->last_sync_onscreen == on_screen &&
             view->last_sync_x == isx && view->last_sync_y == isy &&
@@ -197,7 +197,7 @@ void view_set_size(FwmView *view, int width, int height) {
         view->last_sync_y = isy;
         view->last_sync_w = width;
         view->last_sync_h = height;
-        
+
         wlr_xwayland_surface_configure(view->xwl_surface,
             (int16_t)isx, (int16_t)isy,
             (uint16_t)width, (uint16_t)height);

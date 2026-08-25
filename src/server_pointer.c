@@ -458,7 +458,7 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
             double sx2 = server->cursor->x + event->delta_x - ox;
             double sy2 = server->cursor->y + event->delta_y - oy;
             double sx2_out, sy2_out;
-            
+
             if (wlr_region_confine(&server->active_constraint->region,
                                    sx1, sy1, sx2, sy2, &sx2_out, &sy2_out)) {
                 event->delta_x = sx2_out - sx1;

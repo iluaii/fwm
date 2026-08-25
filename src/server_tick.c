@@ -1856,8 +1856,8 @@ static int physics_tick_cb(void *data) {
                 view->y = body->y;
                 server_place_view(server, view, body->x, body->y);
                 view_sync_position(view);
-                
-                if ((dx != 0 || dy != 0) && server->active_constraint && 
+
+                if ((dx != 0 || dy != 0) && server->active_constraint &&
                     server->active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED &&
                     view_from_surface(server, server->active_constraint->surface) == view) {
                     /* dx/dy are world deltas passed to wlr_cursor_move(), which takes layout
