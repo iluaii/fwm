@@ -240,7 +240,6 @@ int server_settings_file_value(const ConfigOption *opt, char *out, size_t cap);
 /* Run a command line through a shell, orphaned so it outlives the key that
  * asked for it. `spawn:`, the terminal action, and the idle locker all use it —
  * there is one way fwm starts a process, not three. */
-void server_spawn(const char *cmd);
 
 /* ── server_desktop.c ─────────────────────────────────────────────────── */
 void server_toggle_desktop_tiling(FwmServer *server, int d);

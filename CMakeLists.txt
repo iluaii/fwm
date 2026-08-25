@@ -149,6 +149,7 @@ set(SOURCES
     src/ipc.c
     src/ipc_events.c
     src/session.c
+    src/launched.c
     src/server.c
     src/server_lifecycle.c
     src/server_tick.c

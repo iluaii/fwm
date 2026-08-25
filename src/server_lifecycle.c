@@ -29,6 +29,7 @@
 #include "shortcuts.h"
 #include "ipc.h"
 #include "session.h"
+#include "launched.h"
 #include <signal.h>
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -626,6 +627,7 @@ void server_destroy(FwmServer *server) {
     /* Order matters: the policy lives in the config, which is freed below. */
     session_clear_on_clean_exit(server);
     session_finish(server);
+    launched_finish(server);
     config_free(&server->config);
     
     /* Clean overlays. Clearing each pointer is not tidiness: teardown below

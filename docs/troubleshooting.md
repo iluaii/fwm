@@ -99,6 +99,16 @@ you are dragging the mouse faster than about three times `max_throw_speed` — s
 **A window sits half off the screen.** A window larger than the play area cannot
 fit in it; the walls hold what they can. Resize or fullscreen it.
 
+**A window opened on the wrong desktop.** Windows go to the desktop their
+application was *launched* from, not the one on screen when they map — that is
+what makes a slow application land where you asked rather than where you drifted
+to. Three things outrank the camera, in this order: a `[[rule]]` with `desktop`
+set, an application the session restored, and the desktop the launch happened
+on. Only an application fwm did not start (a client already running, something
+launched from another terminal, a second window from a program you started more
+than two minutes ago) follows the camera. `fwmctl windows` shows where each one
+actually went.
+
 **Everything is jittery under a spin or a drag.** `[effects] live = 0` puts
 windows under an effect back on a periodic still frame, which is the better trade
 on slower hardware. `FWM_DEBUG_EFFECTS=1` prints frame timings.

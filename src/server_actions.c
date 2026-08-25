@@ -26,6 +26,7 @@
 #include "shortcuts.h"
 #include "ipc.h"
 #include "session.h"
+#include "launched.h"
 #include <signal.h>
 #include "ui/tray.h"
 #include "ui/hints.h"
@@ -91,6 +92,7 @@ static BspNode *tile_neighbor(FwmServer *server, int desktop, BspNode *from, cha
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <errno.h>
@@ -154,25 +156,66 @@ bool server_can_spin(const PhysicsBody *b) {
 /* Run a command as a detached child. Through a shell, so a bind can carry
  * quoting, arguments and $VARIABLES — `spawn:$BROWSER --new-window` works for
  * exactly the reason it looks like it should. */
-void server_spawn(const char *cmd) {
+pid_t server_spawn(const char *cmd) {
+    /* The grandchild's pid comes back up a pipe, because the double fork that
+     * orphans it also throws it away: the middle child is the only process that
+     * ever learns it, and it exits immediately. Knowing it is what lets a window
+     * be traced back to the launch that asked for it (launched.h). A pipe that
+     * cannot be made is not worth failing a launch over — the command still
+     * runs, and its window simply lands wherever the camera is. */
+    int fds[2];
+    bool have_pipe = pipe(fds) == 0;
+    /* Close-on-exec on both ends, so neither can survive into any exec anywhere
+     * in the process. The read below waits for EOF as its failure signal, and
+     * EOF needs every copy of the write end gone — an fd that escaped into some
+     * unrelated long-lived process would turn that wait into a hang, and the
+     * thing hanging would be the compositor's event loop. */
+    if (have_pipe) {
+        fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+        fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+    }
+
     pid_t pid = fork();
 
     if (pid == 0) {
         /* Child: double-fork to orphan the grandchild process.
-         * Only async-signal-safe functions (setsid, execl, _exit) may be called here. */
-        if (fork() == 0) {
+         * Only async-signal-safe functions (fork, setsid, write, close, execl,
+         * _exit) may be called here. */
+        if (have_pipe) close(fds[0]);
+        pid_t grandchild = fork();
+        if (grandchild == 0) {
+            if (have_pipe) close(fds[1]);
             setsid();
             execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
             _exit(1);
         }
+        if (have_pipe && grandchild > 0) {
+            ssize_t w = write(fds[1], &grandchild, sizeof(grandchild));
+            (void)w;
+        }
         _exit(0);
     } else if (pid > 0) {
+        pid_t grandchild = -1;
+        if (have_pipe) {
+            close(fds[1]);
+            /* The middle child writes and exits at once, so this read either
+             * returns the pid or hits EOF because the fork failed — it cannot
+             * hang the event loop waiting for a command that takes its time. */
+            ssize_t n;
+            do { n = read(fds[0], &grandchild, sizeof(grandchild)); }
+            while (n < 0 && errno == EINTR);
+            if (n != (ssize_t)sizeof(grandchild)) grandchild = -1;
+            close(fds[0]);
+        }
         /* Bounded wait: the middle child calls _exit(0) immediately,
          * so this waitpid never blocks the event loop. */
         while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
+        return grandchild;
     } else {
+        if (have_pipe) { close(fds[0]); close(fds[1]); }
         wlr_log(WLR_ERROR, "fwm: failed to fork process for command: %s", cmd);
     }
+    return -1;
 }
 
 /* Is `name` an executable somewhere on PATH? */
@@ -723,10 +766,15 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         }
     } else if (strcmp(action, "terminal") == 0) {
         const char *cmd = terminal_command(server);
-        if (cmd) server_spawn(cmd);
+        /* The desktop is written down HERE rather than where the window turns
+         * up, because by then it may well be a different one — see launched.h.
+         * Only the two actions a person launches something with: the lock
+         * command and the battery command go through server_spawn too, and
+         * neither has a window to place. */
+        if (cmd) launched_note(server, server_spawn(cmd), server_active_desktop(server));
     } else if (strncmp(action, "spawn:", 6) == 0) {
         const char *cmd = action + 6;
-        server_spawn(cmd);
+        launched_note(server, server_spawn(cmd), server_active_desktop(server));
     } else if (strncmp(action, "global:", 7) == 0) {
         /* Hand the key to an external shell — "global:<app_id>:<name>", the
          * shortcut it registered over hyprland-global-shortcuts (shortcuts.h).

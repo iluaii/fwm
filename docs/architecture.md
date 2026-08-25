@@ -85,7 +85,7 @@ price to pay for turning a feature *off*.
 | Layout | `bsp.c` (the tree), `server_tiling.c` (applying it), `server_desktop.c` |
 | Desktops | `expo*.c` (the strip and its 3D view) |
 | Config | `config.c`, `config_binds.c`, `config_set.c`, `toml.c` |
-| State & IPC | `session.c`, `ipc.c`, `ipc_events.c`, `server_config.c` (paths, reload, remembered choices) |
+| State & IPC | `session.c`, `launched.c` (which desktop an application was started from), `ipc.c`, `ipc_events.c`, `server_config.c` (paths, reload, remembered choices) |
 | Wallpaper | `wallpaper.c`, `video.c` |
 | Audio | `audio.c` (capture), `cava.c` (FFT + bars), `sound.c` (mixer), `wav.c` |
 | Light | `sun.c` (where the sun is — arithmetic, no scene), `shadow.c` (what it draws: one shared nine-patch image, nine slices per window) |

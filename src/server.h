@@ -556,6 +556,11 @@ typedef struct FwmServer {
      * confused with `session` above, which is the libseat/VT session. */
     void *session_state;
 
+    /* Which desktop each application we started was started FROM
+     * (src/launched.h), so a window that takes its time to appear still opens
+     * where it was asked for. NULL until something is launched. */
+    struct FwmLaunched *launched;
+
     /* MAX_WINDOWS overflow is reported once per session, not once per window:
      * the tray pill stores a capped 24 messages and would otherwise fill with
      * copies of the same one. */
@@ -945,5 +950,11 @@ int server_knob_step(FwmServer *server, int dir);
  * state file so it survives a restart. Replaces the FIRST [[wallpaper]] layer;
  * further parallax layers keep their images. */
 void server_set_wallpaper(FwmServer *server, const char *path);
+
+/* Run `cmd` detached, through a shell, and return the pid of the process that
+ * will actually run it (-1 if it could not be started). The pid is what
+ * launched_note() needs to put the resulting window where it was asked for; a
+ * caller with no window to place may ignore it. */
+pid_t server_spawn(const char *cmd);
 
 #endif /* FWM_SERVER_H */

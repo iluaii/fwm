@@ -23,6 +23,7 @@
 #include "bsp.h"
 #include "group.h"
 #include "session.h"
+#include "launched.h"
 #include "foreign.h"
 #include "ipc.h"
 #include <stdlib.h>
@@ -814,6 +815,17 @@ void view_map(FwmView *view) {
      * wins over what merely happened to be true last time. */
     int restored = session_claim_desktop(view->server, view);
     if (restored >= 0 && !(have_rule && rule.desktop >= 0)) current_desktop = restored;
+
+    /* Otherwise: the desktop this application was STARTED from, which is not
+     * always the one in front of you by the time it finally has a window to
+     * show. Steam asked for on desktop 2 and read about on desktop 1 while it
+     * loaded used to arrive on 1. Below [[rule]] and below the session, both of
+     * which are somebody having said outright where this window goes; above the
+     * camera, which is only where you happen to be standing. See launched.h. */
+    if (!(have_rule && rule.desktop >= 0) && restored < 0) {
+        int asked = launched_desktop(view->server, view);
+        if (asked >= 0) current_desktop = asked;
+    }
     /* Centred on its desktop — which IS one screen now, so this lands in the
      * middle of whichever monitor is showing it. Centred on that monitor's
      * size rather than the column's: a column is the primary monitor's shape,

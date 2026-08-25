@@ -19,6 +19,7 @@
 #include "launcher_search.h"
 #include "../server.h"
 #include "../video.h"
+#include "../launched.h"
 
 #include <box2d/box2d.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -34,7 +35,6 @@
 #include <wlr/util/log.h>
 #include <strings.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <time.h>
 
 /* Search-bar launcher in the tray's "sharp islands" style: a chevron-ended
@@ -996,22 +996,11 @@ static void launch_selected(Launcher *l) {
         snprintf(cmd, sizeof(cmd), "%s", app->exec);
     }
 
-    pid_t pid = fork();
-    if (pid == 0) {
-        /* Child: double-fork to orphan the grandchild process */
-        if (fork() == 0) {
-            setsid();
-            execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
-            _exit(1);
-        }
-        _exit(0);
-    } else if (pid > 0) {
-        /* Bounded wait: the middle child calls _exit(0) immediately,
-         * so this waitpid never blocks the event loop. */
-        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) {}
-    } else {
-        wlr_log(WLR_ERROR, "fwm: failed to fork process for launcher: %s", cmd);
-    }
+    /* Started through the server's own spawn rather than a second copy of the
+     * same double fork, so that the desktop this was launched from is recorded
+     * the one way it is recorded everywhere — an application picked here takes
+     * just as long to appear as one started from a keybind. */
+    launched_note(l->server, server_spawn(cmd), server_active_desktop(l->server));
 }
 
 bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
