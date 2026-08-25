@@ -786,7 +786,15 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
      * leak a stray click into the window being grabbed, bound chord or not. */
     bool claimed = config_match_mouse(&server->config, button_to_fwm(event->button),
                                       fwd_mods) != NULL;
-    if (server->interactive.action == FWM_ACTION_NONE && !(fwd_mods & FWM_MOD_LOGO) && !claimed) {
+    bool should_forward = (server->interactive.action == FWM_ACTION_NONE && !(fwd_mods & FWM_MOD_LOGO) && !claimed);
+
+    /* If we sent a press to the client (e.g. they clicked the titlebar), we MUST
+     * send the release so the grab completes, even if the compositor took over
+     * the drag in the meantime. Otherwise wlr_seat's button_count stays stuck > 0.
+     * Sending one we do not owe is harmless: on a release the seat walks its own
+     * pointer_state.buttons[] and returns without touching the client if that
+     * button is not among the ones it is holding. */
+    if (should_forward || (event->state == WL_POINTER_BUTTON_STATE_RELEASED && server->seat->pointer_state.button_count > 0)) {
         wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
     }
     
