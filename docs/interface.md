@@ -5,6 +5,14 @@ titlebars anywhere (windows are server-side decorated with a focus border and
 nothing else), and there is no panel process to start — all of it is the
 compositor.
 
+All of it can also be made of glass. `[glass] enabled = true` puts the desktop
+behind each of these panels under it, blurred, with a shadow from the same sun
+the windows cast from — every panel on this page at once, including ones added
+after it was written, because a panel is frosted from the shape it already
+paints rather than from anything it says about itself. See
+[glass](configuration.md#glass); `fill` there takes over from the tray and
+launcher opacities while it is on.
+
 Contents: [the tray](#the-tray) · [the modes menu](#the-modes-menu) ·
 [the launcher](#the-launcher) · [the radial menu](#the-radial-menu) ·
 [the sound panel](#the-sound-panel) ·

@@ -28,6 +28,7 @@
 #include "../server_internal.h"
 #include "../theme.h"
 #include "cairo_overlay.h"
+#include "../glass.h"
 
 /* How long it stays, and how it arrives and leaves. Private: nothing outside
  * this file has an opinion about the timing, only about where the line sits. */
@@ -63,7 +64,8 @@ static void toast_draw(cairo_t *cr, int w, int h, void *user_data) {
     (void)user_data;
     const FwmTheme *thm = theme_get();
 
-    cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], 0.94);
+    cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2],
+                          glass_fill(NULL, 0.94));
     cairo_move_to(cr, TOAST_CUT, 0);
     cairo_line_to(cr, w - TOAST_CUT, 0);
     cairo_line_to(cr, w, TOAST_CUT);
@@ -143,6 +145,7 @@ void toast_show(FwmServer *server, bool bad, const char *fmt, ...) {
                                 out->box.x + (out->box.width - TOAST_W) / 2,
                                 out->box.y + out->box.height - TOAST_H - 64);
     cairo_overlay_update(toast.buffer, toast_draw, NULL);
+    glass_attach(toast.buffer);   /* before make_static; see ui/hints.c */
     cairo_overlay_make_static(toast.buffer);
     cairo_overlay_animate_in(toast.buffer, TOAST_ANIM_MS, TOAST_RISE_PX);
 

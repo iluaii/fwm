@@ -15,6 +15,7 @@
 #include "expo_menu.h"
 #include "../theme.h"
 #include "cairo_overlay.h"
+#include "../glass.h"
 #include <stdio.h>
 
 #define MENU_W        212
@@ -62,7 +63,8 @@ static void draw_menu(cairo_t *cr, int w, int h, void *user_data) {
     struct MenuCtx *ctx = user_data;
     const FwmTheme *thm = theme_get();
 
-    cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], 0.97);
+    cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2],
+                          glass_fill(NULL, 0.97));
     panel_path(cr, 0, 0, w, h, MENU_CUT);
     cairo_fill(cr);
 
@@ -118,6 +120,7 @@ struct wlr_scene_buffer *expo_menu_show(struct wlr_scene_tree *parent,
                                         const char *mode) {
     struct wlr_scene_buffer *buf = cairo_overlay_create(parent, MENU_W, MENU_H);
     if (!buf) return NULL;
+    glass_attach(buf);
 
     menu.hover = EXPO_MENU_ROW_NONE;
     snprintf(menu.title, sizeof(menu.title), "%s",

@@ -20,7 +20,7 @@ Three promises about this file:
 
 Contents: [physics](#physics) · [per-desktop physics](#per-desktop-physics) ·
 [window rules](#window-rules) · [tiling](#tiling) · [camera](#camera) ·
-[decor](#decor) · [input](#input) · [focus](#focus) · [idle](#idle) ·
+[decor](#decor) · [glass](#glass) · [input](#input) · [focus](#focus) · [idle](#idle) ·
 [clipboard](#clipboard) · [battery](#battery) · [effects](#effects) ·
 [session](#session) · [binds](#binds) · [modes](#modes) · [mouse](#mouse) ·
 [gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_picker](#wallpaper_picker) ·
@@ -284,6 +284,12 @@ text — from the current wallpaper image, so the tray belongs to the desktop
 behind it. `tint_strength` is how far the fill moves toward the wallpaper's hue.
 Colours are premultiplied internally; write them as plain hex.
 
+`tray_opacity` and `launcher_opacity` are handed over to `[glass] fill` while
+[the glass](#glass) is on: an island standing on frosted glass and one standing
+on the wallpaper do not want the same number, and the panels are meant to agree
+with each other about which one it is. Turn the glass off and these two mean
+what they always did.
+
 `inactive_opacity` is the unfocused dim: the window you are working in stays at
 full strength and the rest fall back a step, so focus reads without the border
 having to shout. It applies to the client's own pixels, never to fwm's chrome,
@@ -361,6 +367,74 @@ because a window is not necessarily opaque: a terminal at 80% would otherwise
 show its own shadow through itself instead of the wallpaper. That also means a
 blur much wider than the shadow is long has little left to show — if you want it
 softer, make it longer too.
+
+## glass
+
+```toml
+[glass]
+enabled        = true
+radius         = 28.0             # px of blur behind a panel
+fill           = 0.55             # flat colour left standing on the frost
+tint           = 0.0              # 0..1 toward tint_color
+tint_color     = "#000000"
+brightness     = 1.0              # multiplier on the blurred desktop
+shadow         = true             # panels cast, from [sun]
+shadow_length  = 10.0             # px of cast
+shadow_blur    = 18.0             # penumbra px
+shadow_opacity = 0.5              # scaled by the sun's own alpha
+```
+
+What fwm's own panels are made of: the desktop behind them blurred, and a
+shadow under them. Every panel fwm draws is covered — the tray, the launcher,
+the modes and stats menus, the sound panel, the radial menu, the hints sheet, a
+toast, the panels inside the desktop strip — and **not one of them was told the
+shape it paints**. An island is filled at a known alpha, so the panel's own
+alpha channel is that shape times that alpha, and dividing the alpha back out
+recovers the shape exactly: rounded corners, the gaps between pills, the
+antialiased rim and all. That is the whole trick, and it is why turning this on
+frosts everything at once instead of one panel per release.
+
+Off until it is asked for, the same bargain [grass](#grass) makes. It needs the
+GLES2 renderer; on the Vulkan and pixman ones the panels stand on the desktop
+the way they always did, and nothing else changes.
+
+**`fill` is the one that matters**, and while the glass is on it REPLACES
+`decor.tray_opacity` and `decor.launcher_opacity`. The frost lies under the
+island, so how opaque the island is decides how much of it you can see. At the
+flat default of 0.92 there is a pane of frosted glass under the tray and almost
+none of it shows; 0.5 is a panel you watch the desktop move through; 0.7 is
+glass you have to look for. One number for every panel, because the point of
+the exercise is that they are one material.
+
+**`radius`** is how far the blur reaches, in pixels of screen, and it is cheap
+to raise: the photograph is shrunk before it is blurred, so most of a wide blur
+is paid for by the shrinking. Only most of it, though — a short panel like the
+tray has little to shrink before there is no shape left to blur, and there the
+reach is made up by running the blur more than once instead. Either way the
+number means the same thing on screen. **`brightness`** multiplies what comes
+back — under 1 for a frost that sits down against a bright wallpaper — and
+**`tint`** pulls it toward `tint_color`, which is how you get a coloured pane
+instead of a neutral one.
+
+**The shadow** takes its bearing and its darkness from [`[sun]`](#sun), because
+a panel is one more object lying on the desktop under the same light: a tray
+casting north while the windows cast east would be the one thing on screen
+disagreeing about where the light is. So `[sun]` off, or night, means no panel
+shadow either. What a panel decides for itself is only the rest —
+`shadow_length` is the whole cast, and it is deliberately a third of
+`sun.length` because a panel *lies* on the desktop where a window floats above
+it; `shadow_blur` is the penumbra; `shadow_opacity` is how much of the sun's
+darkness it takes.
+
+**What it costs.** One attached panel pays for a photograph of the strip of
+desktop it covers and four small passes over it, per frame — and only on frames
+where something under it actually moved. An idle desktop renders nothing at
+all, glass or no glass, and a panel that is not on screen costs nothing and
+holds no buffers.
+
+Live: every key is a `fwmctl set glass.*`, and the frost follows on the next
+frame — `fwmctl set glass.radius 60` while you watch is the fastest way to find
+the number you want.
 
 ## input
 

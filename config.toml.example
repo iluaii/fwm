@@ -282,6 +282,58 @@ color          = "#000000"
 # a window is not necessarily opaque; on, it is one fewer surface to composite.
 #under_window  = true
 
+# ── glass ───────────────────────────────────────────────────────────────
+# What fwm's own panels are made of: the desktop behind them blurred, and a
+# shadow under them. Every panel fwm draws is covered — the tray, the launcher,
+# the modes and stats menus, the sound panel, the radial menu, the hints sheet,
+# a toast, the expo panels — and not one of them had to be told the shape it
+# paints. An island is filled at a known alpha, so the sheet's own alpha
+# channel IS that shape, and dividing the fill back out recovers it exactly:
+# rounded corners, the gaps between pills, the antialiased rim and all.
+#
+# Off until it is asked for, like [grass]. It needs the GLES2 renderer; on the
+# others the panels stand on the desktop the way they always did.
+#
+# `fill` is the one that matters, and it REPLACES decor.tray_opacity and
+# decor.launcher_opacity for as long as the glass is on. The frost is under the
+# island, so how opaque the island is decides how much glass there is to see: at
+# 0.92 — the flat default — there is a pane of frosted glass under the tray and
+# almost none of it shows. 0.5 is a panel you can see the desktop moving
+# through; 0.7 is glass you have to look for. One number for every panel,
+# because the point is that they are one material.
+#
+# `radius` is how far the blur reaches, in pixels of screen. It is cheap to
+# raise: the picture is shrunk before it is blurred, and most of a wide blur is
+# paid for by the shrinking. Only most of it — a short panel like the tray has
+# little to shrink before there is no shape left to blur, and there the reach is
+# made up by running the blur more than once instead. The number means the same
+# thing on screen either way. `brightness` multiplies what comes back — under 1
+# for a frost that sits down against bright wallpaper — and `tint` pulls it
+# toward `tint_color`, which is how you get a coloured pane rather than a
+# neutral one.
+#
+# The shadow takes its bearing and its darkness from [sun], because a panel is
+# one more object lying on the desktop under the same light, and a tray casting
+# north while the windows cast east is the one thing on screen disagreeing about
+# where the light is. So [sun] off, or night, means no panel shadow either.
+# What is here is only what a panel decides for itself: `shadow_length` is the
+# whole cast (a panel LIES on the desktop, a window floats above it, which is
+# why this is a third of sun.length), `shadow_blur` the penumbra, and
+# `shadow_opacity` how much of the sun's darkness it takes.
+#
+# Live: every key is a `fwmctl set glass.*`, the frost following the next frame.
+[glass]
+#enabled        = true
+#radius         = 28.0
+#fill           = 0.55
+#tint           = 0.0
+#tint_color     = "#000000"
+#brightness     = 1.0
+#shadow         = true
+#shadow_length  = 10.0
+#shadow_blur    = 18.0
+#shadow_opacity = 0.5
+
 # Hyprland-style tiling: gaps and the tile-glide animation.
 # anim_speed is 1/s (12 ~ 250ms glide); 0 disables the animation.
 #

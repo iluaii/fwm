@@ -20,6 +20,7 @@
 #include "view.h"
 #include "rotate.h"
 #include "shadow.h"
+#include "glass.h"
 #include "physics.h"
 #include "theme.h"
 #include "layer.h"
@@ -49,6 +50,7 @@
 #include "expo.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
+#include "star_draw.h"
 #include "cava.h"
 #include "sound.h"
 #include "sandbox.h"
@@ -285,6 +287,193 @@ static struct wlr_xcursor_manager *cursor_theme_load(void) {
     return NULL;
 }
 
+/* ---- GPU reset recovery ------------------------------------------------
+ *
+ * A GPU reset — the driver giving up on a hung command stream and restarting
+ * the card — takes the EGL context down with it. Every GL object made on that
+ * context is gone, and every call into it silently does nothing. The renderer
+ * serves ALL monitors, so a compositor that does not notice keeps compositing
+ * through the corpse and paints garbage (on radeonsi, a flat acid green) on
+ * every screen at once, for good: the picture never comes back, because
+ * nothing ever rebuilds the context.
+ *
+ * wlroots does notice, and says so through renderer->events.lost. The whole of
+ * the fix is to take it up: let go of everything that lived in the dead
+ * context, build a new renderer and allocator, and point the compositor and
+ * every output at them. Clients need no help — wlroots drops their textures
+ * itself (wlr_client_buffer keeps a renderer_destroy listener for exactly
+ * this) and they come back on their next commit.
+ *
+ * The reset itself is not ours to prevent; it is whatever hung the card. This
+ * only decides whether the desktop survives it. */
+
+static void handle_renderer_lost(struct wl_listener *listener, void *data);
+
+/* FWM_DEBUG_GPU_LOST=<seconds>: raise the lost signal by hand that long after
+ * startup, as the driver would after a reset.
+ *
+ * Recovery code that has never run is a guess. A real reset needs a hung card
+ * and cannot be asked for, so this asks wlroots' signal for it instead —
+ * everything downstream of the signal is then the genuine path, unchanged. */
+static int gpu_lost_debug_cb(void *data) {
+    FwmServer *server = data;
+    wlr_log(WLR_INFO, "FWM_DEBUG_GPU_LOST: pretending the GPU was reset");
+    wl_signal_emit_mutable(&server->wlr_renderer->events.lost, server->wlr_renderer);
+    return 0;
+}
+
+static void gpu_lost_debug_arm(FwmServer *server, struct wl_event_loop *loop) {
+    const char *s = getenv("FWM_DEBUG_GPU_LOST");
+    if (!s || !*s) return;
+    int secs = atoi(s);
+    if (secs < 1) secs = 1;
+    struct wl_event_source *t = wl_event_loop_add_timer(loop, gpu_lost_debug_cb, server);
+    if (!t) return;
+    wl_event_source_timer_update(t, secs * 1000);
+    wlr_log(WLR_INFO, "FWM_DEBUG_GPU_LOST: will fake a GPU reset in %ds", secs);
+}
+
+static void renderer_watch_lost(FwmServer *server) {
+    server->renderer_lost.notify = handle_renderer_lost;
+    wl_signal_add(&server->wlr_renderer->events.lost, &server->renderer_lost);
+}
+
+/* Let go of every GPU object fwm itself caches across frames.
+ *
+ * Called while the dying renderer is still a live C object, because destroying
+ * a texture calls through it — doing this after wlr_renderer_destroy would be
+ * a use-after-free. Calls into the lost CONTEXT are harmless no-ops; calls
+ * into freed MEMORY are not, and the ordering is the whole difference.
+ *
+ * Animations in flight are stopped rather than carried across. They are all
+ * transient by nature, and a window that finishes its wobble instantly beats
+ * one drawn from a texture that no longer exists. */
+static void gpu_release_caches(FwmServer *server) {
+    /* The strip holds a photograph of every window on every desktop, and the
+     * orrery's star on top of that. */
+    expo_destroy(server);
+    /* A shot in flight holds the still it is flying across the screen. */
+    screenshot_cleanup(server);
+
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        view_jelly_stop(view);
+        view_stop_spin(view);
+        view_stop_squash(view);
+    }
+
+    FwmOutput *out;
+    wl_list_for_each(out, &server->outputs, link) {
+        server_wrap_slide_stop(server, out);   /* holds the outgoing desktop */
+        wallpaper_gpu_release(out->wallpaper);
+        wallpaper_gpu_release(out->wallpaper_prev);
+        star_draw_gpu_release(out->star_draw);
+    }
+
+    /* rotate.c's and star_gl.c's shader programs are static and keyed to the
+     * renderer that built them; both notice the new one on their own. This
+     * still has to run, because rotate.c also holds a raw GL texture name from
+     * the last capture, which nothing else clears. */
+    rotate_shutdown(server->wlr_renderer);
+    /* And everything the frost under the panels keeps on the GPU. The panes
+     * themselves stay; the next frame builds their buffers again. */
+    glass_gpu_release();
+}
+
+/* The rebuild proper, on an idle callback rather than straight off the signal.
+ *
+ * The renderer cannot be destroyed from inside its own lost handler: the
+ * emission is still in progress, and wl_signal_emit_mutable keeps two marker
+ * listeners on the signal for the length of it, so wlr_renderer_destroy's
+ * "no listeners left" assertion trips. Waiting for idle also gets us off
+ * whatever stack raised the loss — plausibly a render pass inside the very
+ * renderer being replaced. */
+static void renderer_rebuild(void *data) {
+    FwmServer *server = data;
+
+    struct wlr_renderer *old_renderer = server->wlr_renderer;
+    struct wlr_allocator *old_allocator = server->wlr_allocator;
+
+    gpu_release_caches(server);
+
+    struct wlr_renderer *renderer = wlr_renderer_autocreate(server->wlr_backend);
+    if (!renderer) {
+        wlr_log(WLR_ERROR, "GPU reset: no renderer could be created; shutting down");
+        wl_display_terminate(server->wl_display);
+        return;
+    }
+    struct wlr_allocator *allocator =
+        wlr_allocator_autocreate(server->wlr_backend, renderer);
+    if (!allocator) {
+        wlr_log(WLR_ERROR, "GPU reset: no allocator could be created; shutting down");
+        wlr_renderer_destroy(renderer);
+        wl_display_terminate(server->wl_display);
+        return;
+    }
+
+    server->wlr_renderer = renderer;
+    server->wlr_allocator = allocator;
+
+    /* NOT wlr_renderer_init_wl_display again: it creates the wl_shm and
+     * linux-dmabuf globals, and those keep a COPY of the format set rather
+     * than a pointer to the renderer, so they neither dangle nor go stale
+     * across a reset of the same card. Calling it twice would hang a second
+     * set of globals off the display. */
+
+    /* What imports client buffers on commit from here on. */
+    wlr_compositor_set_renderer(server->compositor, renderer);
+
+    /* Every output's swapchain came out of the old allocator. Re-init before
+     * dropping it, so the old buffers are released in the swap. */
+    FwmOutput *out;
+    wl_list_for_each(out, &server->outputs, link) {
+        wlr_output_init_render(out->wlr_output, allocator, renderer);
+    }
+
+    wlr_allocator_destroy(old_allocator);
+    wlr_renderer_destroy(old_renderer);
+
+    /* Now that the new allocator exists, give back what needed it. A star that
+     * cannot be rebuilt is dropped rather than left as a node with no buffer
+     * behind it; the desktop keeps working without it. */
+    wl_list_for_each(out, &server->outputs, link) {
+        if (out->star_draw && !star_draw_gpu_rebuild(out->star_draw)) {
+            wlr_log(WLR_ERROR, "GPU reset: the star could not be rebuilt, dropping it");
+            star_draw_destroy(out->star_draw);
+            out->star_draw = NULL;
+        }
+    }
+
+    renderer_watch_lost(server);
+    server->renderer_recovering = false;
+
+    server_schedule_frames(server);
+    wlr_log(WLR_INFO, "GPU reset: renderer rebuilt, the desktop is back");
+}
+
+static void handle_renderer_lost(struct wl_listener *listener, void *data) {
+    FwmServer *server = wl_container_of(listener, server, renderer_lost);
+    (void)data;
+
+    /* A second loss reported before the swap finishes would re-enter this with
+     * half a renderer in place. */
+    if (server->renderer_recovering) return;
+    server->renderer_recovering = true;
+
+    wlr_log(WLR_ERROR, "GPU reset: the renderer was lost, rebuilding it");
+
+    /* Off the signal now, while merely unhooking is safe, so nothing arrives
+     * twice between here and the rebuild. */
+    wl_list_remove(&server->renderer_lost.link);
+    wl_list_init(&server->renderer_lost.link);
+
+    struct wl_event_loop *loop = wl_display_get_event_loop(server->wl_display);
+    if (!wl_event_loop_add_idle(loop, renderer_rebuild, server)) {
+        wlr_log(WLR_ERROR, "GPU reset: cannot schedule the rebuild; shutting down");
+        wl_display_terminate(server->wl_display);
+    }
+}
+
 bool server_init(FwmServer *server) {
     memset(server, 0, sizeof(*server));
     server->key_mode = -1;   /* the root keymap; 0 would be the first submap */
@@ -322,6 +511,9 @@ bool server_init(FwmServer *server) {
         return false;
     }
     wlr_renderer_init_wl_display(server->wlr_renderer, server->wl_display);
+    /* From here on a GPU reset is survivable: see the recovery block above. */
+    renderer_watch_lost(server);
+    gpu_lost_debug_arm(server, event_loop);
     
     server->wlr_allocator = wlr_allocator_autocreate(server->wlr_backend, server->wlr_renderer);
     if (!server->wlr_allocator) {
@@ -386,6 +578,9 @@ bool server_init(FwmServer *server) {
     server->layer_background = wlr_scene_tree_create(&server->scene->tree);
     server->layer_windows = wlr_scene_tree_create(&server->scene->tree);
     server->layer_overlay = wlr_scene_tree_create(&server->scene->tree);
+    /* The frost under fwm's own panels hangs in this layer; it needs the
+     * server once, and then panels attach to it in one line each. */
+    glass_init(server);
 
     // Layer-shell trees are woven between ours. Creation order alone cannot
     // express this (new trees always land on top), so place them explicitly:
@@ -676,9 +871,17 @@ void server_destroy(FwmServer *server) {
         wl_list_for_each(o, &server->outputs, link) server_wrap_slide_stop(server, o);
     }
 
+    /* Nothing left to rebuild a renderer for: stop listening before the
+     * display tears it down under us. */
+    wl_list_remove(&server->renderer_lost.link);
+
     /* The rotation shaders belong to the renderer's GL context; they have to go
      * while that context still exists. */
     rotate_shutdown(server->wlr_renderer);
+
+    /* The panes under fwm's panels, while the renderer they hold buffers and
+     * textures from is still standing. */
+    glass_finish();
 
     /* The one image every window's shadow was cut from. The windows are gone
      * by now, so nothing is left holding a lock on it. */

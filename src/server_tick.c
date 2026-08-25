@@ -50,6 +50,7 @@
 #include "shadow.h"
 #include "snapshot.h"
 #include "server_internal.h"
+#include "glass.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -1696,7 +1697,8 @@ static int physics_tick_cb(void *data) {
      * so a menu nobody advances is a panel with nothing drawn in it. */
     if (server->stats_buffer)
         stats_menu_tick(server->stats_buffer, server->stats,
-                        server->config.decor.tray_opacity, elapsed);
+                        glass_fill(&server->config, server->config.decor.tray_opacity),
+                        elapsed);
 
     /* The readouts. Sampling is cheap on the ticks where nothing is due, and
      * only a value that CHANGED asks for a repaint — a tray redrawn at the
@@ -1708,7 +1710,8 @@ static int physics_tick_cb(void *data) {
          * is as stale as the pill would be. */
         if (server->stats_buffer)
             stats_menu_redraw(server->stats_buffer, server->stats,
-                              server->config.decor.tray_opacity);
+                              glass_fill(&server->config,
+                                         server->config.decor.tray_opacity));
     }
 
     /* Audio spectrum. Analysed once per TICK rather than once per step: it is

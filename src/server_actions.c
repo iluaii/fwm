@@ -44,6 +44,7 @@
 #include "wallpaper.h"
 #include "group.h"
 #include "expo.h"
+#include "glass.h"
 
 /* Directional tile navigation: among the leaves of `desktop`, find the one
  * nearest to `from` in direction `dir` ('l','r','u','d'), judged by tile
@@ -992,7 +993,7 @@ void server_modes_state(FwmServer *server, ModesState *out) {
     out->wind     = server->config.grass.wind > 0.0;
     out->ring     = server->config.camera.wrap;
     out->hp       = server->config.physics.hp;
-    out->opacity  = server->config.decor.tray_opacity;
+    out->opacity  = glass_fill(&server->config, server->config.decor.tray_opacity);
 }
 
 void server_close_modes_menu(FwmServer *server) {
@@ -1242,7 +1243,7 @@ void server_toggle_stats_menu(FwmServer *server) {
             server->layer_overlay, &out->box,
             out->tray_buffer->node.x + tray_stats_pill_x(&out->tray_strip),
             out->tray_strip.stats.w, server->stats,
-            server->config.decor.tray_opacity);
+            glass_fill(&server->config, server->config.decor.tray_opacity));
     }
     server_request_tray_redraw(server);
 }
@@ -1257,7 +1258,7 @@ int server_stats_menu_click(FwmServer *server, int row) {
 
     stats_set_enabled(server->stats, row, !it->enabled);
     stats_menu_redraw(server->stats_buffer, server->stats,
-                      server->config.decor.tray_opacity);
+                      glass_fill(&server->config, server->config.decor.tray_opacity));
     server_request_tray_redraw(server);
     return 1;
 }

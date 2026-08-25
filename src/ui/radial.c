@@ -17,6 +17,7 @@
 #include "cairo_overlay.h"
 #include "icons.h"
 #include "../server.h"
+#include "../glass.h"
 
 #include <box2d/box2d.h>
 #include <math.h>
@@ -220,7 +221,8 @@ static void draw_radial(cairo_t *cr, int w, int h, void *data) {
     (void)w; (void)h;
 
     const FwmTheme *thm = theme_get();
-    double alpha = r->server->config.decor.launcher_opacity;
+    double alpha = glass_fill(&r->server->config,
+                              r->server->config.decor.launcher_opacity);
 
     PangoLayout *layout = pango_cairo_create_layout(cr);
     PangoFontDescription *desc = pango_font_description_from_string("sans 10");
@@ -501,6 +503,7 @@ static void radial_open(Radial *r) {
      * to build a world for, and this way the failure path frees nothing. */
     r->overlay = cairo_overlay_create(server->layer_overlay, r->side, r->side);
     if (!r->overlay) return;
+    glass_attach(r->overlay);
 
     show_menu(r, 0);
 

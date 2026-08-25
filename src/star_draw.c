@@ -819,6 +819,56 @@ void star_draw_destroy(FwmStarDraw *d) {
     free(d);
 }
 
+/* The GPU under this star has been reset and its renderer is about to be
+ * replaced (server_lifecycle.c). Everything below lives in the dying context,
+ * so it is let go here — while that context is still a valid object to call
+ * into — and built again by star_draw_gpu_rebuild once the new one is up.
+ *
+ * The scene node survives: it is the star's place on the screen, and dropping
+ * it would take the star off the desktop rather than repaint it. It is left
+ * pointing at nothing until the rebuild hands it a new buffer. */
+void star_draw_gpu_release(FwmStarDraw *d) {
+    if (!d) return;
+    if (d->frame_tex) { wlr_texture_destroy(d->frame_tex); d->frame_tex = NULL; }
+    if (d->bg_tex)    { wlr_texture_destroy(d->bg_tex);    d->bg_tex    = NULL; }
+    if (d->bg_buf)    { wlr_buffer_drop(d->bg_buf);        d->bg_buf    = NULL; }
+    if (d->use_gl) {
+        for (int i = 0; i < 2; i++) {
+            if (d->gpu[i]) wlr_buffer_drop(d->gpu[i]);
+            d->gpu[i] = NULL;
+        }
+        d->gpu_next = 0;
+        if (d->buf) wlr_scene_buffer_set_buffer(d->buf, NULL);
+    }
+    /* A raw GL name from expo's capture, meaningless in the new context. Expo
+     * is closed across a reset anyway, so nothing re-sets it behind our back. */
+    d->ring_tex = 0;
+    d->drawn = false;
+}
+
+/* The other half: buffers from the new allocator, and a repaint from scratch.
+ *
+ * False means the shader path could not be put back — the caller drops the
+ * star rather than leave a node with no buffer behind it. The cairo path has
+ * nothing to rebuild: its overlay is CPU-side and the scene re-uploads it. */
+bool star_draw_gpu_rebuild(FwmStarDraw *d) {
+    if (!d) return false;
+    if (!d->use_gl) return true;
+    for (int i = 0; i < 2; i++) {
+        d->gpu[i] = snapshot_alloc(d->server, d->side, d->side);
+        if (!d->gpu[i]) {
+            for (int j = 0; j < i; j++) {
+                wlr_buffer_drop(d->gpu[j]);
+                d->gpu[j] = NULL;
+            }
+            return false;
+        }
+    }
+    if (d->buf) wlr_scene_buffer_set_buffer(d->buf, d->gpu[0]);
+    d->drawn = false;   /* the next tick paints it all again */
+    return true;
+}
+
 /* Re-cut the canvas to `side` pixels.
  *
  * The buffer a star is given is sized once and never touched again — it is the

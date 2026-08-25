@@ -22,6 +22,7 @@
 #include "modes.h"
 #include "../theme.h"
 #include "../server.h"
+#include "../glass.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -580,7 +581,8 @@ static void draw_mixer(cairo_t *cr, int w, int h, void *data) {
     (void)w; (void)h;
 
     const FwmTheme *thm = theme_get();
-    double alpha = m->server->config.decor.launcher_opacity;
+    double alpha = glass_fill(&m->server->config,
+                              m->server->config.decor.launcher_opacity);
     double px = 0.0, py = m->panel_y;
 
     PangoLayout *layout = pango_cairo_create_layout(cr);
@@ -817,6 +819,7 @@ static void mixer_open(Mixer *m) {
     m->h = (int)(HEAD_H + PAD + m->visible * ROW_H + PAD);
     m->overlay = cairo_overlay_create(server->layer_overlay, m->w, m->h);
     if (!m->overlay) return;
+    glass_attach(m->overlay);
 
     /* The master is row zero and is always there, read or not: it is the row
      * the hand lands on, and a panel whose first row appeared a second late

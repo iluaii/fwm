@@ -115,6 +115,8 @@ set(SOURCES
     src/star_gl.c
     src/sun.c
     src/shadow.c
+    src/blur.c
+    src/glass.c
     src/wallpaper.c
     src/video.c
     src/audio.c

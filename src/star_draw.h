@@ -55,6 +55,13 @@ FwmStarDraw *star_draw_create(struct FwmServer *server, struct FwmOutput *out,
                               struct wlr_scene_tree *front, const StarConfig *cfg);
 void star_draw_destroy(FwmStarDraw *draw);
 
+/* GPU reset recovery, in two halves either side of the renderer swap: release
+ * lets go of everything that lived in the dying context, rebuild allocates
+ * again from the new one. Rebuild returning false means the shader path could
+ * not be restored and the star has to be dropped. */
+void star_draw_gpu_release(FwmStarDraw *draw);
+bool star_draw_gpu_rebuild(FwmStarDraw *draw);
+
 /* Redraw for the state `star` is in now, and put it where a monitor whose
  * camera is at `camera_x` and whose top-left is at (origin_x, origin_y) would
  * see it. Cheap to call every frame: the picture is only actually repainted

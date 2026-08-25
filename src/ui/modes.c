@@ -16,6 +16,7 @@
 #include "cairo_overlay.h"
 #include "tray.h"
 #include "../theme.h"
+#include "../glass.h"
 
 #include <math.h>
 #include <string.h>
@@ -621,6 +622,7 @@ struct wlr_scene_buffer *modes_menu_show(struct wlr_scene_tree *parent,
     if (buf) {
         wlr_scene_node_set_position(&buf->node, wx, wy);
         cairo_overlay_update(buf, draw_menu, &ctx);
+        glass_attach(buf);
         /* Node-level fade and drop, on top of the per-row stagger the tick
          * draws inside the buffer: the panel arrives, then its contents do.
          * server_close_modes_menu runs exactly this in reverse. */

@@ -36,6 +36,7 @@
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "grass.h"
+#include "glass.h"
 #include "star_draw.h"
 #include "expo.h"
 #include "group.h"
@@ -378,6 +379,9 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
      * That is a window flashing onto the screen next door for a sixtieth of a
      * second, which is precisely long enough to see. */
     server_views_clip(output->server);
+    /* And the frost under fwm's own panels, last of all: it photographs the
+     * desktop, so everything that moves this frame has to have moved. */
+    glass_tick(output);
     wlr_scene_output_commit(scene_output, NULL);
 
     struct timespec now;
@@ -1112,6 +1116,7 @@ static void output_build_tray(FwmOutput *out) {
      * this: a second monitor arriving, a mode change, a screen coming back. */
     out->tray_strip = (TrayStrip){0};
     out->tray_buffer = tray_init(server->layer_overlay, out->box.width);
+    glass_attach(out->tray_buffer);
     if (!out->tray_buffer) return;
     wlr_scene_node_set_position(&out->tray_buffer->node,
                                 out->tray_buffer->node.x + out->box.x,

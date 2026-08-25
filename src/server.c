@@ -40,6 +40,7 @@
 #include "ui/launcher.h"
 #include "ui/cairo_overlay.h"
 #include "server_internal.h"
+#include "glass.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -425,7 +426,7 @@ void server_request_tray_redraw(FwmServer *server) {
         }
     }
 
-    data.opacity = server->config.decor.tray_opacity;
+    data.opacity = glass_fill(&server->config, server->config.decor.tray_opacity);
     data.error_count = server->config.error_total;
     data.error_expanded = server->errors_buffer != NULL;
     data.mode_name = (server->key_mode >= 0 && server->key_mode < server->config.mode_count)

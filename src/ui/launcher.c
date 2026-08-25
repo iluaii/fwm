@@ -20,6 +20,7 @@
 #include "../server.h"
 #include "../video.h"
 #include "../launched.h"
+#include "../glass.h"
 
 #include <box2d/box2d.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -646,7 +647,8 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
     pango_layout_set_font_description(layout, desc);
     pango_font_description_free(desc);
 
-    double alpha = l->server->config.decor.launcher_opacity;
+    double alpha = glass_fill(&l->server->config,
+                              l->server->config.decor.launcher_opacity);
 
     /* ── bar ── */
     pill_path(cr, 0, 0, l->bar_w, BAR_H);
@@ -893,6 +895,7 @@ static void launcher_open(Launcher *l) {
         launcher_close(l);
         return;
     }
+    glass_attach(l->overlay);
     wlr_scene_node_set_position(&l->overlay->node, l->px, l->py);
     cairo_overlay_animate_in(l->overlay, PANEL_ANIM_MS, PANEL_RISE_PX);
     l->open = true;

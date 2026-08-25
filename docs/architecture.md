@@ -81,7 +81,7 @@ price to pay for turning a feature *off*.
 | Simulation | `physics.c` (the mirror + Box2D), `wobble.c` (drag lattice) |
 | Compositor core | `server.c`, `server_lifecycle.c`, `server_tick.c`, `server_output.c`, `server_shell.c`, `server_seat.c` |
 | Input | `server_input.c` (keyboard, binds, modes), `server_pointer.c`, `server_drag.c`, `gestures.c` + `server_gestures.c` |
-| Windows | `view.c`, `view_effects.c` (squash/wobble/fade), `snapshot.c`, `rotate.c` (the one GLES2 path), `group.c` (tabs) |
+| Windows | `view.c`, `view_effects.c` (squash/wobble/fade), `snapshot.c`, `rotate.c` (raw GLES2, for the rotation and the bend the render-pass API cannot express), `group.c` (tabs) |
 | Layout | `bsp.c` (the tree), `server_tiling.c` (applying it), `server_desktop.c` |
 | Desktops | `expo*.c` (the strip and its 3D view) |
 | Config | `config.c`, `config_binds.c`, `config_set.c`, `toml.c` |
@@ -89,6 +89,7 @@ price to pay for turning a feature *off*.
 | Wallpaper | `wallpaper.c`, `video.c` |
 | Audio | `audio.c` (capture), `cava.c` (FFT + bars), `sound.c` (mixer), `wav.c` |
 | Light | `sun.c` (where the sun is — arithmetic, no scene), `shadow.c` (what it draws: one shared nine-patch image, nine slices per window) |
+| Glass | `glass.c` (a frosted pane under each of fwm's own panels, cut to the panel's own alpha — no panel describes its shape), `blur.c` (the GLES2 passes that make one) |
 | Session | `server_idle.c` (the blank and lock timers), `lock.c` (the lock protocol), `clipboard.c` (the seat's selection: fwm's own offers, and text kept past the window that copied it), `battery.c` (the charge, and when it is worth interrupting somebody over) |
 | Extras | `ram.c` (memory footprints), `theme.c` (palette), `layer.c`, `foreign.c` |
 | UI | `ui/*.c` — see below, plus `ui/toast.c`: one line at the bottom of the screen, used by anything with something short to say (where a screenshot went, how much charge is left) |

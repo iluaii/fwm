@@ -492,6 +492,74 @@ static void load_decor(toml_table_t *root, FwmConfig *cfg) {
     if (dc->dim_ms < 0.0) dc->dim_ms = 0.0;
 }
 
+/* ── glass section ───────────────────────────────────────────────────── */
+
+static void load_glass(toml_table_t *root, FwmConfig *cfg) {
+    GlassConfig *g = &cfg->glass;
+
+    g->enabled = 0;      /* a decoration, off until asked for */
+    /* Wide enough that nothing behind a panel is still legible through it,
+     * which is the whole point: a frost you can read a window through is a
+     * panel with a window printed on it. */
+    g->radius  = 28.0;
+    /* Half the island, near enough. Much above this and the frost stops being
+     * visible at all; much below and the text on a pill has to compete with
+     * whatever is on the wallpaper under it. */
+    g->fill    = 0.55;
+    g->tint    = 0.0;
+    parse_hex_color("#000000", g->tint_color);
+    g->brightness = 1.0;
+
+    g->shadow         = 1;
+    /* A panel lies ON the desktop; a window floats above it. [sun] length is
+     * 34px at 45 degrees for that reason, and this is deliberately a third of
+     * it — the same light, a much shorter cast. */
+    g->shadow_length  = 10.0;
+    g->shadow_blur    = 18.0;
+    g->shadow_opacity = 0.5;
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "glass");
+    if (!tbl) return;
+
+    toml_datum_t e = toml_bool_in(tbl, "enabled");
+    if (e.ok) g->enabled = e.u.b ? 1 : 0;
+    toml_datum_t s = toml_bool_in(tbl, "shadow");
+    if (s.ok) g->shadow = s.u.b ? 1 : 0;
+
+    LOAD_DOUBLE(tbl, "radius",         g->radius);
+    LOAD_DOUBLE(tbl, "fill",           g->fill);
+    LOAD_DOUBLE(tbl, "tint",           g->tint);
+    LOAD_DOUBLE(tbl, "brightness",     g->brightness);
+    LOAD_DOUBLE(tbl, "shadow_length",  g->shadow_length);
+    LOAD_DOUBLE(tbl, "shadow_blur",    g->shadow_blur);
+    LOAD_DOUBLE(tbl, "shadow_opacity", g->shadow_opacity);
+
+    toml_datum_t c = toml_string_in(tbl, "tint_color");
+    if (c.ok) {
+        if (!parse_hex_color(c.u.s, g->tint_color))
+            config_report_error(cfg, "[glass] tint_color: \"%s\" is not #RRGGBB[AA]", c.u.s);
+        free(c.u.s);
+    }
+
+    if (g->radius < 0.0)     g->radius = 0.0;
+    if (g->radius > 128.0)   g->radius = 128.0;
+    /* Zero would make the coverage the mask is divided by zero, and every
+     * panel would come back as a full rectangle of glass. */
+    if (g->fill < 0.02)      g->fill = 0.02;
+    if (g->fill > 1.0)       g->fill = 1.0;
+    if (g->tint < 0.0)       g->tint = 0.0;
+    if (g->tint > 1.0)       g->tint = 1.0;
+    if (g->brightness < 0.0) g->brightness = 0.0;
+    if (g->brightness > 2.0) g->brightness = 2.0;
+    if (g->shadow_length < 0.0)   g->shadow_length = 0.0;
+    if (g->shadow_length > 128.0) g->shadow_length = 128.0;
+    if (g->shadow_blur < 0.0)     g->shadow_blur = 0.0;
+    if (g->shadow_blur > 128.0)   g->shadow_blur = 128.0;
+    if (g->shadow_opacity < 0.0)  g->shadow_opacity = 0.0;
+    if (g->shadow_opacity > 1.0)  g->shadow_opacity = 1.0;
+}
+
 /* ── sun section ─────────────────────────────────────────────────────── */
 
 static void load_sun(toml_table_t *root, FwmConfig *cfg) {
@@ -1817,6 +1885,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_startup(NULL, &cfg->startup, cfg);
     load_gestures(NULL, cfg);
     load_cava(NULL, cfg);
+    load_glass(NULL, cfg);
     load_grass(NULL, cfg);
     load_sound(NULL, cfg);
     load_volume(NULL, cfg);
@@ -1874,6 +1943,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_mouse(root, cfg);
     load_gestures(root, cfg);
     load_cava(root, cfg);
+    load_glass(root, cfg);
     load_grass(root, cfg);
     load_sound(root, cfg);
     load_volume(root, cfg);

@@ -17,6 +17,7 @@
 #include "cairo_overlay.h"
 #include "modes.h"
 #include "../server.h"
+#include "../glass.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,7 +93,8 @@ static void draw_osd(cairo_t *cr, int w, int h, void *data) {
      * through. A readout at tray_opacity = 0.5 over a bright picture is a
      * readout you cannot read — that is a real setting, and it was the first
      * one this was tried against. */
-    double alpha = o->server->config.decor.launcher_opacity;
+    double alpha = glass_fill(&o->server->config,
+                              o->server->config.decor.launcher_opacity);
 
     modes_panel_path(cr, 0.0, 0.0, (double)w, (double)h, MODES_MENU_CHAMFER);
     cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], alpha);
@@ -179,6 +181,7 @@ void osd_show(Osd *o, const char *label, const char *value, double frac, bool at
         closing_cancel(o);
         o->overlay = cairo_overlay_create(server->layer_overlay, OSD_W, OSD_H);
         if (!o->overlay) return;
+        glass_attach(o->overlay);
         /* The monitor's box, not the column's: on a second screen of another
          * size the pill would sit off-centre and, on a shorter one, below the
          * bottom edge entirely. */

@@ -534,3 +534,24 @@ void wallpaper_destroy(FwmWallpaper *wp) {
     free(wp->layers);
     free(wp);
 }
+
+/* Let go of the cached card textures because the renderer that owns them is
+ * being replaced after a GPU reset (server_lifecycle.c).
+ *
+ * Only the GPU half goes. The cards themselves are cairo surfaces in ordinary
+ * memory and survive untouched, so there is nothing to rebuild: the next
+ * caller of wallpaper_layer_texture finds a NULL cache and uploads again, on
+ * the new renderer, exactly as it does for a layer it has never drawn. */
+void wallpaper_gpu_release(FwmWallpaper *wp) {
+    if (!wp) return;
+    for (int i = 0; i < wp->count; i++) {
+        if (wp->layers[i].card_tex) {
+            wlr_texture_destroy(wp->layers[i].card_tex);
+            wp->layers[i].card_tex = NULL;
+        }
+        if (wp->layers[i].card_tex_buf) {
+            wlr_buffer_unlock(wp->layers[i].card_tex_buf);
+            wp->layers[i].card_tex_buf = NULL;
+        }
+    }
+}

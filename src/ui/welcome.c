@@ -16,6 +16,7 @@
 #include "../theme.h"
 #include "cairo_overlay.h"
 #include "logo.h"
+#include "../glass.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -121,9 +122,10 @@ struct wlr_scene_buffer *welcome_show(struct wlr_scene_tree *parent, int screen_
 
     struct wlr_scene_buffer *welcome_buf = cairo_overlay_create(parent, WELCOME_W, WELCOME_H);
     if (welcome_buf) {
-        double opacity = cfg->decor.tray_opacity;
+        double opacity = glass_fill(cfg, cfg->decor.tray_opacity);
         wlr_scene_node_set_position(&welcome_buf->node, wx, wy);
         cairo_overlay_update(welcome_buf, draw_welcome_content, &opacity);
+        glass_attach(welcome_buf);   /* before make_static; see ui/hints.c */
         cairo_overlay_make_static(welcome_buf);
         cairo_overlay_animate_in(welcome_buf, 240.0, 18.0);
     }

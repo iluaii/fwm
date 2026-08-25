@@ -20,6 +20,7 @@
 #include "modes.h"
 #include "tray.h"
 #include "../theme.h"
+#include "../glass.h"
 
 #include <math.h>
 #include <string.h>
@@ -194,6 +195,7 @@ struct wlr_scene_buffer *stats_menu_show(struct wlr_scene_tree *parent,
     if (buf) {
         wlr_scene_node_set_position(&buf->node, wx, wy);
         cairo_overlay_update(buf, draw_menu, &ctx);
+        glass_attach(buf);
         cairo_overlay_animate_in(buf, STATS_MENU_ANIM_MS, -STATS_MENU_RISE_PX);
     }
     return buf;

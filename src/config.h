@@ -231,6 +231,47 @@ enum {
     COLOR_SOURCE_WALLPAPER = 1, /* tint + accent derived from the wallpaper image */
 };
 
+/* ── glass ───────────────────────────────────────────────────────────────
+ *
+ * What fwm's own panels are made of: the desktop behind them blurred, and a
+ * shadow under them. Every panel fwm draws is covered — the tray, the
+ * launcher, the modes and stats menus, the sound panel, the hints sheet, a
+ * toast — because none of them has to say anything about its own shape to be
+ * frosted. See src/glass.h for why.
+ *
+ * A decoration, and off until it is asked for, the same bargain [grass] makes.
+ *
+ * Switching it on changes what a panel's opacity MEANS, which is why `fill` is
+ * here and not four separate numbers: the islands now sit on frosted glass
+ * rather than straight on the desktop, so how opaque they are is how much
+ * glass there is to see. While the glass is on, this replaces [decor]
+ * tray_opacity and launcher_opacity and every panel's own hardcoded alpha —
+ * one number, because they are meant to be one material.
+ */
+typedef struct {
+    int    enabled;
+    double radius;        /* px of blur on the desktop behind a panel */
+    double fill;          /* 0..1 of flat colour left standing on the frost */
+    double tint;          /* 0..1, how far the frost is pulled toward tint_color */
+    float  tint_color[4]; /* premultiplied, the shape every colour here has */
+    double brightness;    /* multiplier on the blurred desktop; 1 leaves it alone */
+
+    /* The shadow.
+     *
+     * Which way it falls and how dark it may get belong to [sun]: a panel is
+     * one more object lying on the desktop under the same light, and a tray
+     * casting north while the windows cast east is the one thing on screen
+     * disagreeing about where the light is. What a panel decides for itself is
+     * only this — whether it casts, how far (it lies much closer to the
+     * desktop than a window floats above it), how soft, and how much of the
+     * sun's darkness it takes. [sun] off, or night, and there is no panel
+     * shadow either. */
+    int    shadow;
+    double shadow_length;  /* px of cast; the bearing comes from [sun] */
+    double shadow_blur;    /* px of penumbra */
+    double shadow_opacity; /* 0..1, scaled by the sun's own alpha */
+} GlassConfig;
+
 /* ── the sun ─────────────────────────────────────────────────────────────
  *
  * There is one light over the desktop and every window casts a shadow from it.
@@ -1279,6 +1320,7 @@ typedef struct {
     MouseConfig     mouse;
     GesturesConfig  gestures;
     CavaConfig      cava;
+    GlassConfig     glass;
     GrassConfig     grass;
     SoundConfig     sound;
     VolumeConfig    volume;

@@ -15,6 +15,7 @@
 #include "expo_hints.h"
 #include "../theme.h"
 #include "cairo_overlay.h"
+#include "../glass.h"
 
 #define HINT_PAD_X   16.0
 #define HINT_PAD_Y   7.0
@@ -129,7 +130,8 @@ static void draw_hints(cairo_t *cr, int w, int h, void *data) {
     const struct hint *hints = data;
     const FwmTheme *thm = theme_get();
 
-    cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2], 0.92);
+    cairo_set_source_rgba(cr, thm->pill[0], thm->pill[1], thm->pill[2],
+                          glass_fill(NULL, 0.92));
     panel_path(cr, w, h, HINT_CUT);
     cairo_fill(cr);
 
@@ -221,6 +223,7 @@ struct wlr_scene_buffer *expo_hints_show(struct wlr_scene_tree *parent,
     struct wlr_scene_buffer *buf = cairo_overlay_create(parent, (int)w, (int)h);
     if (!buf) return NULL;
     cairo_overlay_update(buf, draw_hints, (void *)hints);
+    glass_attach(buf);
     g_w = w;
     g_h = h;
     place(buf, screen_w, screen_h, w, h, 1.0);

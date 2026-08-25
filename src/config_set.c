@@ -75,6 +75,19 @@ static const ConfigOption config_option_table[] = {
     { "decor.inactive_opacity",         CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.inactive_opacity),          0.0,     1.0,    "how much of itself an unfocused window keeps" },
     { "decor.dim_ms",                   CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.dim_ms),                    0.0, 10000.0,    "how long the unfocused dim takes, ms" },
 
+    /* The frost under fwm's own panels. `fill` takes over from the two decor
+     * opacities above while the glass is on — see [glass] in config.h. */
+    { "glass.enabled",                  CFG_OPT_INT,    offsetof(FwmConfig, glass.enabled),                   0.0,     1.0,    "1 = fwm's panels stand on frosted glass" },
+    { "glass.radius",                   CFG_OPT_DOUBLE, offsetof(FwmConfig, glass.radius),                    0.0,   128.0,    "px of blur behind a panel" },
+    { "glass.fill",                     CFG_OPT_DOUBLE, offsetof(FwmConfig, glass.fill),                      0.02,    1.0,    "flat colour left on the glass; low is more frost" },
+    { "glass.tint",                     CFG_OPT_DOUBLE, offsetof(FwmConfig, glass.tint),                      0.0,     1.0,    "how far the frost is pulled toward tint_color" },
+    { "glass.tint_color",               CFG_OPT_COLOR,  offsetof(FwmConfig, glass.tint_color),                0.0,     0.0,    "what the frost is tinted with" },
+    { "glass.brightness",               CFG_OPT_DOUBLE, offsetof(FwmConfig, glass.brightness),                0.0,     2.0,    "multiplier on the blurred desktop" },
+    { "glass.shadow",                   CFG_OPT_INT,    offsetof(FwmConfig, glass.shadow),                    0.0,     1.0,    "1 = panels cast a shadow, from [sun]" },
+    { "glass.shadow_length",            CFG_OPT_DOUBLE, offsetof(FwmConfig, glass.shadow_length),             0.0,   128.0,    "px a panel's shadow is cast" },
+    { "glass.shadow_blur",              CFG_OPT_DOUBLE, offsetof(FwmConfig, glass.shadow_blur),               0.0,   128.0,    "penumbra under a panel, px" },
+    { "glass.shadow_opacity",           CFG_OPT_DOUBLE, offsetof(FwmConfig, glass.shadow_opacity),            0.0,     1.0,    "how dark a panel's shadow is" },
+
     /* Numeric like cava.mode and physics.mass, and for the same reason — the
      * table is typed. 0 = manual, 1 = clock. */
     { "sun.enabled",                    CFG_OPT_INT,    offsetof(FwmConfig, sun.enabled),                     0.0,     1.0,    "1 = windows cast shadows" },

@@ -16,6 +16,7 @@
 #include "../theme.h"
 #include "cairo_overlay.h"
 #include "logo.h"
+#include "../glass.h"
 #include <stdio.h>
 #include <string.h>
 #include <xkbcommon/xkbcommon.h>
@@ -583,7 +584,7 @@ struct wlr_scene_buffer *hints_show(struct wlr_scene_tree *parent, int screen_w,
                                     const FwmConfig *cfg) {
     struct HintsCtx ctx;
     hints_build(cfg, &ctx);
-    ctx.opacity = cfg->decor.tray_opacity;
+    ctx.opacity = glass_fill(cfg, cfg->decor.tray_opacity);
     hints_measure(&ctx, screen_w, screen_h);
 
     int hints_w = hints_width(&ctx);
@@ -598,6 +599,9 @@ struct wlr_scene_buffer *hints_show(struct wlr_scene_tree *parent, int screen_w,
     if (hints_buf) {
         wlr_scene_node_set_position(&hints_buf->node, wx, wy);
         cairo_overlay_update(hints_buf, draw_hints_content, &ctx);
+        /* Before make_static, which is the last moment the sheet's own
+         * pixels exist to be taken a copy of. */
+        glass_attach(hints_buf);
         cairo_overlay_make_static(hints_buf);
         cairo_overlay_animate_in(hints_buf, 170.0, 14.0);
     }

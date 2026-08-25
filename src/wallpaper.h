@@ -96,6 +96,10 @@ struct wlr_texture *wallpaper_layer_texture(FwmWallpaper *wp, int i,
 void wallpaper_layer_crop(FwmWallpaper *wp, int i, int camera_x,
                           int screen_w, int screen_h, struct wlr_fbox *out);
 
+
+/* Drop the cached card textures ahead of a renderer swap after a GPU reset.
+ * The cards are CPU-side and stay; the textures are re-uploaded on demand. */
+void wallpaper_gpu_release(FwmWallpaper *wp);
 void wallpaper_destroy(FwmWallpaper *wp);
 
 #endif /* FWM_WALLPAPER_H */

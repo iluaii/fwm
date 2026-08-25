@@ -16,6 +16,7 @@
 #include "../theme.h"
 #include "cairo_overlay.h"
 #include "tray.h"
+#include "../glass.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -169,7 +170,7 @@ struct wlr_scene_buffer *errors_show(struct wlr_scene_tree *parent, int screen_w
                                      const FwmConfig *cfg) {
     if (cfg->error_count <= 0) return NULL;
 
-    struct ErrCtx ctx = { .cfg = cfg, .opacity = cfg->decor.tray_opacity };
+    struct ErrCtx ctx = { .cfg = cfg, .opacity = glass_fill(cfg, cfg->decor.tray_opacity) };
     int panel_h = panel_height(cfg);
     if (panel_h > screen_h - 60) panel_h = screen_h - 60;
 
@@ -181,6 +182,7 @@ struct wlr_scene_buffer *errors_show(struct wlr_scene_tree *parent, int screen_w
     if (buf) {
         wlr_scene_node_set_position(&buf->node, wx, wy);
         cairo_overlay_update(buf, draw_errors_content, &ctx);
+        glass_attach(buf);   /* before make_static; see ui/hints.c */
         cairo_overlay_make_static(buf);
         /* Drops down from under the tray pill it belongs to. */
         cairo_overlay_animate_in(buf, 170.0, -14.0);

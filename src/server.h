@@ -322,6 +322,13 @@ typedef struct FwmServer {
     struct wlr_session *session; /* NULL on nested backends; used for VT switching */
     struct wlr_renderer *wlr_renderer;
     struct wlr_allocator *wlr_allocator;
+    /* wlroots raises renderer->events.lost when the driver reports a GPU reset
+     * — a hung client (a game on a shader pack that runs the card out of VRAM
+     * is the usual one) taking the whole context down with it. Everything
+     * drawn on that context is garbage from then on, on EVERY monitor, because
+     * one renderer serves them all. server_lifecycle.c rebuilds it. */
+    struct wl_listener renderer_lost;
+    bool renderer_recovering;   /* guards re-entry while the swap is under way */
     struct wlr_scene *scene;
     struct wlr_scene_tree *layer_background;
     struct wlr_scene_tree *layer_windows;
