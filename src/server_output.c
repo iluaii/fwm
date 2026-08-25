@@ -188,6 +188,14 @@ static void server_animate(FwmServer *server) {
         wl_list_for_each(sv, &server->views, link) view_squash_tick(sv, dt);
     }
 
+    /* The rubber a resize holds the window in. Nothing here animates — the
+     * stretch is the scene graph's — but the client behind it has to be kept
+     * drawing, and its new frames have to reach the picture. */
+    {
+        FwmView *rv;
+        wl_list_for_each(rv, &server->views, link) view_rubber_tick(rv, dt);
+    }
+
     /* The drag wobble ticks unconditionally, not under an `if (jelly > 0)` like
      * the squash above: turning the effect off in a config reload has to reach
      * a window that is wobbling right now, and view_jelly_tick is what puts its

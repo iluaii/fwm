@@ -280,6 +280,19 @@ typedef struct {
     int bsp_desktop;
     float bsp_start_ratio, bsp_start_ratio_v;
     
+    /* Which corner of the window the hand took hold of, for a resize: the two
+     * edges nearest the grab point are the ones that move, exactly as a tiled
+     * window's are. Anchoring the top-left unconditionally meant a window
+     * grabbed at its left edge grew to the RIGHT, away from the hand, and the
+     * only way to move a left edge at all was to move the whole window first.
+     * A client asking for the resize itself (xdg_toplevel.resize) names its
+     * edges, and those win over where the cursor happens to be. */
+    int resize_left, resize_top;
+    /* The last size a resize actually asked the client for. Pointer motion
+     * arrives far faster than any client redraws, and asking again for a size
+     * it is already working on only lengthens the queue it is behind. */
+    int sent_w, sent_h;
+
     /* Swap drag */
     double cur_x, cur_y;
 } FwmInteractiveState;

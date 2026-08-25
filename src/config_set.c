@@ -110,6 +110,7 @@ static const ConfigOption config_option_table[] = {
     { "effects.squash",                 CFG_OPT_DOUBLE, offsetof(FwmConfig, effects.squash),                  0.0,     4.0,    "impact squash & stretch; 0 disables" },
     { "effects.jelly",                  CFG_OPT_DOUBLE, offsetof(FwmConfig, effects.jelly),                   0.0,     4.0,    "drag wobble; 0 disables" },
     { "effects.droplet",                CFG_OPT_DOUBLE, offsetof(FwmConfig, effects.droplet),                 0.0,     1.0,    "a window carried off a tiling layout is a drop; 0 disables" },
+    { "effects.rubber",                 CFG_OPT_DOUBLE, offsetof(FwmConfig, effects.rubber),                  0.0,     1.0,    "resize follows the hand, not the client's steps; 0 disables" },
     { "effects.spin",              CFG_OPT_DOUBLE, offsetof(FwmConfig, effects.spin),                    0.0,     4.0,    "free rotation kick (experimental); 0 disables" },
     { "effects.live",              CFG_OPT_DOUBLE, offsetof(FwmConfig, effects.live),                    0.0,     1.0,    "live content under spin/wobble; 0 = still frame" },
 

@@ -27,6 +27,7 @@
 #include "foreign.h"
 #include "ipc.h"
 #include "expo.h"
+#include <wlr/util/edges.h>
 #include <signal.h>
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -309,7 +310,6 @@ void server_start_interactive_move(FwmServer *server, struct FwmView *view, uint
 
 void server_start_interactive_resize(FwmServer *server, struct FwmView *view, uint32_t edges, uint32_t serial) {
     (void)serial;
-    (void)edges;
     PhysicsBody *pb = physics_find_body(&server->physics, view->id);
     if (!pb || pb->pinned) return;
     if (server->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) return;
@@ -322,6 +322,19 @@ void server_start_interactive_resize(FwmServer *server, struct FwmView *view, ui
     server->interactive.view_start_y = view->y;
     server->interactive.view_start_width = view->width;
     server->interactive.view_start_height = view->height;
+    /* The client named the edge it is dragging — a CSD window's own frame, and
+     * the only thing that knows which one the pointer went down on, since the
+     * grab is the client's and we never saw the press. Ignoring it left every
+     * one of them resizing from the bottom-right: dragging the left edge of a
+     * GTK window moved the right one instead. */
+    server->interactive.resize_left = (edges & WLR_EDGE_LEFT) != 0;
+    server->interactive.resize_top  = (edges & WLR_EDGE_TOP)  != 0;
+    server->interactive.sent_w = view->width;
+    server->interactive.sent_h = view->height;
+    /* Drawn at the hand's size for the length of the drag, as with the mouse
+     * bind: a client resizing itself through its own frame is the same gesture
+     * and has the same lag behind it. */
+    view_rubber_begin(view);
     
     physics_stop_body(&server->physics, view->id);
 }

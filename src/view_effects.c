@@ -255,6 +255,7 @@ void view_set_content_enabled(FwmView *view, bool enabled) {
         if (view->squash_buf && node == &view->squash_buf->node) ours = true;
         if (view->spin_buf && node == &view->spin_buf->node) ours = true;
         if (view->jelly_buf && node == &view->jelly_buf->node) ours = true;
+        if (view->rub_buf && node == &view->rub_buf->node) ours = true;
         /* The shadow is nine nodes of ours whose state belongs to the sun and
          * not to this call: half of them are deliberately dark at any moment,
          * and switching the lot back on would paint the whole image where a
@@ -270,6 +271,207 @@ void view_set_content_enabled(FwmView *view, bool enabled) {
      * call here rather than six at the sites, because a site that forgets is a
      * shadow left behind at an empty rectangle. */
     view_shadow_update(view);
+}
+
+/* ── rubber resize ────────────────────────────────────────────────────────
+ *
+ * The picture the window already has, stretched to the box the hand is asking
+ * for. See the rub_* fields in view.h for why.
+ *
+ * The scene graph can do the stretching itself — a buffer node has a
+ * destination size independent of the picture in it — so unlike the wobble and
+ * the spin there is no mesh here and nothing is redrawn per frame. What this
+ * costs is one node and, for a window that has to be composited, one snapshot
+ * per redraw of the client. */
+
+/* The picture to stretch: the client's own buffer when the window is a single
+ * surface (free, and live), a composite of the subtree otherwise. `live` says
+ * which, since the two are freed differently. */
+static struct wlr_buffer *view_rubber_source(FwmView *view, int *live) {
+    /* One surface and nothing else: the client's own buffer IS the picture, so
+     * the stretch costs nothing and the content stays live under the hand. The
+     * view already holds a lock on it (view.c keeps the last committed buffer),
+     * and a new one arrives with every commit.
+     *
+     * Anything with a subsurface or an open menu has to be composited, and that
+     * picture is taken once, here. */
+    if (view_is_single_surface(view) && view->last_buffer) {
+        /* ... and only when that buffer IS the window. A client-decorated xdg
+         * window paints its own shadow margins into the same surface and calls
+         * a sub-rectangle of it the window; stretching the whole buffer into
+         * that rectangle's box would squeeze the margins in with it. Those go
+         * the composited way, where the picture is of the window alone. */
+        struct wlr_surface *s = view_surface(view);
+        int gw, gh;
+        view_committed_size(view, &gw, &gh);
+        if (s && s->current.width == gw && s->current.height == gh) {
+            *live = 1;
+            return view->last_buffer;
+        }
+    }
+    *live = 0;
+    return view_snapshot_content(view);
+}
+
+bool view_rubber_begin(FwmView *view) {
+    /* A fresh grab cancels whatever the last one was still settling. */
+    view->rs_t = 0.0;
+    view->rs_pin_r = view->rs_pin_b = 0;
+    view->rub_settling = 0;
+    if (view->rub_buf) return true;
+    if (!view->scene_tree) return false;
+    if (view->server->config.effects.rubber <= 0.0) return false;
+    /* One picture of a window at a time. The others are all short animations;
+     * a resize can wait for them rather than fight over the same node. */
+    if (view->spin_buf || view->jelly || view->squash_buf) return false;
+
+    /* The size the picture actually holds — what the CLIENT last committed,
+     * not what we may already have asked it for. */
+    int w, h;
+    view_border_box(view, &w, &h);
+    if (w <= 0 || h <= 0) { w = view->width; h = view->height; }
+    if (w <= 0 || h <= 0) return false;
+
+    int live = 0;
+    struct wlr_buffer *src = view_rubber_source(view, &live);
+    if (!src) return false;
+
+    view->rub_buf = wlr_scene_buffer_create(view->scene_tree, src);
+    if (!view->rub_buf) {
+        if (!live) wlr_buffer_drop(src);
+        return false;
+    }
+    /* The scene node has taken its own reference; ours is either the view's
+     * standing lock on the client buffer or one we keep until the picture is
+     * replaced. */
+    if (!live) {
+        view->rub_lock = wlr_buffer_lock(src);
+        wlr_buffer_drop(src);
+    }
+    view->rub_live = live;
+    view->rub_w = w;
+    view->rub_h = h;
+    view->rub_frame_t = 0.0;
+    view_log_effect_path(view, "resize rubber", live);
+
+    /* Under the borders, like the squash: the frame still outlines the window,
+     * and here it outlines the box being ASKED for (view_border_box). */
+    wlr_scene_node_lower_to_bottom(&view->rub_buf->node);
+    view->rub_buf->node.data = view;
+    /* The pointer is held by the resize for as long as this exists, so there is
+     * nothing for the picture to accept. */
+    wlr_scene_buffer_set_dest_size(view->rub_buf, view->width, view->height);
+    view_set_content_enabled(view, false);
+    view_update_border_geometry(view);
+    return true;
+}
+
+void view_rubber_to(FwmView *view, int w, int h) {
+    if (!view->rub_buf || w <= 0 || h <= 0) return;
+    wlr_scene_buffer_set_dest_size(view->rub_buf, w, h);
+    view_update_border_geometry(view);
+}
+
+/* Take the size the client actually settled on, with the edges that were not
+ * being dragged held where the grab left them. */
+static void view_resize_adopt(FwmView *view) {
+    int cw, ch;
+    view_committed_size(view, &cw, &ch);
+    if (cw <= 0 || ch <= 0) return;
+    if (view->rs_pin_r) view->x = view->rs_x1 - cw;
+    if (view->rs_pin_b) view->y = view->rs_y1 - ch;
+    view->width = cw;
+    view->height = ch;
+    physics_sync_body(&view->server->physics, view->id, view->x, view->y,
+                      cw, ch, view->server->screen_width);
+    if (view->scene_tree) server_place_view(view->server, view, view->x, view->y);
+}
+
+void view_resize_settle(FwmView *view, int pin_r, int pin_b, int x1, int y1) {
+    view->rs_pin_r = pin_r;
+    view->rs_pin_b = pin_b;
+    view->rs_x1 = x1;
+    view->rs_y1 = y1;
+    /* Long enough for a client to answer one configure, short enough that a
+     * client which never answers is not left frozen. */
+    view->rs_t = 0.35;
+    view->rub_settling = view->rub_buf != NULL;
+    /* The next frame the client draws is its answer to the last size it was
+     * asked for, and that is the moment to hand the window back. */
+    view->content_dirty = 0;
+}
+
+void view_rubber_tick(FwmView *view, double dt) {
+    /* The moment after the release: hold the far edges, and keep the stretched
+     * picture up until the client has drawn the size it was last asked for.
+     * Without this the window snapped to whatever it had managed to commit
+     * mid-drag — a size the hand had already left — and then walked to the
+     * real one over the next few frames. */
+    if (view->rs_t > 0.0) {
+        /* Unless another gesture has taken the window in the meantime — let go
+         * of a resize and start dragging it straight away, and where the window
+         * goes is the new hand's business. Holding an edge from the last one
+         * would teleport it mid-drag. (A new RESIZE clears this in
+         * view_rubber_begin, so what lands here is a move or a twist.) */
+        FwmInteractiveState *in = &view->server->interactive;
+        if (in->action != FWM_ACTION_NONE && in->view == view) {
+            view->rs_t = 0.0;
+            view->rub_settling = 0;
+            view->rs_pin_r = view->rs_pin_b = 0;
+            view_rubber_end(view);
+            return;
+        }
+        view->rs_t -= dt;
+        if (view->rs_t <= 0.0 || view->content_dirty) {
+            view->rs_t = 0.0;
+            view->rub_settling = 0;
+            view_rubber_end(view);       /* no-op when there was no rubber */
+            view_resize_adopt(view);
+            view->rs_pin_r = view->rs_pin_b = 0;
+            return;
+        }
+    }
+
+    if (!view->rub_buf) return;
+
+    /* Hiding the live nodes took the window out of the scene's frame-done
+     * sweep, and a client that is waiting on a frame callback stops drawing —
+     * which during a resize can mean it never answers the size we asked for,
+     * and the drag ends on the picture it started with.
+     *
+     * At the frame's pace, not this function's: it is called once per output
+     * frame, so on two monitors it runs twice for the same instant, and a
+     * client handed twice as many callbacks as there are frames redraws twice
+     * as often for nothing. */
+    view->rub_frame_t += dt;
+    if (view->rub_frame_t >= 1.0 / 120.0) {
+        view->rub_frame_t = 0.0;
+        view_send_frame_done(view);
+    }
+
+    /* The picture itself is deliberately NOT refreshed while the hand is on the
+     * window. It was, at first — the client's newest frame stretched into the
+     * hand's box — and that is precisely what made the window shudder: every
+     * answer the client sends is a different size, so the same picture was
+     * being squeezed a few percent one way and then the other, several times a
+     * second, on top of the stretch the drag was already applying. One frozen
+     * frame stretched smoothly is the calm version, and the live window comes
+     * back at the release. */
+    if (!view->rub_settling) view->content_dirty = 0;
+}
+
+void view_rubber_end(FwmView *view) {
+    if (!view->rub_buf) return;
+    wlr_scene_node_destroy(&view->rub_buf->node);
+    view->rub_buf = NULL;
+    if (view->rub_lock) {
+        wlr_buffer_unlock(view->rub_lock);
+        view->rub_lock = NULL;
+    }
+    view->rub_live = 0;
+    view->rub_w = view->rub_h = 0;
+    view_set_content_enabled(view, true);
+    view_update_border_geometry(view);   /* back to the client's own box */
 }
 
 void view_stop_squash(FwmView *view) {
@@ -312,8 +514,10 @@ void view_start_squash(FwmView *view, double nx, double ny, double amount) {
     if (!view->scene_tree || !view->last_buffer) return;
     if (amount <= 0.001) return;
     /* A spinning window already has the picture, and a deformation along a
-     * screen-axis normal would be visibly wrong on a tilted one. */
-    if (view->spin_buf) return;
+     * screen-axis normal would be visibly wrong on a tilted one. The rubber
+     * holds it for the same reason: a window being resized is drawn at a size
+     * the client has not reached, and denting THAT is denting a guess. */
+    if (view->spin_buf || view->rub_buf) return;
 
     /* A window still in your hand keeps its wobble: the drag owns the picture,
      * and the impact is not lost anyway — a collision moves the window, and
@@ -611,8 +815,10 @@ void view_jelly_begin(FwmView *view, double strength, double grab_lx, double gra
     if (strength <= 0.0) return;
     /* Rotation wins, exactly as it does over the impact squash: it owns the
      * picture, and a sheet bending along the screen axes says nothing useful
-     * about one that is tilted. */
-    if (view->spin_buf) return;
+     * about one that is tilted. A window in the rubber is not being dragged at
+     * all — one hand, one gesture — but a stray one must not stack two
+     * pictures of the same window. */
+    if (view->spin_buf || view->rub_buf) return;
     /* No mesh without the GLES2 path. Unlike the spin there is no degraded
      * version worth showing — a window that does not wobble is just a window. */
     if (!rotate_supported(view->server->wlr_renderer)) return;
@@ -1015,6 +1221,10 @@ void view_spin_tick(FwmView *view, double angle, double dt) {
      * too, and gives way for the same reason. */
     if (view->squash_buf) view_stop_squash(view);
     view_jelly_stop(view);
+    /* And the resize rubber, which is a picture of the same window at a size
+     * the client has not answered yet. A window spun while it was being
+     * resized is the one way the two ever meet. */
+    view_rubber_end(view);
 
     bool redraw = false;
 

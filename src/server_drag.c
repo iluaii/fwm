@@ -562,18 +562,39 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
         double dx = lx - server->interactive.start_x;
         double dy = ly - server->interactive.start_y;
 
-        int new_w = server->interactive.view_start_width + dx;
-        int new_h = server->interactive.view_start_height + dy;
-        /* Room to grow reaches the right edge of the window's OWN desktop, not
-         * of the world: view_start_x is a world coordinate, so on desktop N it
-         * is already N screens along and a plain screen_width - x is negative
-         * there. That negative then beat the 50px floor below (the ceiling was
-         * applied second) and a negative width tripped an assertion inside
-         * wlroots — resizing any window off desktop 0 killed the compositor. */
+        /* The edges the hand has hold of move; the opposite ones stay put. A
+         * left or top grab therefore both resizes AND moves the window, which
+         * is the whole difference between an edge you can drag and a corner
+         * that drags the far one instead. */
+        int start_w = server->interactive.view_start_width;
+        int start_h = server->interactive.view_start_height;
+        int new_w = server->interactive.resize_left ? start_w - dx : start_w + dx;
+        int new_h = server->interactive.resize_top  ? start_h - dy : start_h + dy;
+
+        /* Room to grow reaches the edge of the MONITOR showing the window's own
+         * desktop, not of the world: view_start_x is a world coordinate, so on
+         * desktop N it is already N screens along and a plain screen_width - x
+         * is negative there. That negative then beat the 50px floor below (the
+         * ceiling was applied second) and a negative width tripped an assertion
+         * inside wlroots — resizing any window off desktop 0 killed the
+         * compositor. And a column is the size of the PRIMARY monitor, so on a
+         * smaller screen the last stretch of it is glass nobody has: growing
+         * into it put the corner the hand was holding past the edge, where
+         * server_views_clip cuts it away. */
         int desk = server->interactive.view_start_x / server->screen_width;
         if (desk < 0) desk = 0;
-        int max_w = (desk + 1) * server->screen_width - server->interactive.view_start_x;
-        int max_h = server->screen_height - server->interactive.view_start_y;
+        if (desk >= FWM_DESKTOPS) desk = FWM_DESKTOPS - 1;
+        FwmOutput *rmon = server_output_showing(server, desk);
+        int lim_w = rmon && rmon->box.width  > 0 ? rmon->box.width  : server->screen_width;
+        int lim_h = rmon && rmon->box.height > 0 ? rmon->box.height : server->screen_height;
+        int col_x = desk * server->screen_width;
+
+        int max_w = server->interactive.resize_left
+                  ? server->interactive.view_start_x + start_w - col_x
+                  : col_x + lim_w - server->interactive.view_start_x;
+        int max_h = server->interactive.resize_top
+                  ? server->interactive.view_start_y + start_h
+                  : lim_h - server->interactive.view_start_y;
 
         if (new_w > max_w) new_w = max_w;
         if (new_h > max_h) new_h = max_h;
@@ -583,11 +604,51 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
         if (new_w < 50) new_w = 50;
         if (new_h < 50) new_h = 50;
 
-        view->width = new_w;
-        view->height = new_h;
-        
-        view_set_size(view, view->width, view->height);
-        physics_sync_body(&server->physics, view->id, view->x, view->y, view->width, view->height, server->screen_width);
+        /* An edge that does not move is an edge that does not move.
+         *
+         * Which means the position has to be measured back from the far edge
+         * using the size the window is actually DRAWN at — not the size we are
+         * asking for. With the rubber up the two are the same, because the
+         * picture is stretched to exactly what was asked. Without it the window
+         * is whatever the client last committed, and anchoring the far edge on
+         * the request instead put it out by the difference: the side nobody was
+         * touching crept toward the corner in the hand and away from it again,
+         * every time the client answered. */
+        int draw_w = new_w, draw_h = new_h;
+        if (!view->rub_buf) {
+            int cw, ch;
+            view_committed_size(view, &cw, &ch);
+            if (cw > 0) draw_w = cw;
+            if (ch > 0) draw_h = ch;
+        }
+        int new_x = server->interactive.resize_left
+                  ? server->interactive.view_start_x + start_w - draw_w
+                  : server->interactive.view_start_x;
+        int new_y = server->interactive.resize_top
+                  ? server->interactive.view_start_y + start_h - draw_h
+                  : server->interactive.view_start_y;
+
+        view->x = new_x;
+        view->y = new_y;
+        view->width = draw_w;
+        view->height = draw_h;
+
+        /* Only when it actually changed. Motion events arrive every couple of
+         * milliseconds and a client redraws at its own pace; re-sending the
+         * size it is already working on adds a configure to the queue it is
+         * already behind, and the window falls further behind the hand. */
+        if (new_w != server->interactive.sent_w || new_h != server->interactive.sent_h) {
+            view_set_size(view, new_w, new_h);
+            server->interactive.sent_w = new_w;
+            server->interactive.sent_h = new_h;
+        }
+        /* And on screen it is that size NOW, whatever the client has managed
+         * to draw. Nothing else here waits for the client, so nothing else
+         * should look like it does. */
+        view_rubber_to(view, new_w, new_h);
+        physics_sync_body(&server->physics, view->id, view->x, view->y,
+                          view->width, view->height, server->screen_width);
+        if (view->scene_tree) server_place_view(server, view, view->x, view->y);
     } else if (server->interactive.action == FWM_ACTION_BSP_RESIZE) {
         int d = server->interactive.bsp_desktop;
         BspNode *root = (d >= 0 && d < FWM_DESKTOPS) ? server->bsp_roots[d] : NULL;
@@ -858,6 +919,19 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
                         server->interactive.view_start_y = view->y;
                         server->interactive.view_start_width = view->width;
                         server->interactive.view_start_height = view->height;
+                        /* The nearest corner, from anywhere inside the window —
+                         * the same grab the tiling branch above takes, and the
+                         * one it has always claimed a floating window got. */
+                        server->interactive.resize_left =
+                            wx < view->x + view->width  / 2.0;
+                        server->interactive.resize_top =
+                            wy < view->y + view->height / 2.0;
+                        server->interactive.sent_w = view->width;
+                        server->interactive.sent_h = view->height;
+                        /* The window is drawn at the size the hand asks for
+                         * from here until the release; the client catches up
+                         * underneath. */
+                        view_rubber_begin(view);
                     }
                 } else if (is_move || is_move_nc) {
                     /* A tiled window is picked UP: it leaves the layout and
@@ -1035,6 +1109,20 @@ void server_drag_release(FwmServer *server, double lx, double ly) {
             }
         }
         
+        /* The hand is off a resize. The client is still answering the last size
+         * it was asked for, so the window is not settled yet: the far edges are
+         * held where the grab left them, and the stretched picture stays up
+         * until the client's next frame (view_resize_settle). */
+        if (server->interactive.action == FWM_ACTION_RESIZE && server->interactive.view) {
+            view_resize_settle(server->interactive.view,
+                               server->interactive.resize_left,
+                               server->interactive.resize_top,
+                               server->interactive.view_start_x
+                                   + server->interactive.view_start_width,
+                               server->interactive.view_start_y
+                                   + server->interactive.view_start_height);
+        }
+
         // X11 windows: push the final position after a drag/resize so the
         // client's idea of its root coordinates matches reality again.
         if (server->interactive.view) view_sync_position(server->interactive.view);

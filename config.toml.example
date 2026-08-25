@@ -538,6 +538,15 @@ blank_after = 600
 # spinning window — rotation owns the picture. While a window wobbles its
 # border is hidden, since a rectangle cannot bend with it.
 [effects]
+# rubber makes a hand-resized window follow the cursor instead of the client:
+# while you drag, the window is drawn at the size you are ASKING for, stretched
+# from the frame the client has already given us, and its real content comes
+# back the moment you let go. Without it the window changes size only when the
+# client redraws, in whatever unit that client answers in — a terminal answers
+# in whole character cells — so it steps along a few frames behind your hand.
+# The cost is that the picture is scaled, and frozen, for as long as the drag
+# lasts. 1 on, 0 off.
+rubber       = 1.0
 # droplet is what a window looks like on its way out of a tiling layout and
 # back into one: it rounds off at the corners into a drop while you carry it,
 # and when you put it down it lands where the cursor let go and spreads out to

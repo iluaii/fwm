@@ -885,6 +885,8 @@ wrap       = false   # a ring: past the last desktop is the first (next/prev,
                      # into the screen edge; view:N is still a destination)
 
 [effects]
+rubber       = 1.0   # a hand-resized window follows the cursor instead of
+                     # stepping along with the client; 0 disables
 camera_shake = 0.0   # jolt the view on hard impacts; off by default, 1.0 to enable
 squash       = 1.0   # windows deform on impact, scaled by speed; 0 disables
 jelly        = 1.0   # how far a dragged window bends (wobbly windows); 0 disables
@@ -1110,7 +1112,7 @@ fit  = "pan"
 |---|---|
 | `Super+LeftDrag` | move / throw a window (floating) — or take a tile out of the layout and put it down elsewhere (tiling) |
 | `Super+Shift+LeftDrag` | move through windows (no collision) — or swap tiles when tiling |
-| `Super+RightDrag` | resize (floating) / resize the tile from its nearest corner (tiling) |
+| `Super+RightDrag` | resize from the corner nearest your hand — a floating window or a tile alike. A floating window is drawn at the size you are asking for while the client catches up underneath, so it follows the cursor instead of stepping along in whatever the client's own unit happens to be |
 
 ---
 

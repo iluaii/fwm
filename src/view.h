@@ -233,6 +233,42 @@ typedef struct FwmView {
     double squash_amount;             /* peak deformation, 0..1 */
     double squash_nx, squash_ny;      /* impact normal, points at the contact */
 
+    /* Rubber resize: the window drawn at the size the HAND is asking for while
+     * the client is still catching up with it.
+     *
+     * A resize is a conversation — we ask, the client redraws, and only then is
+     * there a picture of the new size. So the window moves in the client's
+     * steps, not the hand's: a terminal jumps a whole character cell at a time
+     * and everything lags a frame or three behind the cursor. Stretching the
+     * picture we already have to the box being asked for hides all of it; the
+     * client's real content arrives underneath and takes over at the release.
+     * It is the same trade every compositor that feels smooth here makes — the
+     * content is slightly scaled for as long as the drag lasts.
+     *
+     * The picture is taken once, at the grab, and held for the whole drag. The
+     * client's newer frames are deliberately not swapped in: each answer it
+     * sends is a different size, so a picture kept up to date was being
+     * squeezed a few percent one way and then the other several times a second
+     * on top of the stretch, and the window shuddered. `rub_live` marks the
+     * cheap way of taking it — a single-surface window is stretched straight
+     * from the client's own buffer and nothing is copied at all; anything with
+     * a subsurface or an open menu is composited into `rub_lock` instead. */
+    struct wlr_scene_buffer *rub_buf;
+    struct wlr_buffer *rub_lock;      /* the composited picture, when copied */
+    int rub_live;                     /* the client's own buffer, no copy */
+    int rub_w, rub_h;                 /* size the picture holds */
+    double rub_frame_t;               /* since the last frame callback, s */
+    /* The moment after the hand comes off. The client is still answering the
+     * last size it was asked for, and every answer changes the window — so the
+     * edges that were NOT being dragged are held where the grab left them
+     * until it stops, and the stretched picture stays up until the client's
+     * next frame rather than snapping to a size it has already left behind.
+     * `rs_x1`/`rs_y1` are where the held right and bottom edges stand. */
+    int rub_settling;
+    int rs_pin_r, rs_pin_b;
+    int rs_x1, rs_y1;
+    double rs_t;                      /* grace left, s; 0 = nothing pending */
+
     /* Wobble ("jelly") while a window is dragged: KDE's effect, a sheet of
      * springs that bends rather than a rectangle that is scaled. The model is
      * in wobble.h and knows nothing about any of this; here is only what it
@@ -382,6 +418,25 @@ void view_update_border_geometry(FwmView *view);
  * simply ignored. */
 void view_start_squash(FwmView *view, double nx, double ny, double amount);
 void view_squash_tick(FwmView *view, double dt);
+
+/* ── rubber resize (see rub_* above) ──────────────────────────────────────
+ *
+ * begin: put the stretched picture up and hide the live window behind it.
+ * to:    draw it at this size — the box the hand is asking the client for.
+ * tick:  keep the picture (and the client) alive for another frame.
+ * end:   live content back, whatever size the client actually settled on.
+ *
+ * Begin is false when there is nothing to stretch (no picture yet) or another
+ * effect already owns the window's picture; the resize then simply behaves as
+ * it always did. */
+bool view_rubber_begin(FwmView *view);
+void view_rubber_to(FwmView *view, int w, int h);
+void view_rubber_tick(FwmView *view, double dt);
+void view_rubber_end(FwmView *view);
+/* The hand has come off a resize. `pin_r`/`pin_b` say which far edges were
+ * standing still — the ones opposite the corner that was dragged — and x1/y1
+ * where they stand, in world pixels. */
+void view_resize_settle(FwmView *view, int pin_r, int pin_b, int x1, int y1);
 void view_stop_squash(FwmView *view);
 
 /* Drag wobble (see the jelly_* fields above).

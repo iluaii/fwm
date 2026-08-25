@@ -105,12 +105,36 @@ static void handle_commit(struct wl_listener *listener, void *data) {
          * client's to answer with. A game whose buffer is smaller than the
          * screen (its own resolution, scaled up for us) would otherwise shrink
          * the window it is filling, one commit at a time. */
+        /* A resize by hand needs a word of its own. While the rubber holds the
+         * window, the size on screen is the one the HAND asked for — the
+         * picture is stretched to it — and the client's answer is not adopted
+         * until the release. Without the rubber the answer IS the window, and
+         * then the far edge has to be re-pinned as it arrives: the drag
+         * measures the position back from the edge nobody is touching, so a
+         * window resized by its left or top edge would otherwise creep by the
+         * difference between what we asked for and what came back. */
+        FwmInteractiveState *in = &view->server->interactive;
+        bool held = in->action == FWM_ACTION_RESIZE && in->view == view;
         bool ours = pb && pb->fullscreen;
-        if (!ours && cw > 0 && ch > 0 && (cw != view->width || ch != view->height)) {
+        if (view->rub_buf) {
+            /* The rubber owns the drawn size — during the drag and for the
+             * moment after it, until the client has answered. */
+        } else if (!ours && cw > 0 && ch > 0 && (cw != view->width || ch != view->height)) {
+            if (held) {
+                if (in->resize_left)
+                    view->x = in->view_start_x + in->view_start_width - cw;
+                if (in->resize_top)
+                    view->y = in->view_start_y + in->view_start_height - ch;
+            } else if (view->rs_t > 0.0) {
+                if (view->rs_pin_r) view->x = view->rs_x1 - cw;
+                if (view->rs_pin_b) view->y = view->rs_y1 - ch;
+            }
             view->width = cw;
             view->height = ch;
             physics_sync_body(&view->server->physics, view->id, view->x, view->y,
                               cw, ch, view->server->screen_width);
+            if ((held || view->rs_t > 0.0) && view->scene_tree)
+                server_place_view(view->server, view, view->x, view->y);
         }
     }
 
@@ -239,6 +263,14 @@ void view_place_borders(FwmView *view, int x, int y, int w, int h) {
 
 /* The window's own box, as committed. */
 void view_border_box(FwmView *view, int *w, int *h) {
+    /* While the rubber holds the window, the window IS the box being asked
+     * for: the picture is stretched to it, and a frame drawn around the size
+     * the client last committed would sit inside the window it outlines. */
+    if (view->rub_buf) {
+        *w = view->width;
+        *h = view->height;
+        return;
+    }
     if (view->type == FWM_VIEW_XDG) {
         *w = view->xdg_toplevel->base->current.geometry.width;
         *h = view->xdg_toplevel->base->current.geometry.height;
@@ -948,6 +980,7 @@ void view_unmap(FwmView *view) {
     view_stop_squash(view);
     view_jelly_stop(view);
     view_stop_spin(view);
+    view_rubber_end(view);
 
     /* Which desktop to re-home the keyboard on, read before the body goes. */
     PhysicsBody *ub = physics_find_body(&view->server->physics, view->id);

@@ -786,6 +786,7 @@ static void load_effects(toml_table_t *root, EffectsConfig *e) {
     e->squash = 1.0;
     e->jelly = 1.0;
     e->droplet = 1.0;
+    e->rubber = 1.0;
     e->spin = 1.0;
     e->live = 1.0;
     e->shot_fly = 1.0;
@@ -806,6 +807,9 @@ static void load_effects(toml_table_t *root, EffectsConfig *e) {
     /* At 1 the corners are already on the ellipse; past that the mesh folds
      * through itself and the drop turns inside out. */
     if (e->droplet > 1.0) e->droplet = 1.0;
+    LOAD_DOUBLE(tbl, "rubber", e->rubber);
+    if (e->rubber < 0.0) e->rubber = 0.0;
+    if (e->rubber > 1.0) e->rubber = 1.0;   /* a stretch is on or it is off */
     LOAD_DOUBLE(tbl, "live", e->live);
     if (e->live < 0.0) e->live = 0.0;
     if (e->live > 1.0) e->live = 1.0;

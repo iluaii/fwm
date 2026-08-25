@@ -571,6 +571,14 @@ typedef struct {
      * [effects] jelly at 0, and a drop that is not also wobbling is a drop that
      * holds its shape while it is carried. */
     double droplet;
+    /* Resize rubber: while a window is being resized by hand it is drawn at the
+     * size the HAND is asking for, stretched from the picture the client has
+     * already given us, instead of stepping along in whatever unit the client
+     * answers in (a terminal answers in whole character cells) a frame or three
+     * behind the cursor. 0 disables — the window then changes size exactly when
+     * the client redraws, which is what fwm did before and what a client whose
+     * content must not be scaled for a moment wants. */
+    double rubber;
     /* Free window rotation (EXPERIMENTAL), strength of the spin_window kick.
      * 0 makes the bind do nothing. Nothing rotates on its own: a window only
      * ever spins because the bind told it to. */

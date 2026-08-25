@@ -655,6 +655,8 @@ string, so like every other string here it is reload-only.
 
 ```toml
 [effects]
+rubber       = 1.0   # a hand-resized window follows the cursor, not the
+                     # client's own steps; 0 disables
 camera_shake = 1.0   # screen shake on impact; 0 disables
 squash       = 1.0   # squash & stretch on impact; 0 disables
 jelly        = 1.0   # wobble while dragging; 0 disables
@@ -663,6 +665,15 @@ spin         = 1.0   # strength of the spin_window kick (experimental)
 live         = 1.0   # live window content under spin/wobble; 0 = still frame
 shot_fly     = 1.0   # region screenshot peels off and flies away; 0 disables
 ```
+
+`rubber` is what makes a resize feel like a resize. A window's size is the
+client's to decide: the compositor asks, the client redraws, and only then is
+there a picture of the new size — in whatever unit that client works in, a whole
+character cell at a time for a terminal, always a frame or three behind the
+hand. With `rubber` on, the window is drawn at the size you are *asking* for,
+stretched from the frame the client has already given us, and the real content
+takes over the moment you let go. The picture is frozen and scaled for as long
+as the drag lasts; that is the whole cost, and it is why `0` is there.
 
 `shot_fly` is the one effect that is not about windows: when `screenshot_region`
 takes its picture, a frozen copy of the region lifts off the screen, shrinks,
