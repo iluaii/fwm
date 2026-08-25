@@ -61,6 +61,11 @@ void session_autostart(struct FwmServer *server);
  * return the desktop it should go to and forget the entry; -1 otherwise. */
 int session_claim_desktop(struct FwmServer *server, struct FwmView *view);
 
+/* What `fwm -debug` puts on screen instead of the saved session: a terminal on
+ * desktop 1, and a second on desktop 2 with that desktop switched to tiling.
+ * Call once, where session_restore would have gone. */
+void session_debug_desktop(struct FwmServer *server);
+
 /* Delete the state file because we are shutting down on purpose. A crash never
  * gets here, so the file surviving is exactly the signal that the last run was
  * not a clean one. Skipped when restore = "always". */

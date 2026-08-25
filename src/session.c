@@ -17,6 +17,7 @@
 #include "server.h"
 #include "view.h"
 #include "physics.h"
+#include "launched.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -186,6 +187,9 @@ static void build_snapshot(struct FwmServer *server, char *out, size_t cap) {
 }
 
 void session_maybe_save(struct FwmServer *server) {
+    /* A -debug run's windows are not the session; the file belongs to the one
+     * this was started beside. */
+    if (server->debug) return;
     if (server->config.session.restore == SESSION_RESTORE_NEVER) return;
 
     struct FwmSessionState *st = state_of(server);
@@ -338,10 +342,53 @@ int session_claim_desktop(struct FwmServer *server, struct FwmView *view) {
     return -1;
 }
 
+/* ── the -debug desktop ──────────────────────────────────────────────── */
+
+/* What a -debug run comes up with, and the reason the flag exists at all.
+ *
+ * A second fwm started from another TTY to try a build in shares a HOME with
+ * the session you are still using, and the session note is the piece of that
+ * HOME which reaches back out of this process: the debug run read it and
+ * relaunched everything it listed — a second Steam, talking to the first one
+ * over its own socket — then wrote its own windows over the note and deleted it
+ * on the way out, so the real session had nothing left to come back to. Every
+ * one of those is switched off (session_maybe_save, session_clear_on_clean_exit
+ * and server_run's own branch), and [startup] with them: fwm-kbd and wlsunset
+ * are exactly the kind of thing one does not want a second copy of on somebody
+ * else's keyboard and screen.
+ *
+ * Which leaves an empty desktop, and an empty desktop is not much to test on.
+ * So: a terminal on the first desktop, and a second on the next one with the
+ * layout switched to tiling — one window under physics and one under the tree,
+ * which is both halves of how fwm can hold a window, with no key pressed.
+ *
+ * The desktop each one lands on is written down against its pid rather than
+ * left to the camera (launched.h): a terminal takes long enough to start that
+ * the second one would otherwise open wherever you had wandered to. */
+void session_debug_desktop(struct FwmServer *server) {
+    const char *cmd = server_terminal_command(server);
+    if (!cmd) return;   /* it has already said so, in the tray */
+
+    launched_note(server, server_spawn(cmd), 0);
+
+    /* Tiling before the window rather than after it, so the second terminal is
+     * a tile from the moment it maps instead of a floating window the layout
+     * takes hold of a frame later. */
+    server_set_desktop_mode(server, 1, DESKTOP_MODE_TILING);
+    launched_note(server, server_spawn(cmd), 1);
+
+    wlr_log(WLR_INFO, "fwm -debug: no session restore, no startup commands, "
+                      "two terminals (desktop 2 tiling)");
+}
+
 /* Called only on the way out of a NORMAL shutdown — a crash never reaches
  * server_destroy. Removing the file here is what lets the next start tell the
  * two apart: a state file that survived means the last run died. */
 void session_clear_on_clean_exit(struct FwmServer *server) {
+    /* And it must not take the real session's note with it when it goes: the
+     * file surviving IS the evidence that a run died, and a debug run exiting
+     * cleanly is no evidence about the session next door. */
+    if (server->debug) return;
     if (server->config.session.restore == SESSION_RESTORE_ALWAYS) return;
 
     char sp[512];

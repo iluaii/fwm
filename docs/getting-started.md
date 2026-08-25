@@ -107,12 +107,15 @@ fwm can run nested inside your current session, which is how it is developed:
 
 ```sh
 ./dev.sh          # rebuild and run in a window
-./dev.sh -n 2     # ...with two terminals already open
+./dev.sh -n 2     # ...with two more terminals open
 ./dev.sh -g 1     # ...with gravity on
 ```
 
 The inner compositor can be restarted as often as you like while the session you
-are working in never notices. `./dev.sh -h` prints the rest of its flags — a
+are working in never notices. It runs with `-debug`, which keeps it out of the
+outer session's state — no session restore, no `[startup]` — and starts it with
+a terminal on desktop 1 and a tiled one on desktop 2; the same flag is what to
+use when a build is run from another TTY instead. `./dev.sh -h` prints the rest of its flags — a
 screenshot-and-quit mode, a starting desktop, the visualiser on synthetic audio.
 Keybinds are the one thing a nested run cannot test: the outer compositor claims
 the `Super` combinations first. See

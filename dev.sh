@@ -11,8 +11,14 @@
 # Nesting cannot test keybinds, though: an outer fwm claims the Super
 # combinations before the inner one ever sees them. Run from a TTY for those.
 #
+# The inner fwm is started with -debug, because it shares a HOME with the
+# session around it: without the flag it reads that session's note, relaunches
+# everything listed in it, then writes its own windows over the note and deletes
+# it on the way out. -debug also brings up two terminals of its own, one of them
+# tiled, so a run has something in it to look at; -n opens more on top of those.
+#
 #   ./dev.sh                      rebuild and run
-#   ./dev.sh -n 2                 ... with 2 terminals already open
+#   ./dev.sh -n 2                 ... with 2 more terminals open
 #   ./dev.sh -g 1                 ... with gravity on (fwm boots in zero-g)
 #   ./dev.sh -a toggle_tiling_all ... firing one action after startup
 #   ./dev.sh -c 3                 ... parked on desktop 3
@@ -20,6 +26,9 @@
 #                                     (off|visual|physical|both — a nested run
 #                                     has nothing playing to capture)
 #   ./dev.sh -d                   ... with debug logging
+#   ./dev.sh --session            ... as a REAL session: session restore and
+#                                     [startup] run, and the note is written.
+#                                     Only when that is what you are testing
 #   ./dev.sh -s shot.png          screenshot after a few seconds, then quit
 #   ./dev.sh -B                   skip the rebuild
 #
@@ -36,6 +45,7 @@ build=1
 shot=""
 shot_delay=4
 run_env=""
+fwm_args="-debug"
 
 # Print the header block, stopping at the first blank line, so the usage text
 # does not have to be kept in sync with hard-coded line numbers.
@@ -49,6 +59,7 @@ while [ $# -gt 0 ]; do
         -c) run_env="$run_env FWM_TEST_CAMERA=$2"; shift 2 ;;
         -V) run_env="$run_env FWM_TEST_CAVA=1 FWM_TEST_CAVA_MODE=$2"; shift 2 ;;
         -d) run_env="$run_env FWM_DEBUG=1"; shift ;;
+        --session) fwm_args=""; shift ;;
         --picker) run_env="$run_env FWM_OPEN_PICKER=1"; shift ;;
         --hints)  run_env="$run_env FWM_SHOW_HINTS=1"; shift ;;
         -t) TERM_CMD="$2"; shift 2 ;;
@@ -94,7 +105,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # shellcheck disable=SC2086
-env $run_env $backend_env "$BUILD/fwm" >"$log" 2>&1 &
+env $run_env $backend_env "$BUILD/fwm" $fwm_args >"$log" 2>&1 &
 fwm_pid=$!
 
 # Wait for the inner socket rather than sleeping a guessed amount.

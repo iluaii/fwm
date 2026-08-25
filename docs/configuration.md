@@ -717,6 +717,10 @@ Two limits: an application whose window belongs to a different process than the
 one launched (some browsers, Electron apps) comes back on the current desktop
 rather than its old one, and at most 64 applications are recorded.
 
+A second fwm run over the same `HOME` — a build tried from another TTY — would
+otherwise relaunch the running session's applications and then overwrite its
+note. Start that one as `fwm -debug` and it leaves the file alone entirely.
+
 ## startup
 
 ```toml
@@ -732,6 +736,8 @@ already set and can subscribe immediately rather than polling for a compositor.
 
 This is for programs that follow the session: a backlight bridge, a bar, a
 notification daemon. Applications are `session` restore's job, not this one.
+`fwm -debug` runs none of them, since a second copy of a backlight bridge or a
+gamma daemon is a second copy on the keyboard and the screen you are using.
 
 fwm neither supervises these nor stops them when it exits. A helper that must
 clean up after itself should watch for the socket disappearing — which is what

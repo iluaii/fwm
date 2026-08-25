@@ -563,11 +563,30 @@ notices.
 
 ```sh
 ./dev.sh                      # rebuild and run nested
-./dev.sh -n 2 -g 1            # ... with two terminals, gravity on
+./dev.sh -n 2 -g 1            # ... with two more terminals, gravity on
 ./dev.sh -a toggle_tiling_all # ... firing one action after startup
 ./dev.sh -s shot.png          # screenshot after a few seconds, then quit
 ./dev.sh -h                   # all options
 ```
+
+Whichever way it is run — nested, or straight from another TTY when the thing
+being tested needs a real GPU, the monitor layout or VT switching — a second fwm
+shares a `HOME` with the session you left running, and the piece of that `HOME`
+which bites is the session note: it read the note and relaunched everything in
+it (a second Steam, talking to the first over its own socket), then wrote its
+own windows over it and deleted it on the way out. `-debug` is the run that does
+none of that:
+
+```sh
+build/fwm -debug              # from another TTY, beside a live session
+```
+
+It neither reads nor writes `~/.local/state/fwm/session`, runs no `[startup]`
+commands, and comes up with two terminals instead: one on desktop 1, one on
+desktop 2 with that desktop tiling — both ways fwm can hold a window, before you
+have touched the keyboard. `dev.sh` passes the flag for you, so `-n` adds
+terminals on top of those two; `dev.sh --session` turns it back off for the one
+case where the session note and `[startup]` are what you are testing.
 
 Because keys cannot be injected into a nested compositor, a few env hooks stand
 in for them: `FWM_TEST_ACTION`, `FWM_TEST_GRAVITY` (fwm boots in zero-g),

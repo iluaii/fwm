@@ -474,8 +474,9 @@ static void handle_renderer_lost(struct wl_listener *listener, void *data) {
     }
 }
 
-bool server_init(FwmServer *server) {
+bool server_init(FwmServer *server, bool debug) {
     memset(server, 0, sizeof(*server));
+    server->debug = debug;
     server->key_mode = -1;   /* the root keymap; 0 would be the first submap */
     /* Read once: the diagnostic must cost nothing at all when it is off. */
     server->fx_debug = getenv("FWM_DEBUG_EFFECTS") != NULL;
@@ -788,13 +789,19 @@ void server_run(FwmServer *server) {
     }
 
     /* After the backend is up (so WAYLAND_DISPLAY is exported and the socket
-     * accepts connections) but before the event loop blocks: the relaunched
-     * clients connect into the loop we are about to enter. */
-    session_restore(server);
-
-    /* After restore, so a helper that reads the window list at startup sees
-     * the session it is joining rather than an empty one. */
-    session_autostart(server);
+     * accepts connections) but before the event loop blocks: the clients
+     * started here connect into the loop we are about to enter. */
+    if (server->debug) {
+        /* Neither of the two below, and for the same reason: a -debug run is a
+         * second fwm over the first one's HOME, and both of them reach out of
+         * this process into the session you are still using. */
+        session_debug_desktop(server);
+    } else {
+        session_restore(server);
+        /* After restore, so a helper that reads the window list at startup sees
+         * the session it is joining rather than an empty one. */
+        session_autostart(server);
+    }
 
     wl_display_run(server->wl_display);
 }

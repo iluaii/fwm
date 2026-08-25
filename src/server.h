@@ -755,11 +755,18 @@ typedef struct FwmServer {
      * nothing is frozen. It outlives the selector by one commit, because the
      * shot is read back from the frame that still has it on screen. */
     struct wlr_scene_buffer *shot_freeze;
-    
+
+    /* `fwm -debug`: a scratch session, started beside the one you are living
+     * in. It shares a HOME with that session, so it stays away from everything
+     * of the real one's that is kept there — the saved session above all — and
+     * brings up its own two windows instead. session_debug_desktop has the
+     * whole of what it does. */
+    int debug;
+
     int running;
 } FwmServer;
 
-bool server_init(FwmServer *server);
+bool server_init(FwmServer *server, bool debug);
 void server_run(FwmServer *server);
 void server_destroy(FwmServer *server);
 
@@ -963,5 +970,10 @@ void server_set_wallpaper(FwmServer *server, const char *path);
  * launched_note() needs to put the resulting window where it was asked for; a
  * caller with no window to place may ignore it. */
 pid_t server_spawn(const char *cmd);
+
+/* What the `terminal` bind runs: $TERMINAL, or the first emulator on PATH out
+ * of a list of the usual ones. NULL when there is none, having said so once
+ * through the tray's error pill. */
+const char *server_terminal_command(FwmServer *server);
 
 #endif /* FWM_SERVER_H */

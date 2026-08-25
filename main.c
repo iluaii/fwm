@@ -1,5 +1,6 @@
 #include "src/server.h"
 #include <malloc.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -10,6 +11,7 @@ int main(int argc, char *argv[]) {
      * config file or the control socket, so there is no option parser here and
      * an unknown flag is not worth inventing one for — it is ignored, and the
      * compositor starts, which is what somebody who typed it wanted. */
+    bool debug = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
             printf("fwm %s\n", FWM_VERSION);
@@ -19,12 +21,21 @@ int main(int argc, char *argv[]) {
             printf("fwm %s — a Wayland compositor where windows are physical objects\n"
                    "\n"
                    "  fwm                start the compositor\n"
+                   "  fwm -debug         a scratch session to test a build in: the saved\n"
+                   "                     session is neither read nor written, [startup] is\n"
+                   "                     not run, and two terminals come up instead — one\n"
+                   "                     on desktop 1, one tiled on desktop 2\n"
                    "  fwm --version      print the version\n"
                    "\n"
                    "Everything else is configured in ~/.config/fwm/config.toml or\n"
                    "changed at runtime with fwmctl.\n", FWM_VERSION);
             return 0;
         }
+        /* Started beside a session you are living in — from another TTY, over
+         * the same HOME. Everything it turns off is something that would reach
+         * back into that session; see session_debug_desktop. */
+        if (strcmp(argv[i], "-debug") == 0 || strcmp(argv[i], "--debug") == 0)
+            debug = true;
     }
 
     /* Pin the mmap threshold before anything allocates.
@@ -47,7 +58,7 @@ int main(int argc, char *argv[]) {
     wlr_log_init(getenv("FWM_DEBUG") ? WLR_DEBUG : WLR_INFO, NULL);
 
     FwmServer server;
-    if (!server_init(&server)) {
+    if (!server_init(&server, debug)) {
         fprintf(stderr, "Failed to initialize fwm-Wayland server\n");
         return 1;
     }

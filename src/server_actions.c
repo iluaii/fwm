@@ -248,7 +248,7 @@ static bool on_path(const char *name) {
  * seconds of staring at nothing. A list is still a choice made for the user,
  * but unlike a hard-coded name it is one they can override with either half of
  * the mechanism: the variable, or `spawn:` with whatever they please. */
-static const char *terminal_command(FwmServer *server) {
+const char *server_terminal_command(FwmServer *server) {
     const char *env = getenv("TERMINAL");
     if (env && *env) return env;
 
@@ -766,7 +766,7 @@ void server_dispatch_action(FwmServer *server, const char *action) {
             server_set_fullscreen(server, server->focused_view, !on, true);
         }
     } else if (strcmp(action, "terminal") == 0) {
-        const char *cmd = terminal_command(server);
+        const char *cmd = server_terminal_command(server);
         /* The desktop is written down HERE rather than where the window turns
          * up, because by then it may well be a different one — see launched.h.
          * Only the two actions a person launches something with: the lock
