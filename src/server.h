@@ -796,6 +796,14 @@ void server_xwl_unmanaged_create(FwmServer *server, struct wlr_xwayland_surface 
  * parked if that desktop is not being shown. The unmanaged half of
  * server_views_place, and called from it. */
 void server_xwl_unmanaged_place(FwmServer *server);
+/* And every one of them raised back over the window layer. */
+void server_xwl_unmanaged_raise(FwmServer *server);
+/* A real fullscreen window put back on top of the ordinary windows sharing its
+ * desktop, with its own dialogs kept above it. Called whenever something else
+ * has been raised — a focus, a window opening — since the stack is otherwise
+ * "whatever was raised last wins" and a fullscreen window would sink under the
+ * next thing to open. */
+void server_restack_fullscreen(FwmServer *server);
 /* Give the keyboard to an unmanaged surface on `desktop` that wants it, if
  * there is one. Arriving on the desktop a fullscreen X11 game is on has to put
  * the keys back in the game; nothing else would, since it is not a view and so

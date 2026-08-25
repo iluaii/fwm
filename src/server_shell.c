@@ -200,6 +200,17 @@ void server_xwl_unmanaged_place(FwmServer *server) {
     wl_list_for_each(u, &server->xwl_unmanaged, link) xwl_or_place(u);
 }
 
+/* Every mapped override-redirect surface back on top. They are menus, tooltips
+ * and the odd Wine fullscreen window — things drawn OVER whatever is beneath
+ * them by definition — so anything that reshuffles the window layer has to put
+ * them back, or a game's own menu ends up behind the game. */
+void server_xwl_unmanaged_raise(FwmServer *server) {
+    struct FwmXwlUnmanaged *u;
+    wl_list_for_each(u, &server->xwl_unmanaged, link) {
+        if (u->tree) wlr_scene_node_raise_to_top(&u->tree->node);
+    }
+}
+
 bool server_xwl_unmanaged_refocus(FwmServer *server, int desktop) {
     struct FwmXwlUnmanaged *u;
     wl_list_for_each(u, &server->xwl_unmanaged, link) {

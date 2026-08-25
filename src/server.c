@@ -155,6 +155,67 @@ struct wlr_surface *server_keyboard_target(FwmServer *server) {
     return server->focused_view ? view_surface(server->focused_view) : NULL;
 }
 
+/* Is `v` a dialog of `anc` — its child, or its child's child? A fullscreen
+ * window's own windows are the one thing entitled to sit over it: the Steam
+ * overlay, a game's launcher dialog, a file chooser. The chain is walked with a
+ * guard rather than trusted, because a client is free to hand us a parent loop
+ * and the answer here must not be an infinite one. */
+static bool view_descends_from(FwmServer *server, FwmView *v, FwmView *anc) {
+    for (int guard = 0; v && guard < 16; guard++) {
+        FwmView *parent = NULL, *it;
+        if (v->type == FWM_VIEW_XDG) {
+            struct wlr_xdg_toplevel *pt = v->xdg_toplevel ? v->xdg_toplevel->parent : NULL;
+            if (pt) wl_list_for_each(it, &server->views, link)
+                if (it->type == FWM_VIEW_XDG && it->xdg_toplevel == pt) { parent = it; break; }
+        } else {
+            struct wlr_xwayland_surface *px = v->xwl_surface ? v->xwl_surface->parent : NULL;
+            if (px) wl_list_for_each(it, &server->views, link)
+                if (it->type == FWM_VIEW_XWAYLAND && it->xwl_surface == px) { parent = it; break; }
+        }
+        if (!parent) return false;
+        if (parent == anc) return true;
+        v = parent;
+    }
+    return false;
+}
+
+/* A real fullscreen window owns the glass its desktop is shown on: nothing
+ * ordinary may be drawn over it.
+ *
+ * The stack is otherwise simply "whatever was raised last is on top", and
+ * plenty of things raise: a focus, a window opening, a click. So a fullscreen
+ * video kept its place only until the next window appeared, and then sank
+ * behind it — for good, since nothing ever put it back. This is the putting
+ * back, and it runs wherever something was raised.
+ *
+ * Fake fullscreen is deliberately not included: it is an ordinary window that
+ * happens to fill the work area, tray and all, and stacking it specially would
+ * take away the one thing that tells the two modes apart.
+ *
+ * Cheap enough to run on every focus: the list is the windows that exist, and
+ * a raise on a node already at the top is a no-op inside the scene graph. */
+void server_restack_fullscreen(FwmServer *server) {
+    FwmView *fs;
+    wl_list_for_each(fs, &server->views, link) {
+        if (!fs->scene_tree || !fs->fs_real) continue;
+        PhysicsBody *b = physics_find_body(&server->physics, fs->id);
+        if (!b || !b->fullscreen) continue;
+
+        wlr_scene_node_raise_to_top(&fs->scene_tree->node);
+
+        /* Its own dialogs go back over it afterwards — raising the fullscreen
+         * window has just buried them. */
+        FwmView *v;
+        wl_list_for_each(v, &server->views, link) {
+            if (v == fs || !v->scene_tree) continue;
+            if (view_descends_from(server, v, fs))
+                wlr_scene_node_raise_to_top(&v->scene_tree->node);
+        }
+    }
+    /* And the menus of X clients, which are not views at all. */
+    server_xwl_unmanaged_raise(server);
+}
+
 void server_focus_view(FwmServer *server, struct FwmView *view) {
     /* Not a plain no-op when an unmanaged surface holds the keyboard: the
      * window may already be focused_view and still not have the keys, because
@@ -202,7 +263,12 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
         }
         view_set_border_color(prev_focus, theme_get()->border_inactive);
     }
-    
+
+    /* The raise above may have buried a fullscreen window sharing this
+     * desktop. It goes back on top; the window that just took the focus keeps
+     * the keyboard either way. */
+    server_restack_fullscreen(server);
+
     server_request_tray_redraw(server);
 }
 
@@ -339,6 +405,9 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
                 server_apply_tiling(server, d);
             }
         }
+        /* Above everything on this desktop from here on, and its own dialogs
+         * above it. The raise a few lines up only settles this instant. */
+        server_restack_fullscreen(server);
     } else {
         if (b->fullscreen) {
             b->fullscreen = 0;
