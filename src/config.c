@@ -93,7 +93,8 @@ int action_is_known(const char *a) {
     static const char *prefixes[] = {
         "spawn:", "view:", "move_camera:", "tile_focus:", "tile_move:",
         "move_to:", "move_to_view:", "global:",
-        "sun_azimuth:", "sun_elevation:", "set:", "volume:", FWM_MODE_ACTION, NULL
+        "sun_azimuth:", "sun_elevation:", "set:", "volume:", "focus_output:",
+        FWM_MODE_ACTION, NULL
     };
     for (int i = 0; exact[i]; i++)
         if (strcmp(a, exact[i]) == 0) return 1;

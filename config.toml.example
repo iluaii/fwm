@@ -876,7 +876,8 @@ tap = true
 #                 show_hints, show_errors, modes_menu, reload_config,
 #                 wallpaper_picker, launcher, expo, toggle_wrap, EXIT
 # screenshots:    screenshot, screenshot_region
-# monitors:       output_off, toggle_internal_output, outputs_on
+# monitors:       output_off, toggle_internal_output, outputs_on,
+#                 focus_output:1 .. focus_output:9
 # tiling:         toggle_split, tile_focus:l|r|u|d, tile_move:l|r|u|d
 # tab-stacks:     group_toggle, group_next, group_prev, group_add
 #
@@ -974,6 +975,21 @@ tap = true
 # down, provided another monitor is connected.
 "super+o"            = "output_off"
 "super+shift+o"      = "outputs_on"
+# Which screen you are working on. ctrl+alt+1 is the monitor at the left of the
+# desk, ctrl+alt+2 the next one along, and so on: the pointer moves to the
+# middle of it and the keyboard follows whatever is there. A number past the
+# last monitor lands on the last monitor, so on two screens 2..9 all mean "the
+# other one" — and a third screen takes 3 over the moment it is plugged in,
+# with nothing here to re-edit.
+"ctrl+alt+1"         = "focus_output:1"
+"ctrl+alt+2"         = "focus_output:2"
+"ctrl+alt+3"         = "focus_output:3"
+"ctrl+alt+4"         = "focus_output:4"
+"ctrl+alt+5"         = "focus_output:5"
+"ctrl+alt+6"         = "focus_output:6"
+"ctrl+alt+7"         = "focus_output:7"
+"ctrl+alt+8"         = "focus_output:8"
+"ctrl+alt+9"         = "focus_output:9"
 #"super+ctrl+o"       = "toggle_internal_output"
 # Lock the screen. fwm implements ext-session-lock-v1; the lock screen itself
 # is drawn by an external client (hyprlock, swaylock), so this is a plain spawn.

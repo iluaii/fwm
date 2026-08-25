@@ -94,6 +94,21 @@ static const struct { const char *bind; const char *action; } default_binds[] = 
      * and super+l pan through. */
     { "super+ctrl+Left",      "view:prev"        },
     { "super+ctrl+Right",     "view:next"        },
+    /* And one monitor over. Numbers rather than a "next screen" step: on two
+     * screens a step is the same key twice and you have to look up to see
+     * where you landed, while ctrl+alt+1 is always the screen at the left of
+     * the desk. Every number past the last monitor lands on the last one, so a
+     * two-screen desk gets 2..9 all meaning "the other one" and a third screen
+     * takes over 3 the moment it is plugged in. */
+    { "ctrl+alt+1",           "focus_output:1"   },
+    { "ctrl+alt+2",           "focus_output:2"   },
+    { "ctrl+alt+3",           "focus_output:3"   },
+    { "ctrl+alt+4",           "focus_output:4"   },
+    { "ctrl+alt+5",           "focus_output:5"   },
+    { "ctrl+alt+6",           "focus_output:6"   },
+    { "ctrl+alt+7",           "focus_output:7"   },
+    { "ctrl+alt+8",           "focus_output:8"   },
+    { "ctrl+alt+9",           "focus_output:9"   },
 };
 
 void apply_default_binds(FwmConfig *cfg) {

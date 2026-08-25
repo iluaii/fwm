@@ -1098,6 +1098,7 @@ fit  = "pan"
 | `show_errors` | open the config-problem panel (same as clicking the tray's ⚠ pill) |
 | `modes_menu` | open the modes menu (same as clicking the tray's modes pill) |
 | `stats_menu` | open the stats menu (same as clicking the tray's stats pill) |
+| `focus_output:<n>` | move the session to monitor `n`, counted left to right and then top to bottom with the primary always 1: the pointer goes to the middle of it and the keyboard follows to whatever is there. A number past the last monitor means the last monitor, so `focus_output:2` through `:9` all mean "the other screen" on a two-monitor desk and a third one takes over `:3` the moment it is plugged in |
 | `output_off` | turn off the monitor the pointer is on — it leaves the layout, hands its desktop back and the pointer moves to a screen that is still lit. The last lit screen is never turned off |
 | `toggle_internal_output` | the same for the built-in laptop panel (eDP/LVDS/DSI) whichever screen the pointer is on. Closing the lid does this by itself, as long as another monitor is plugged in |
 | `outputs_on` | every monitor back on — the way out when you turned off the screen you were looking at |

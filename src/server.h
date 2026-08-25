@@ -815,6 +815,14 @@ FwmOutput *server_output_at(FwmServer *server, double lx, double ly);
 FwmOutput *server_active_output(FwmServer *server);
 /* The monitor showing desktop `d`, or NULL when none is. */
 FwmOutput *server_output_showing(FwmServer *server, int d);
+/* The nth monitor as a person counts them — left to right, then top to bottom,
+ * one-based, the primary always 1. A number past the last screen gives the last
+ * screen, so a bind for a monitor you have not plugged in yet still lands
+ * somewhere sensible. NULL only when nothing is lit. */
+FwmOutput *server_output_nth(FwmServer *server, int n);
+/* Move the session to that monitor: the pointer goes to the middle of it and
+ * the keyboard follows to whatever is there. */
+void server_focus_output(FwmServer *server, FwmOutput *out);
 /* Light a monitor or put it out at runtime — a keybind, `fwmctl dispatch`, the
  * laptop lid. A dark monitor leaves the layout entirely, so it holds no desktop
  * and no window can be placed on it; lighting it again gives it a free desktop,

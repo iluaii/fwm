@@ -567,6 +567,12 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         FwmOutput *o;
         wl_list_for_each(o, &server->outputs, link)
             server_output_set_enabled(server, o, 1);
+    } else if (strncmp(action, "focus_output:", 13) == 0) {
+        /* Straight to a named screen, rather than to the next one along: with
+         * two monitors "next" and "this one" are the same key, and the hand
+         * still has to look up to see where it went. A number always means the
+         * same screen. */
+        server_focus_output(server, server_output_nth(server, atoi(action + 13)));
     } else if (strcmp(action, "group_toggle") == 0) {
         FwmView *v = server->focused_view;
         if (v) {

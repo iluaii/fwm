@@ -518,6 +518,39 @@ FwmOutput *server_active_output(FwmServer *server) {
     return o ? o : server_primary_output(server);
 }
 
+/* Which of two monitors comes first when a person counts them: left to right,
+ * then top to bottom, and by name only so that two screens stacked exactly on
+ * top of each other still have an order at all. */
+static int output_before(const FwmOutput *a, const FwmOutput *b) {
+    if (a->box.x != b->box.x) return a->box.x < b->box.x;
+    if (a->box.y != b->box.y) return a->box.y < b->box.y;
+    return strcmp(a->wlr_output->name, b->wlr_output->name) < 0;
+}
+
+/* The nth monitor in that order, one-based. The primary sits at the layout
+ * origin, so it is always number 1.
+ *
+ * A number past the last monitor is the LAST monitor rather than nothing: on a
+ * two-screen desk 3..9 all mean "the other one", and the day a third screen
+ * arrives those keys start meaning it without a line of config changing. A key
+ * that does nothing at all until you re-edit the file is the worse answer, and
+ * the desks this is for grow a monitor more often than they shrink one. */
+FwmOutput *server_output_nth(FwmServer *server, int n) {
+    if (n < 1) n = 1;
+    FwmOutput *cur = NULL;
+    for (int i = 0; i < n; i++) {
+        FwmOutput *next = NULL, *o;
+        wl_list_for_each(o, &server->outputs, link) {
+            if (!o->enabled || o->box.width <= 0 || o->box.height <= 0) continue;
+            if (cur && !output_before(cur, o)) continue;   /* already counted */
+            if (!next || output_before(o, next)) next = o;
+        }
+        if (!next) break;   /* ran off the end: keep the last one we had */
+        cur = next;
+    }
+    return cur;
+}
+
 FwmOutput *server_output_showing(FwmServer *server, int d) {
     FwmOutput *o;
     wl_list_for_each(o, &server->outputs, link) {
@@ -1314,6 +1347,23 @@ static void cursor_to_output(FwmServer *server, FwmOutput *out) {
     wlr_cursor_warp(server->cursor, NULL,
                     out->box.x + out->box.width / 2.0,
                     out->box.y + out->box.height / 2.0);
+}
+
+/* Work on that monitor from now on.
+ *
+ * "Which monitor am I at" is answered by where the pointer stands
+ * (server_active_output), so moving there IS moving the pointer — a bind that
+ * only shuffled the keyboard focus would leave the next super+1 switching the
+ * desktop on the screen the hand left behind. The keyboard follows: whatever is
+ * under the pointer once it lands, else the newest window on that screen's
+ * desktop, which is server_refocus's whole job. */
+void server_focus_output(FwmServer *server, FwmOutput *out) {
+    if (!out || !out->enabled || out->box.width <= 0) return;
+    if (server->cursor
+     && server_output_at(server, server->cursor->x, server->cursor->y) == out)
+        return;   /* already standing there */
+    cursor_to_output(server, out);
+    server_refocus(server, out->desktop, NULL);
 }
 
 /* Light one monitor or put it out, with nothing standing in the way. Returns 1

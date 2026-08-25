@@ -51,6 +51,7 @@ unusable, so they work on a machine with no config at all.
 | `Super+Ctrl+←` / `Super+Ctrl+→` | `view:prev` / `view:next` | one desktop over; wraps round the ring at either end |
 | `Super+H` / `Super+L` | `move_camera:-50` / `move_camera:50` | pan the camera (hold to repeat) |
 | `Super+A` | `expo` | the desktop strip |
+| `Ctrl+Alt+1`…`9` | `focus_output:1`…`focus_output:9` | go to that monitor; numbers past the last screen land on it |
 
 ### Everything else
 
@@ -144,6 +145,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 
 | Action | Does |
 |---|---|
+| `focus_output:<n>` | work on monitor `n` — counted left to right, then top to bottom, the primary always 1. The pointer moves to the middle of it and the keyboard follows. A number past the last monitor means the last one |
 | `output_off` | turn off the monitor under the cursor (never the last lit one) |
 | `toggle_internal_output` | the laptop panel on/off — for docking |
 | `outputs_on` | turn every monitor back on |
