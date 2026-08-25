@@ -185,21 +185,16 @@ void view_set_size(FwmView *view, int width, int height) {
         int isx = (int)lround(sx);
         int isy = (int)lround(sy);
         
-        // Only allow the early-out if it's actually on-screen
-        if (on_screen && view->last_sync_x == isx && view->last_sync_y == isy &&
+        // Only configure if something actually changed since last sync
+        if (view->last_sync_onscreen == on_screen &&
+            view->last_sync_x == isx && view->last_sync_y == isy &&
             view->last_sync_w == width && view->last_sync_h == height) {
             return;
         }
-        
-        if (on_screen) {
-            view->last_sync_x = isx;
-            view->last_sync_y = isy;
-        } else {
-            // Invalidate the cache completely so it doesn't accidentally match later
-            view->last_sync_x = -999999;
-            view->last_sync_y = -999999;
-        }
-        
+
+        view->last_sync_onscreen = on_screen;
+        view->last_sync_x = isx;
+        view->last_sync_y = isy;
         view->last_sync_w = width;
         view->last_sync_h = height;
         
@@ -636,8 +631,9 @@ FwmView *view_xwl_create(struct wlr_xwayland_surface *xsurface, struct FwmServer
     view->type = FWM_VIEW_XWAYLAND;
     view->xwl_surface = xsurface;
     view->server = server;
-    view->last_sync_x = -999999;
-    view->last_sync_y = -999999;
+    view->last_sync_onscreen = false;
+    view->last_sync_x = 0;
+    view->last_sync_y = 0;
     view->last_sync_w = -1;
     view->last_sync_h = -1;
 
