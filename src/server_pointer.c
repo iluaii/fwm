@@ -206,6 +206,11 @@ static void pointer_note_surface(FwmServer *server, struct wlr_surface *surface,
  * carry on with the ordinary "what is under the cursor" path. */
 static bool pointer_grab_deliver(FwmServer *server, double lx, double ly,
                                  uint32_t time_msec) {
+    if (server->active_constraint &&
+        server->active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+        return true;
+    }
+
     if (server->seat->pointer_state.button_count == 0) return false;
     if (!server->ptr_surface ||
         server->ptr_surface != server->seat->pointer_state.focused_surface) {
@@ -389,9 +394,7 @@ static void process_cursor_motion(FwmServer *server, uint32_t time_msec) {
      * mean "what is under me". */
     if (server_drag_motion(server, lx, ly, &now)) return;
 
-    /* A drag the CLIENT is doing: the pointer is spoken for, and neither the
-     * focus nor the surface under the cursor may change until the button is
-     * let go. */
+    /* A drag the CLIENT is doing, or a locked pointer: the pointer is spoken for. */
     if (pointer_grab_deliver(server, lx, ly, time_msec)) return;
 
     // Focus follows pointer
