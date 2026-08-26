@@ -80,13 +80,40 @@ static void idle_blank(FwmServer *server, int on) {
     FwmOutput *o;
     wl_list_for_each(o, &server->outputs, link) {
         if (on ? (!o->enabled || o->idle_blanked) : !o->idle_blanked) continue;
+        /* A screen that already refused to go dark this stretch is not asked
+         * again. See idle_blank_failed on FwmOutput: the threshold stays
+         * crossed for as long as the session is left alone, so without this a
+         * driver that says no once is handed the same atomic commit on every
+         * beat until somebody touches a key — hours of them, on a machine
+         * nobody is watching, which is the shape of the fault this guards. */
+        if (on && o->idle_blank_failed) continue;
 
         struct wlr_output_state state;
         wlr_output_state_init(&state);
         wlr_output_state_set_enabled(&state, on ? false : true);
-        if (wlr_output_commit_state(o->wlr_output, &state))
-            o->idle_blanked = on ? 1 : 0;
+        bool ok = wlr_output_commit_state(o->wlr_output, &state);
         wlr_output_state_finish(&state);
+
+        if (ok) {
+            o->idle_blanked = on ? 1 : 0;
+            o->idle_blank_failed = 0;
+        } else if (on) {
+            /* Left lit, and not asked again until the next stretch. */
+            o->idle_blank_failed = 1;
+            wlr_log(WLR_ERROR, "idle: %s refused to blank; leaving it lit",
+                    o->wlr_output->name);
+        } else {
+            /* THE DANGEROUS ONE. A screen we cannot light again is still a
+             * screen the user is sitting in front of, and leaving the flag up
+             * would have server_schedule_frames skip it for the rest of the
+             * session: the panel comes back on by itself and shows a picture
+             * that never updates again. Give up the flag rather than the
+             * screen — a frame asked for on a monitor that is genuinely off
+             * costs nothing, and a monitor that is genuinely on gets drawn. */
+            o->idle_blanked = 0;
+            wlr_log(WLR_ERROR, "idle: %s refused to light; handing it back to "
+                               "the frame loop anyway", o->wlr_output->name);
+        }
 
         /* Coming back needs a frame asked for by hand: nothing on screen
          * changed while the monitor was dark, so there is no damage waiting to
@@ -111,6 +138,11 @@ static void idle_blank(FwmServer *server, int on) {
  * of "the user is here", not two. */
 void server_idle_activity(FwmServer *server) {
     server->idle_secs = 0.0;
+    /* A refusal belongs to one stretch of idleness. The next one asks again:
+     * whatever the driver was busy with — a modeset, a lock surface still
+     * being configured — is long over by then. */
+    FwmOutput *o;
+    wl_list_for_each(o, &server->outputs, link) o->idle_blank_failed = 0;
     /* The locker may run again next time the session is left alone, but not
      * twice for one stretch of it. */
     server->idle_locked = 0;
@@ -296,8 +328,13 @@ void server_idle_tick(FwmServer *server, double dt) {
     /* Locking is a command, not a state fwm holds: it starts the locker and the
      * session-lock protocol takes it from there. Once per stretch of idleness —
      * a locker already on screen must not be started again every tick. */
+    /* And not at all if the session is already locked. Locking by hand and
+     * then walking away is the ordinary way this file is reached, and starting
+     * a second locker on top of the first is at best a client that is refused
+     * (lock.c) and exits, at worst one that retries. Nothing is gained either
+     * way: the session is already locked, which is all the timer wanted. */
     if (cfg->lock_after > 0.0 && cfg->lock[0] && !server->idle_locked &&
-        server->idle_secs >= cfg->lock_after) {
+        !server->locked && server->idle_secs >= cfg->lock_after) {
         server->idle_locked = 1;
         wlr_log(WLR_INFO, "idle: locking with \"%s\"", cfg->lock);
         server_spawn(cfg->lock);

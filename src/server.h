@@ -89,6 +89,10 @@ typedef struct FwmOutput {
      * is off. Remembered per screen so waking lights the ones idle put out and
      * leaves alone the ones the lid or `output_off` did. */
     int idle_blanked;
+    /* The blanking commit was refused by the driver. Without this the timer
+     * asks again on every tick for as long as the session stays idle — a DRM
+     * atomic commit per beat, all night, on a screen that will not take it. */
+    int idle_blank_failed;
     /* Turned off at RUNTIME (the lid, `output_off`) rather than by the config.
      * A reload re-applies the file to every monitor, and without this it would
      * light the panel inside a closed laptop back up. */
