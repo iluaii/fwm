@@ -947,6 +947,13 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         wlr_log(WLR_INFO, "desktop strip is %s",
                 server->config.camera.wrap ? "a ring" : "a line");
         server_request_tray_redraw(server);
+    } else if (strncmp(action, "swap_desktop:", 13) == 0) {
+        /* The desktop you are looking at trades places with the one named.
+         * Relative to the ACTIVE monitor, like every other desktop bind: on two
+         * screens "this desktop" is the one under the pointer. */
+        int desktop = resolve_desktop(server, action + 13);
+        if (desktop >= 0)
+            server_swap_desktops(server, server_active_desktop(server), desktop);
     } else if (strncmp(action, "move_to:", 8) == 0) {
         int desktop = resolve_desktop(server, action + 8);
         if (desktop >= 0)

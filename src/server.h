@@ -836,6 +836,15 @@ FwmOutput *server_output_at(FwmServer *server, double lx, double ly);
 FwmOutput *server_active_output(FwmServer *server);
 /* The monitor showing desktop `d`, or NULL when none is. */
 FwmOutput *server_output_showing(FwmServer *server, int d);
+/* Trade two desktops: what stood on `a` stands on `b` and the other way round,
+ * windows, layout tree and mode together. The places themselves do not move —
+ * the camera stays where it is and each monitor goes on showing the desktop it
+ * was showing, with different windows on it. */
+void server_swap_desktops(FwmServer *server, int a, int b);
+/* Everything on desktop `d` re-measured against whichever monitor is showing
+ * it now: windows out on a strip of world the glass does not reach are brought
+ * back, a fullscreen window is refitted, and a tiling layout is re-split. */
+void server_desktop_refit(FwmServer *server, int d);
 /* The nth monitor as a person counts them — left to right, then top to bottom,
  * one-based, the primary always 1. A number past the last screen gives the last
  * screen, so a bind for a monitor you have not plugged in yet still lands

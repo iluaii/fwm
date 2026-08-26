@@ -231,6 +231,7 @@ static const struct { const char *prefix, *label; } group_kinds[] = {
     { "tile_move:",     "move tile" },
     { "move_to:",       "send window over" },
     { "move_to_view:",  "send window, follow" },
+    { "swap_desktop:",  "trade desktops" },
     { "focus_output:",  "go to monitor" },
     { "volume:",        "volume" },
     { "sun_azimuth:",   "turn the sun" },

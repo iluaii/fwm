@@ -94,6 +94,20 @@ static const struct { const char *bind; const char *action; } default_binds[] = 
      * and super+l pan through. */
     { "super+ctrl+Left",      "view:prev"        },
     { "super+ctrl+Right",     "view:next"        },
+    /* And two desktops trading places, contents and all: the one you are on
+     * for the one you name. What it is for is putting the desktop you are
+     * working on next to the one you keep looking across at — the strip's
+     * order is the order you walk it in. */
+    { "super+ctrl+1",         "swap_desktop:0"   },
+    { "super+ctrl+2",         "swap_desktop:1"   },
+    { "super+ctrl+3",         "swap_desktop:2"   },
+    { "super+ctrl+4",         "swap_desktop:3"   },
+    { "super+ctrl+5",         "swap_desktop:4"   },
+    { "super+ctrl+6",         "swap_desktop:5"   },
+    { "super+ctrl+7",         "swap_desktop:6"   },
+    { "super+ctrl+8",         "swap_desktop:7"   },
+    { "super+ctrl+9",         "swap_desktop:8"   },
+    { "super+ctrl+0",         "swap_desktop:9"   },
     /* And one monitor over. Numbers rather than a "next screen" step: on two
      * screens a step is the same key twice and you have to look up to see
      * where you landed, while ctrl+alt+1 is always the screen at the left of

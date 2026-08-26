@@ -92,7 +92,7 @@ int action_is_known(const char *a) {
     };
     static const char *prefixes[] = {
         "spawn:", "view:", "move_camera:", "tile_focus:", "tile_move:",
-        "move_to:", "move_to_view:", "global:",
+        "move_to:", "move_to_view:", "swap_desktop:", "global:",
         "sun_azimuth:", "sun_elevation:", "set:", "volume:", "focus_output:",
         FWM_MODE_ACTION, NULL
     };

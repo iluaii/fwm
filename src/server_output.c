@@ -951,7 +951,7 @@ static void desktop_refit_clamp(FwmServer *server, int d) {
 
 /* Everything on `d` that was cut to a screen's measurements, re-cut to the
  * measurements of whichever screen is showing it now. */
-static void desktop_refit(FwmServer *server, int d) {
+void server_desktop_refit(FwmServer *server, int d) {
     if (d < 0 || d >= FWM_DESKTOPS) return;
     desktop_refit_clamp(server, d);
     desktop_refit_fullscreen(server, d);
@@ -1021,8 +1021,8 @@ void server_output_show_desktop(FwmServer *server, FwmOutput *out, int d, int se
      * now, and resizing its windows to the column would be a round of client
      * configures for a screen nobody is looking at — it gets its fitting when
      * some monitor picks it up. */
-    desktop_refit(server, out->desktop);
-    if (other) desktop_refit(server, other->desktop);
+    server_desktop_refit(server, out->desktop);
+    if (other) server_desktop_refit(server, other->desktop);
 
     server_views_place(server);
     server_request_tray_redraw(server);

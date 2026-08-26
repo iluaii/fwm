@@ -49,6 +49,7 @@ unusable, so they work on a machine with no config at all.
 | `Super+1`…`0` | `view:0`…`view:9` | jump to a desktop |
 | `Super+Shift+1`…`0` | `move_to:0`…`move_to:9` | send the focused window there |
 | `Super+Ctrl+←` / `Super+Ctrl+→` | `view:prev` / `view:next` | one desktop over; wraps round the ring at either end |
+| `Super+Ctrl+1`…`0` | `swap_desktop:0`…`swap_desktop:9` | trade this desktop with that one, windows and layout together |
 | `Super+H` / `Super+L` | `move_camera:-50` / `move_camera:50` | pan the camera (hold to repeat) |
 | `Super+A` | `expo` | the desktop strip |
 | `Ctrl+Alt+1`…`9` | `focus_output:1`…`focus_output:9` | go to that monitor; numbers past the last screen land on it |
@@ -103,6 +104,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `view:back` | that same way back, whatever desktop is on screen now |
 | `move_to:<0-9>` | send the focused window there — it flies across the strip rather than vanishing (`[camera] anim_ms`) |
 | `move_to_view:next|prev` | send the focused window one desktop over (`next`/`prev` relative to the one on screen) |
+| `swap_desktop:<0-9>` | trade the desktop on screen with that one: windows, layout tree and mode change places, while the camera stays where it is. `next`/`prev` walk the desktop along the strip |
 | `move_camera:<px>` | pan by that many px (negative = left); holdable |
 | `expo` | the desktop strip |
 | `toggle_wrap` | close the strip into a ring, or open it |

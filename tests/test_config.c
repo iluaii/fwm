@@ -555,6 +555,7 @@ static void test_every_dispatchable_action_binds(void) {
         "output_off", "outputs_on", "toggle_sun", "sun_mode", "star_spawn", "star_off", "star_collapse",
         "toggle_internal_output", "focus_output:1", "focus_output:9", "EXIT",
         "view:3", "view:back", "move_to:7", "move_to_view:next", "move_camera:-50",
+        "swap_desktop:4", "swap_desktop:next",
         "tile_focus:l", "tile_move:d", "spawn:true", "mode:default",
         "sun_azimuth:+15", "sun_elevation:-5",
         "set:physics.gravity=981", "set:sun.blur+2", "set:sun.blur-2",

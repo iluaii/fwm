@@ -899,6 +899,8 @@ tap = true
 # move a window:  move_to:0 .. move_to:9        (send it there, stay put)
 #                 move_to_view:0 .. :9         (send it there and follow)
 #                 both take next/prev too, relative to the desktop on screen
+# swap desktops: swap_desktop:0 .. :9         (trade places with this one)
+#                 next/prev too, which walks the desktop along the strip
 # In physics and floating modes you can also just drag a window across the
 # desktop edge; in tiling you cannot, because the layout owns its geometry —
 # these actions are the way to move a tiled window out.
@@ -1055,6 +1057,21 @@ tap = true
 # same join super+h and super+l pan through.
 "super+ctrl+Left"    = "view:prev"
 "super+ctrl+Right"   = "view:next"
+# Two desktops trading places, contents and all: the one you are looking at for
+# the one you name. The strip's order is the order you walk it in, so this is
+# for putting the desktop you are working on next to the one you keep glancing
+# across at, without moving a window by hand. The camera does not move — the
+# desktop you are on is still the desktop you are on, with other windows on it.
+"super+ctrl+1"       = "swap_desktop:0"
+"super+ctrl+2"       = "swap_desktop:1"
+"super+ctrl+3"       = "swap_desktop:2"
+"super+ctrl+4"       = "swap_desktop:3"
+"super+ctrl+5"       = "swap_desktop:4"
+"super+ctrl+6"       = "swap_desktop:5"
+"super+ctrl+7"       = "swap_desktop:6"
+"super+ctrl+8"       = "swap_desktop:7"
+"super+ctrl+9"       = "swap_desktop:8"
+"super+ctrl+0"       = "swap_desktop:9"
 
 # Modes (submaps): a second keymap you step into, so bare keys can mean
 # something. Press the `enter` key and the mode owns the keyboard — its binds

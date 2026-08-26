@@ -204,6 +204,149 @@ void server_toggle_desktop_tiling(FwmServer *server, int d) {
             ? DESKTOP_MODE_PHYSICS : DESKTOP_MODE_TILING);
 }
 
+/* Trade two desktops for each other: everything on `a` is now on `b` and
+ * everything on `b` is on `a`.
+ *
+ * The ten desktops are ten PLACES in one strip, and the whole of fwm is built
+ * on that — a monitor shows a column, a window's desktop is which column it
+ * stands in, the strip's cards are in strip order, the ext-workspace handles
+ * are those ten places and nothing else. So a swap moves the CONTENTS and
+ * leaves the places alone: the camera does not move, whichever screen you are
+ * looking at goes on showing the desktop it was showing, and what is drawn on
+ * it is what used to be somewhere else. Nothing has to be renumbered, and
+ * nothing outside this function has to learn a new idea.
+ *
+ * What travels is what a desktop IS: its windows, the tree that lays them out,
+ * and its mode. A [physics.<name>] profile stays with the number, as it does
+ * across a reload — it is the config talking about a place. */
+void server_swap_desktops(FwmServer *server, int a, int b) {
+    if (a == b || server->screen_width <= 0) return;
+    if (a < 0 || a >= FWM_DESKTOPS || b < 0 || b >= FWM_DESKTOPS) return;
+
+    int span = (b - a) * server->screen_width;
+
+    /* A swap is two sends crossing, so it flies on exactly the terms a send
+     * does (server_move_view_to_desktop): the bookkeeping happens at once and
+     * only the PICTURE is walked back and eased across the strip.
+     *
+     * What the eye gets: one set leaves toward the other's address while the
+     * other arrives from it, both on the camera's curve over the camera's
+     * duration. Between neighbours they cross at the boundary between them.
+     * Between distant desktops they pass each other off-screen, which is
+     * honest — there is a strip's width between those two places, and the
+     * swap is the two of them travelling it.
+     *
+     * At the ring's join there is no picture to fly through, so that one stays
+     * a teleport — the same exception the camera and a send both make. */
+    int seam = server->config.camera.wrap
+            && ((a == FWM_DESKTOPS - 1 && b == 0)
+             || (a == 0 && b == FWM_DESKTOPS - 1));
+    int may_fly = !seam && server->config.camera.anim_ms > 0.0
+               && !expo_active(server);
+
+    /* Where each flyer stood, kept here rather than on the view: the re-tile
+     * below arms glides of its own, and tile_fx is the field they would land
+     * in. Bounded by MAX_WINDOWS, which is what the view list is bounded by. */
+    struct { FwmView *view; double fx, fy; } flight[MAX_WINDOWS];
+    int nflight = 0;
+
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        PhysicsBody *pb = physics_find_body(&server->physics, v->id);
+        int d = pb ? pb->desktop_id : v->x / server->screen_width;
+        if (d != a && d != b) continue;
+
+        int step = (d == a) ? span : -span;
+
+        /* Never the window in your hand: a drag owns its position frame by
+         * frame and would spend the whole crossing fighting the flight for the
+         * same field. That one teleports, and carries its wobble with it. */
+        int animate = may_fly && pb && server->interactive.view != v;
+
+        if (animate && nflight < MAX_WINDOWS) {
+            flight[nflight].view = v;
+            flight[nflight].fx = pb->x;
+            flight[nflight].fy = pb->y;
+            nflight++;
+        } else {
+            animate = 0;
+        }
+
+        /* A flight or a glide still in the air is aimed at a slot on a desktop
+         * that has just moved out from under it; there is nothing left for
+         * either to finish, and the crossing armed below starts clean. */
+        v->tile_anim = TILE_ANIM_NONE;
+
+        if (pb) {
+            pb->x += step;
+            pb->desktop_id = (d == a) ? b : a;
+            pb->vx = 0; pb->vy = 0; pb->flying = 0;
+            /* The mode travels with the windows, so what the body is — a tile,
+             * a free body, a floating one — is exactly what it was. */
+            v->x = (int)lround(pb->x);
+            v->y = (int)lround(pb->y);
+        } else {
+            v->x += step;
+        }
+        /* Moved a whole screen without travelling: a window still wobbling
+         * from a drag must not be shoved by the coordinate change. A flight is
+         * not a coordinate change — it travels, and the wobble is entitled to
+         * feel it. */
+        if (!animate)
+            view_jelly_carry(v, (double)step, 0.0);
+        view_sync_position(v);
+    }
+
+    BspNode *tree = server->bsp_roots[a];
+    server->bsp_roots[a] = server->bsp_roots[b];
+    server->bsp_roots[b] = tree;
+
+    int mode = server->desktop_mode[a];
+    server->desktop_mode[a] = server->desktop_mode[b];
+    server->desktop_mode[b] = mode;
+
+    if (server->focus_desktop == a)      server->focus_desktop = b;
+    else if (server->focus_desktop == b) server->focus_desktop = a;
+
+    /* Each of the two against whichever monitor is showing it — which is not
+     * the monitor its windows were measured against a moment ago, and on two
+     * screens of different sizes that is the whole point of refitting. Tiling
+     * is re-split from here too. */
+    server_desktop_refit(server, a);
+    server_desktop_refit(server, b);
+
+    server_views_place(server);
+
+    /* Last, so each window flies to whatever everything above settled on: a
+     * tile slot on the desktop it landed in, a refit against a different
+     * monitor, or just the same spot a screen over. */
+    for (int i = 0; i < nflight; i++) {
+        FwmView *fv = flight[i].view;
+        PhysicsBody *pb = physics_find_body(&server->physics, fv->id);
+        if (!pb) continue;
+        fv->tile_tx = fv->tile_anim ? fv->tile_tx : pb->x;
+        fv->tile_ty = fv->tile_anim ? fv->tile_ty : pb->y;
+        fv->tile_fx = flight[i].fx;
+        fv->tile_fy = flight[i].fy;
+        fv->tile_t = 0.0;
+        fv->tile_anim = TILE_ANIM_FLIGHT;
+        /* Back where it stood — the picture, and only the picture. The body
+         * goes on saying which desktop it belongs to for the whole crossing
+         * (flight_desktop, server_tick.c). */
+        pb->x = flight[i].fx;
+        pb->y = flight[i].fy;
+        fv->x = (int)lround(flight[i].fx);
+        fv->y = (int)lround(flight[i].fy);
+        view_sync_position(fv);
+    }
+    /* A swap that came down the control socket has not already woken the idle
+     * heartbeat the way a key press has, and would spend its first fifth of a
+     * second standing still. */
+    if (nflight > 0) server_tick_wake(server);
+
+    server_request_tray_redraw(server);
+}
+
 /* Send a window to another desktop.
  *
  * In physics and floating modes you can already drag a window across the

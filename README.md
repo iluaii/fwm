@@ -1074,6 +1074,7 @@ fit  = "pan"
 | `view:back` | the desktop this screen showed before — the bind for the one you are on does this too, unless `[camera] back_and_forth` is off |
 | `move_to:<0-9>` | send the focused window to a desktop, camera stays (`next`/`prev` too) |
 | `move_to_view:<0-9>` | send it there and follow, keeping it focused (`next`/`prev` too) |
+| `swap_desktop:<0-9>` | trade the desktop you are on with that one — its windows, its layout tree and its mode change places, while the places themselves do not: the camera stays put and each monitor goes on showing the desktop it was showing, with other windows on it (`next`/`prev` too, which walks a desktop along the strip) |
 | `pan_desktop` | **gestures only:** pan across the strip with your fingers, settling on a desktop when they lift |
 | `tile_focus:l\|r\|u\|d` | focus tile in direction |
 | `tile_move:l\|r\|u\|d` | swap tile in direction |
