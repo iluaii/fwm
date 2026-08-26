@@ -326,6 +326,20 @@ void view_set_border_color(FwmView *view, const float color[4]) {
 
 void view_set_border_enabled(FwmView *view, int enabled) {
     if (!view->border[0]) return;
+    /* A fullscreen window has no frame, whoever is asking for one.
+     *
+     * Every effect that replaces the window with a picture of itself hides the
+     * border while it runs and puts it back at the end — from a flag captured
+     * when it STARTED. So a window that went fullscreen in between (the wobble
+     * of the drag that carried it there is still ringing out, an impact landed
+     * on it a moment before) was handed its frame back on top of the fullscreen
+     * picture, and there it stayed, because nothing else ever switches a border
+     * off again. Said here rather than at each of those sites: it is a property
+     * of being fullscreen, not a thing five callers have to remember. */
+    if (enabled) {
+        PhysicsBody *b = physics_find_body(&view->server->physics, view->id);
+        if (b && b->fullscreen) enabled = 0;
+    }
     for (int i = 0; i < 4; i++) {
         wlr_scene_node_set_enabled(&view->border[i]->node, enabled);
     }
