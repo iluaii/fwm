@@ -146,9 +146,7 @@ static void drag_place(FwmServer *server, double lx, double ly) {
     int min_world_x = 0;
     int max_world_x = 10 * server->screen_width - server->interactive.view_start_width;
     int min_y = 0;
-    int max_y = server->screen_height - server->interactive.view_start_height;
     if (max_world_x < min_world_x) max_world_x = min_world_x;
-    if (max_y < min_y) max_y = min_y;
 
     /* view_start_x is already a world coordinate, and dx is a distance:
       * a hand moving n px across a monitor moves the window n px through
@@ -159,6 +157,69 @@ static void drag_place(FwmServer *server, double lx, double ly) {
 
     if (target_world_x < min_world_x) target_world_x = min_world_x;
     if (target_world_x > max_world_x) target_world_x = max_world_x;
+
+    /* THE JOIN, CLOSED IN ONE PLACEMENT.
+     *
+     * A window is drawn by a single screen and cut to it, and which screen that
+     * is flips when its LEFT EDGE crosses into the next column — not when the
+     * hand crosses the bezel. The two moments are a whole grab-offset apart.
+     *
+     * That matters because the flip changes the frame the window's position is
+     * read in: server_world_to_screen adds the drawing monitor's box.y, and two
+     * monitors of different height are stood on a shared centre or a shared
+     * bottom, never a shared top. So the flip alone moves the window down the
+     * glass by the gap between their top edges, and a shift of the anchor alone
+     * moves it up by the same amount. Do one without the other and you see it.
+     *
+     * So they are done together, here, against the screen that is about to draw
+     * the window rather than the one under the hand: the anchor is carried by
+     * exactly what the change of frame is about to undo, and the window does not
+     * move on the glass at all. The join stops being a place where anything
+     * happens. */
+    if (server->interactive.cam_have) {
+        FwmOutput *frame = server_output_drawing(server, target_world_x,
+                                                 server->interactive.view_start_width,
+                                                 view->drawn_on);
+        if (frame) {
+            int off  = frame->camera_x - frame->box.x;
+            int offy = -frame->box.y;
+            int cx = off  - server->interactive.cam_offset;
+            int cy = offy - server->interactive.cam_offset_y;
+            if (cx || cy) {
+                server->interactive.cam_offset   = off;
+                server->interactive.cam_offset_y = offy;
+                server->interactive.view_start_x += cx;
+                server->interactive.view_start_y += cy;
+                target_world_x += cx;  want_x += cx;
+                target_world_y += cy;  want_y += cy;
+                /* The world moved, the window did not; the wobble must not be
+                 * told it travelled. */
+                view_jelly_carry(view, cx, cy);
+            }
+        }
+    }
+
+    /* The floor is the MONITOR's, not the column's — the same correction the
+     * resize path makes a few hundred lines down, for the same reason. A column
+     * is the size of the PRIMARY monitor, so on a shorter screen its bottom
+     * stretch is glass nobody has: clamping a drag to the column let a window
+     * be carried down past the last row of pixels that screen owns, where
+     * server_views_clip cuts it away and the hand is holding something it can
+     * no longer see.
+     *
+     * Read off where the window is GOING, not off the anchor it started from:
+     * the anchor is a whole screen behind during a crossing, and a window on
+     * its way onto the short monitor would be measured against the tall one it
+     * is leaving. A column no monitor is showing has only the column to go by. */
+    int drag_col = target_world_x / server->screen_width;
+    if (drag_col < 0) drag_col = 0;
+    if (drag_col >= FWM_DESKTOPS) drag_col = FWM_DESKTOPS - 1;
+    FwmOutput *dmon = server_output_showing(server, drag_col);
+    int lim_h = dmon && dmon->box.height > 0 ? dmon->box.height : server->screen_height;
+
+    int max_y = lim_h - server->interactive.view_start_height;
+    if (max_y < min_y) max_y = min_y;
+
     if (target_world_y < min_y) target_world_y = min_y;
     if (target_world_y > max_y) target_world_y = max_y;
 
@@ -206,33 +267,126 @@ static void drag_place(FwmServer *server, double lx, double ly) {
  * A spinning window needs none of this — server_drag_swing_place already places
  * it from the cursor's WORLD position every frame, so the camera is in the sum
  * already. */
+/* THE HAND CROSSED TO ANOTHER SCREEN. Carry the window over with it.
+     *
+     * The drag moves a window through the WORLD by the distance the hand moved
+     * across the desk (drag_place), which is right for as long as both are on
+     * one screen and wrong the moment they are not: two monitors are two
+     * windows onto the same strip, and the strip does not have to run past
+     * them in order. The screen on the right can be showing desktop 5 while
+     * the one on the left shows desktop 0 — and then a hand that travelled
+     * 1300px right has moved the window 1300px into desktop 1, which nothing
+     * is showing. The window vanishes out from under the cursor that is
+     * carrying it.
+     *
+     * So re-home it: shift the anchor by the difference between what the two
+     * screens have under them, which leaves the window exactly where it looks
+     * like it is — still in the hand, on the same pixel of glass — and puts it
+     * in the column the new screen is showing. Two screens that happen to show
+     * neighbouring desktops in order have no difference between them, the shift
+     * is zero, and a drag across that join behaves as it always did.
+     *
+     * The camera reference is re-seeded rather than carried for the reason it
+     * always was: the two cameras are independent, and the gap between them is
+     * not travel the window did.
+     *
+     * TAKES THE POSITION rather than reading the cursor, and does NOT place the
+     * window itself. Both so that the POINTER path can settle a crossing with
+     * the very event that caused it: the tick runs at 60Hz and motion events
+     * arrive several hundred times a second, so a crossing left for the next
+     * tick is up to a frame of the window drawn against the old screen's
+     * offset and then snapped back — which on two monitors of different height
+     * is a visible jerk, the width of the gap between their top edges. The
+     * caller places the window once, afterwards, with the corrected anchor.
+     *
+     * Returns 1 if the anchor moved. */
+static int drag_cross_screens(FwmServer *server, double lx, double ly) {
+    FwmOutput *o = server_output_at(server, lx, ly);
+    if (!o) return 0;
+
+    int offset   = o->camera_x - o->box.x;
+    int offset_y = -o->box.y;
+    if (!server->interactive.cam_have) {
+        server->interactive.cam_output = o;
+        server->interactive.cam_ref = o->camera_x;
+        /* The anchor is expressed in the frame of the screen DRAWING the
+         * window, which is not always the one under the hand — a window can be
+         * picked up while it straddles a join. drag_place owns these two from
+         * here on; this only gives them their first value. */
+        FwmOutput *frame = server->interactive.view ? server->interactive.view->drawn_on : NULL;
+        if (!frame) frame = o;
+        server->interactive.cam_offset   = frame->camera_x - frame->box.x;
+        server->interactive.cam_offset_y = -frame->box.y;
+        server->interactive.cam_have = 1;
+        return 0;
+    }
+    if (server->interactive.cam_output == o) return 0;
+    server->interactive.cam_output = o;
+    server->interactive.cam_ref = o->camera_x;
+
+    /* ONLY ACROSS A BREAK IN THE WORLD.
+     *
+     * Where the two screens show columns that run on from one another, the
+     * window needs no help from the hand: it walks across the join under the
+     * drag's own arithmetic, and drag_place re-frames it in the one placement
+     * where the picture changes screens. Carrying it here as well would be the
+     * same move made twice, a grab-offset apart — the hand's crossing first,
+     * the picture's later — and that pair of half-corrections IS the jerk.
+     *
+     * Where they do not run on — the screen on the right showing desktop 5
+     * while the left shows 0 — walking across is not available: the world
+     * between them is a column nothing displays, and a window walked into it
+     * disappears out from under the cursor carrying it. That one is handed
+     * over the moment the hand is, because there is no other moment. */
+    int carry = offset - server->interactive.cam_offset;
+    if (!carry) return 0;
+
+    int carry_y = offset_y - server->interactive.cam_offset_y;
+    server->interactive.cam_offset   = offset;
+    server->interactive.cam_offset_y = offset_y;
+    server->interactive.view_start_x += carry;
+    server->interactive.view_start_y += carry_y;
+    /* The world moved, the window did not, and telling the wobble otherwise
+     * hands it a whole screen of travel in one tick. */
+    if (server->interactive.view)
+        view_jelly_carry(server->interactive.view, carry, carry_y);
+    return 1;
+}
+
+/* The camera moved under a drag (edge auto-scroll, above all): bring the window
+ * along. The crossing above is settled here too, for a hand that leaves one
+ * monitor without a motion event to say so — a screen unplugged, a camera
+ * sliding out from under a cursor standing still. */
 void server_drag_follow_camera(FwmServer *server) {
     if (server->interactive.action != FWM_ACTION_MOVE || !server->interactive.view) return;
     if (!server->cursor) return;
 
-    FwmOutput *o = server_output_at(server, server->cursor->x, server->cursor->y);
-    if (!o) return;
-
-    /* Re-seed rather than shift when the hand crosses to another monitor: the
-     * two cameras are independent, and the difference between them is not
-     * travel the window did. */
-    if (!server->interactive.cam_have || server->interactive.cam_output != o) {
-        server->interactive.cam_output = o;
-        server->interactive.cam_ref = o->camera_x;
-        server->interactive.cam_have = 1;
+    if (drag_cross_screens(server, server->cursor->x, server->cursor->y)) {
+        drag_place(server, server->cursor->x, server->cursor->y);
         return;
     }
 
+    FwmOutput *o = server_output_at(server, server->cursor->x, server->cursor->y);
+    if (!o) return;
+
     int delta = o->camera_x - server->interactive.cam_ref;
-    if (delta == 0) return;
-    server->interactive.cam_ref = o->camera_x;
-    server->interactive.view_start_x += delta;
+    if (delta) {
+        server->interactive.cam_ref = o->camera_x;
+        server->interactive.view_start_x += delta;
+        /* The window did not move — the world did, and the hand is still
+         * holding it exactly where it was on screen. Telling the wobble
+         * otherwise hands it a whole desktop of travel in one tick, which is
+         * what made a window carried across with super+N jerk in the hand. */
+        view_jelly_carry(server->interactive.view, delta, 0);
+    }
+
+    /* Placed every tick, not only when the camera moved. The frame the anchor
+     * is read in (drag_place) can change with the hand perfectly still — the
+     * OTHER monitor switching desktops is enough to hand this window's column
+     * to a different screen — and nothing else would notice until the hand
+     * moved again. The call is idempotent: the same cursor and the same anchor
+     * give the same position. */
     drag_place(server, server->cursor->x, server->cursor->y);
-    /* The window did not move — the world did, and the hand is still holding it
-     * exactly where it was on screen. Telling the wobble otherwise hands it a
-     * whole desktop of travel in one tick, which is what made a window carried
-     * across with super+N jerk in the hand. */
-    view_jelly_carry(server->interactive.view, delta, 0);
 }
 
 /* Take a tiled window out of the layout so it can be carried.
@@ -414,6 +568,9 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
                              wx - view->x, wy - view->y);
         }
 
+        /* Before the placement, not after: this is what keeps the seam of a
+         * crossing invisible — see drag_cross_screens. */
+        drag_cross_screens(server, lx, ly);
         drag_place(server, lx, ly);
 
         // Shift velocity history
@@ -541,6 +698,19 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
             /* The edge of THIS monitor, not of the layout. */
             double ex = lx - eo->box.x;
             int step = ex >= eo->box.width - 10 ? 1 : (ex <= 10 ? -1 : 0);
+            /* But NOT an edge with another monitor against it. That strip of
+             * ten pixels is the last thing the hand crosses on its way to the
+             * screen next door, and turning it into a desktop switch means the
+             * window can never get there: you reach for the other monitor and
+             * the one you are on flicks to the next desktop instead, over and
+             * over. An edge facing open air is still a place to push a window
+             * off the end of the strip — that is what this is for — but an
+             * edge facing glass belongs to the crossing. */
+            if (step) {
+                double probe = step > 0 ? eo->box.x + eo->box.width + 1
+                                        : eo->box.x - 1;
+                if (server_output_at(server, probe, ly)) step = 0;
+            }
             if (step) {
                 /* Dragging a window off the end of a ring puts it on the other
                  * end, which is the whole point of the ring — the window is

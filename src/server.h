@@ -229,6 +229,19 @@ typedef struct {
     FwmOutput *cam_output;
     int cam_ref;
     int cam_have;
+    /* Where the world sits under the screen the hand was last on: camera_x
+     * minus box.x, which is what turns a layout coordinate into a world one.
+     * Kept as a NUMBER rather than read back off cam_output, because a monitor
+     * can be unplugged in the middle of a drag and that pointer is then a
+     * pointer to a freed output — comparing it is one thing, following it to
+     * read two fields is another. */
+    int cam_offset;
+    /* And the same for the other axis: -box.y, because a column has no camera
+     * vertically (server_world_to_screen adds box.y and nothing else). Two
+     * monitors of different height are almost never aligned along their tops —
+     * the layout stands them on a shared centre or a shared bottom — so this
+     * is the difference that made a window jump as the hand crossed. */
+    int cam_offset_y;
 
     /* Swirl: how the cursor's direction of travel is turning, which is what
      * winds a spinning window up mid-drag (see server_pointer.c). `dir` is the
@@ -840,6 +853,10 @@ FwmOutput *server_output_at(FwmServer *server, double lx, double ly);
 FwmOutput *server_active_output(FwmServer *server);
 /* The monitor showing desktop `d`, or NULL when none is. */
 FwmOutput *server_output_showing(FwmServer *server, int d);
+/* The monitor that will draw a window of `span` with its left edge at `wx`,
+ * `prefer` being the one that drew it last. See server_output.c. */
+FwmOutput *server_output_drawing(FwmServer *server, double wx, double span,
+                                 FwmOutput *prefer);
 /* Trade two desktops: what stood on `a` stands on `b` and the other way round,
  * windows, layout tree and mode together. The places themselves do not move —
  * the camera stays where it is and each monitor goes on showing the desktop it

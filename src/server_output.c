@@ -647,6 +647,21 @@ static FwmOutput *world_output(FwmServer *server, double wx, double span) {
     return world_output_near(server, wx, span, NULL);
 }
 
+/* Which monitor WILL draw a window of `span` whose left edge lands at `wx`,
+ * given the screen that drew it last. The same answer server_place_view is
+ * about to reach, asked one step early.
+ *
+ * The drag needs it early. A window is drawn by one screen and cut to it, so
+ * crossing a join swaps the frame its position is read in — and on two monitors
+ * that are not aligned along their top edges the two frames differ by the gap
+ * between them. The drag cancels that by shifting the window through the world
+ * by the same amount, which only works if both happen in ONE placement: half of
+ * it a frame early is exactly the jerk it exists to prevent. See drag_place. */
+FwmOutput *server_output_drawing(FwmServer *server, double wx, double span,
+                                 FwmOutput *prefer) {
+    return world_output_near(server, wx, span, prefer);
+}
+
 bool server_world_to_screen(FwmServer *server, double wx, double wy,
                             double span, double *sx, double *sy) {
     FwmOutput *o = world_output(server, wx, span);
