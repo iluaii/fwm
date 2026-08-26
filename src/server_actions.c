@@ -339,6 +339,29 @@ static int resolve_desktop(FwmServer *server, const char *arg) {
     return resolve_desktop_ex(server, arg, NULL);
 }
 
+/* The monitor a move_to_output: argument names, or NULL when there is nothing
+ * to move to.
+ *
+ * A window crosses to another SCREEN by crossing to the desktop that screen is
+ * showing. That is not a detour, it is what the two words mean here: the world
+ * is one strip of columns, a desktop stands on at most one monitor, so naming
+ * the monitor names the column — and everything that already knows how to send
+ * a window one column along works unchanged, tiling and flight included.
+ *
+ * Which column that is changes every time the other screen switches desktops,
+ * and THAT is why this cannot be an ordinary `move_to:` with a number written
+ * into the config: the number would be right until the first time you pressed
+ * super+3 over there.
+ *
+ * Counted rather than stepped, for the reason focus_output: is counted — see
+ * server_output_nth. Asking for the screen you are already on is nothing to do,
+ * and so is a screen holding no desktop yet. */
+static FwmOutput *move_to_output_arg(FwmServer *server, const char *arg) {
+    FwmOutput *out = server_output_nth(server, atoi(arg));
+    if (!out || out->desktop < 0) return NULL;
+    return out == server_active_output(server) ? NULL : out;
+}
+
 /* Park the camera on a desktop. A `seam` move — the ring's join — is jumped
  * outright: sliding it would drag the view backwards across every desktop in
  * between, and there is no picture of the join to slide through, because the
@@ -962,6 +985,24 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         int desktop = resolve_desktop(server, action + 13);
         if (desktop >= 0)
             server_move_view_to_desktop(server, server->focused_view, desktop, 1);
+    } else if (strncmp(action, "move_to_output:", 15) == 0) {
+        FwmOutput *out = move_to_output_arg(server, action + 15);
+        if (out)
+            server_move_view_to_desktop(server, server->focused_view, out->desktop, 0);
+    } else if (strncmp(action, "move_to_output_view:", 20) == 0) {
+        FwmOutput *out = move_to_output_arg(server, action + 20);
+        FwmView *v = server->focused_view;
+        if (out && v) {
+            /* NOT move_to_view's `follow` flag. That walks the ACTIVE monitor's
+             * camera onto the destination desktop — and the destination desktop
+             * is standing on the OTHER monitor, so the two screens would fight
+             * over which of them gets to show it, and the window would arrive
+             * back on the screen it just left. Crossing to a window that went
+             * to another screen means crossing to that screen. */
+            server_move_view_to_desktop(server, v, out->desktop, 0);
+            server_focus_output(server, out);
+            server_focus_view(server, v);
+        }
     } else if (strncmp(action, "set:", 4) == 0) {
         server_action_set_option(server, action + 4);
     } else if (strncmp(action, "volume:", 7) == 0) {

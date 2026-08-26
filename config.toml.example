@@ -887,6 +887,8 @@ tap = true
 # screenshots:    screenshot, screenshot_region
 # monitors:       output_off, toggle_internal_output, outputs_on,
 #                 focus_output:1 .. focus_output:9
+#                 move_to_output:1 .. :9       (send a window to that screen)
+#                 move_to_output_view:1 .. :9  (send it there and cross to it)
 # tiling:         toggle_split, tile_focus:l|r|u|d, tile_move:l|r|u|d
 # tab-stacks:     group_toggle, group_next, group_prev, group_add
 #
@@ -1001,6 +1003,25 @@ tap = true
 "ctrl+alt+7"         = "focus_output:7"
 "ctrl+alt+8"         = "focus_output:8"
 "ctrl+alt+9"         = "focus_output:9"
+# And the window with it. Same numbering as the keys above — ctrl+alt+shift+2 is
+# "put this on the second screen" — because a window is sent to a SCREEN by
+# being sent to whichever desktop that screen happens to be showing, and that
+# desktop changes every time the other monitor switches. A plain move_to: with a
+# number in it would be right until the first time you pressed super+3 over
+# there; this stays right.
+#
+# The camera does not follow, the i3/sway way. move_to_output_view: is the same
+# send with the pointer and the keyboard crossing over after it, for when you
+# are moving a window in order to go on working in it.
+"ctrl+alt+shift+1"   = "move_to_output:1"
+"ctrl+alt+shift+2"   = "move_to_output:2"
+"ctrl+alt+shift+3"   = "move_to_output:3"
+"ctrl+alt+shift+4"   = "move_to_output:4"
+"ctrl+alt+shift+5"   = "move_to_output:5"
+"ctrl+alt+shift+6"   = "move_to_output:6"
+"ctrl+alt+shift+7"   = "move_to_output:7"
+"ctrl+alt+shift+8"   = "move_to_output:8"
+"ctrl+alt+shift+9"   = "move_to_output:9"
 #"super+ctrl+o"       = "toggle_internal_output"
 # Lock the screen. fwm implements ext-session-lock-v1; the lock screen itself
 # is drawn by an external client (hyprlock, swaylock), so this is a plain spawn.
