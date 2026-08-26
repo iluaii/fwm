@@ -162,12 +162,32 @@ struct FwmShadow {
     bool live[SHADOW_CELLS];  /* has geometry: what set_enabled(true) may turn on */
 };
 
+/* A shadow reaches outside the window that casts it, and its cells are scene
+ * buffers, which take the hit test over their whole rectangle whatever their
+ * alpha. The cells sit at the bottom of their OWN window's tree, so they never
+ * came between that window and the hand — but the tree as a whole stands above
+ * the windows underneath, so the overhang took input from THEM: a band around
+ * every raised window where the neighbour below could not be clicked, and one
+ * that walked across the desktop over the day as the sun moved.
+ *
+ * Landing on a cell was not simply lost, which is what made it hard to name:
+ * view_at walks up to the owning tree, so the click reached the CASTING window
+ * instead — it focused and could be grabbed, from a place its neighbour was
+ * drawn. Scenery declines input; the same answer glass.c and star_draw.c give,
+ * and the window itself goes on answering for its own area. */
+static bool shadow_declines_input(struct wlr_scene_buffer *buffer,
+                                  double *sx, double *sy) {
+    (void)buffer; (void)sx; (void)sy;
+    return false;
+}
+
 FwmShadow *shadow_create(struct wlr_scene_tree *parent) {
     FwmShadow *sh = calloc(1, sizeof(*sh));
     if (!sh) return NULL;
     for (int i = 0; i < SHADOW_CELLS; i++) {
         sh->cell[i] = wlr_scene_buffer_create(parent, NULL);
         if (!sh->cell[i]) { shadow_destroy(sh); return NULL; }
+        sh->cell[i]->point_accepts_input = shadow_declines_input;
         wlr_scene_node_set_enabled(&sh->cell[i]->node, false);
         /* Under the window and under its borders, wherever they were added. */
         wlr_scene_node_lower_to_bottom(&sh->cell[i]->node);

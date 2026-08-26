@@ -296,6 +296,24 @@ static void handle_panel_destroy(struct wl_listener *listener, void *data) {
     glass_free(g);
 }
 
+/* The pane is the panel plus a margin on every side for the blur and the shadow
+ * to fall into (glass_margin), and that margin is transparent — but a scene
+ * buffer takes the hit test over its whole rectangle, alpha or no alpha. So the
+ * glass under the tray reached 30px below a strip that ends at TRAY_BOTTOM,
+ * while windows start 14px below that: a 16px band across the top of every
+ * window where view_at found a buffer that is not a client surface, handed back
+ * no surface, and the click went nowhere. Dead to the eye, dead to the hand,
+ * and it moved whenever the shadow settings did.
+ *
+ * Scenery has no business taking input — the same answer the hole and the
+ * effect snapshots give (star_draw.c, view_effects.c). The panel itself is a
+ * separate node ABOVE this one and goes on answering for its own area. */
+static bool glass_declines_input(struct wlr_scene_buffer *buffer,
+                                 double *sx, double *sy) {
+    (void)buffer; (void)sx; (void)sy;
+    return false;
+}
+
 void glass_attach(struct wlr_scene_buffer *panel) {
     if (!g_server || !panel || !panel->node.parent) return;
     panes_init();
@@ -308,6 +326,7 @@ void glass_attach(struct wlr_scene_buffer *panel) {
 
     g->pane = wlr_scene_buffer_create(panel->node.parent, NULL);
     if (!g->pane) { free(g); return; }
+    g->pane->point_accepts_input = glass_declines_input;
     wlr_scene_node_set_enabled(&g->pane->node, false);
     wlr_scene_node_place_below(&g->pane->node, &panel->node);
 
