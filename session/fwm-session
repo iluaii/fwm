@@ -24,13 +24,21 @@ LOG="$STATE_DIR/crash.log"
 MAX_CRASHES=3    # this many failures...
 WINDOW=60        # ...within this many seconds means it is not coming back
 
+# Where the compositor's own stderr goes. A session that misbehaves after
+# hours of being left alone leaves nothing behind unless somebody kept its
+# log, and by the time it is noticed the only way to get the session back is
+# to kill it — taking the scrollback with it. One previous run is kept as
+# .log.1, which is the run you actually want to read after a restart.
+LOGFILE="$STATE_DIR/fwm.log"
+
 mkdir -p "$STATE_DIR"
 
 crashes=0
 window_start=$(date +%s)
 
 while :; do
-    "$FWM" "$@"
+    [ -f "$LOGFILE" ] && mv -f "$LOGFILE" "$LOGFILE.1"
+    "$FWM" "$@" 2>>"$LOGFILE"
     code=$?
 
     if [ "$code" -eq 0 ]; then
