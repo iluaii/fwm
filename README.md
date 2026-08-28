@@ -625,6 +625,7 @@ fwmctl save --all               # keep what this session changed, across restart
 fwmctl saved                    # what is kept, and what it is worth now
 fwmctl unsave --all             # forget it; the configured values are back at once
 fwmctl window 7 desktop=4 pin=on       # act on ONE window, by id
+fwmctl theme                    # the UI palette in hex, and where it came from
 fwmctl subscribe                # stream events as they happen
 fwmctl version                  # release, and which binary is answering: path, mtime, pid
 fwmctl memory                   # fwm's own memory, split into its parts
@@ -726,6 +727,7 @@ fwmctl subscribe window_open,desktop  # just these
 | `mode` | a desktop switches physics / tiling / floating |
 | `gravity` | the gravity mode is cycled |
 | `config_reload` | the config was re-read, so anything cached is stale |
+| `palette` | the UI colours changed — a new wallpaper, or a reload that moved them |
 
 An unknown event name is refused outright rather than ignored, since a typo
 that silently subscribed you to nothing looks exactly like an event that never
@@ -761,6 +763,13 @@ hyprland-global-shortcuts, so `Super+Space` can open the shell's launcher
 instead of the built-in one. Both are off until asked for: a client should not
 be able to take fwm's own interface off the screen by requesting it. See
 [keybindings](docs/keybindings.md#giving-a-key-to-an-external-shell).
+
+The colours travel the same way. With `[decor] color_source = "wallpaper"` fwm
+derives its palette from the image behind everything; `fwmctl theme` prints that
+palette in hex and the `palette` event says when it moved. fwm dresses its own
+chrome and stops there — your GTK theme and your terminal config are yours — but
+that is everything `matugen` or `pywal` needs to take the same colours the rest
+of the way. The loop is in [fwmctl.md](docs/fwmctl.md#the-palette).
 
 fwm deliberately has no in-process plugin API. wlroots has no stable ABI, so
 loadable modules would break on every wlroots release and every crash in one

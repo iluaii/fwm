@@ -284,6 +284,12 @@ text — from the current wallpaper image, so the tray belongs to the desktop
 behind it. `tint_strength` is how far the fill moves toward the wallpaper's hue.
 Colours are premultiplied internally; write them as plain hex.
 
+That palette is readable from outside: `fwmctl theme` prints it in hex, and
+`fwmctl subscribe palette` says when it changed and what to. fwm colours its own
+chrome and nothing else — it never writes your GTK theme or your terminal config
+— but with those two, `matugen` or `pywal` can take the same colours the rest of
+the way; [fwmctl.md](fwmctl.md#the-palette) has the loop to paste.
+
 `tray_opacity` and `launcher_opacity` are handed over to `[glass] fill` while
 [the glass](#glass) is on: an island standing on frosted glass and one standing
 on the wallpaper do not want the same number, and the panels are meant to agree

@@ -23,6 +23,7 @@ at it explicitly or you will be talking to the outer session.
 | `fwmctl memory` | fwm's own memory, split into heap, mapped libraries and client buffers |
 | `fwmctl output <name> k=v …` | change one monitor |
 | `fwmctl config` | every settable option with its value, range and one-line help |
+| `fwmctl theme` | the UI palette in hex, where it came from, and the wallpaper it was derived from |
 | `fwmctl get <name>` | read one option |
 | `fwmctl set <name> <value>` | change one option, this session only |
 | `fwmctl set <a>=<v> <b>=<v> …` | several at once, applied together or not at all |
@@ -214,6 +215,64 @@ showing nothing readable. The last lit screen cannot be turned off.
 Like `set`, this is for the session: `[[output]]` in the config file has the last
 word on reload.
 
+## The palette
+
+```console
+$ fwmctl theme
+{"ok":true,"source":"wallpaper","wallpaper":"/home/me/wall.png","generation":6,
+ "colors":{"pill":"#171a16","sel":"#292e2a","text":"#e8ebf0","muted":"#8a9398",
+           "dim":"#525766","accent":"#dc781e",
+           "border_active":"#dc781e","border_inactive":"#544333"}}
+```
+
+The colours the tray, the launcher, the tab bars and the window borders are
+drawn with — the same `FwmTheme` the overlays read, not a second copy that can
+drift from it. `source` is `config` or `wallpaper`; with `wallpaper` the palette
+was [derived from the image](configuration.md#decor) and `wallpaper` is the path
+it came from.
+
+Hex, in the form `config.toml` writes a colour: `#RRGGBB`, or `#RRGGBBAA` when
+it carries alpha, so a value can be read here and pasted back into the file
+unchanged. Internally the borders are premultiplied; the alpha is divided back
+out before printing, so what you get is the colour that was written and not the
+colour as it happens to be blended.
+
+The `palette` event fires when any of that changes — a new wallpaper, a reload,
+a `set` that reached `[decor]`. It carries the whole palette, so a subscriber
+never has to ask a second time, and it is emitted by comparing the built theme
+against the one last announced: a knob dragged through a range rebuilds the
+theme on every step and sends nothing, because nothing about the colours moved.
+
+That is the hook for a colour generator. fwm dresses its own chrome and stops
+there — it does not write your GTK theme, your terminal config or anything else
+under `~/.config` — but it will tell you what it chose, and `matugen` or `pywal`
+can do the rest:
+
+```sh
+#!/bin/sh
+# Follow fwm's palette into GTK and everything else. Name this in
+# [startup] exec and it runs for the life of the session.
+fwmctl subscribe palette | while read -r ev; do
+    # The first line is the subscription's own reply, not a palette.
+    printf '%s' "$ev" | jq -e '.event == "palette"' >/dev/null || continue
+
+    wall=$(printf '%s' "$ev" | jq -r '.wallpaper // empty')
+    if [ -n "$wall" ]; then
+        # The picture beats one colour out of it: a generator building a whole
+        # scheme has more to work with.
+        matugen image "$wall"
+    else
+        matugen color hex "$(printf '%s' "$ev" | jq -r .colors.accent)"
+    fi
+done
+```
+
+With `adw-gtk3` installed and `gtk-application-prefer-dark-theme` set, that is
+GTK 3 and libadwaita apps following the wallpaper along with the tray. The
+stream only ever reports a *change*, so a script that wants to be right from the
+moment it starts should run one `fwmctl theme` before the loop and treat it the
+same way.
+
 ## Events
 
 ```console
@@ -227,11 +286,13 @@ $ fwmctl subscribe
 {"event":"config_reload"}
 {"event":"setting","name":"sun.blur","value":"18.000","saved":true}
 {"event":"ui","what":"launcher","open":true}
+{"event":"palette","source":"wallpaper","wallpaper":"/home/me/wall.png","generation":6,
+ "colors":{"pill":"#171a16",...,"accent":"#dc781e"}}
 ```
 
 Subscribe to everything, or a comma-separated subset:
 `window_open`, `window_close`, `window_focus`, `window_title`, `desktop`, `mode`,
-`gravity`, `config_reload`, `setting`, `ui`. The reply names what was actually subscribed, so a
+`gravity`, `config_reload`, `setting`, `ui`, `palette`. The reply names what was actually subscribed, so a
 client can log it rather than assume its request was understood. Subscribing twice
 widens the set rather than replacing it.
 

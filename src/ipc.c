@@ -18,6 +18,7 @@
 
 #include "ipc.h"
 #include "server.h"
+#include "theme.h"
 #include "view.h"
 #include "physics.h"
 /* For the settings overlay and the window verbs: acting on one window by id is
@@ -66,6 +67,12 @@ struct FwmIpc {
      * pull the ground out from under the caller. It is marked instead and
      * reaped by the read path once the command has returned. */
     struct IpcClient *current;
+
+    /* The palette as it stood when the `palette` event last went out. Every
+     * `fwmctl set` re-applies the config and so rebuilds the theme; comparing
+     * the result is what keeps a knob being dragged through a range from
+     * flooding subscribers with an event that says nothing changed. */
+    FwmTheme palette;
 };
 
 struct IpcClient {
@@ -379,6 +386,85 @@ static void cmd_get(FwmServer *server, const char *name, struct Buf *b) {
     buf_json_string(b, opt->name);
     buf_puts(b, ",\"value\":");
     buf_json_string(b, value);
+    buf_puts(b, "}\n");
+}
+
+/* ── theme ────────────────────────────────────────────────────────────────
+ *
+ * The palette the overlays draw with, in the one form a shell script can use
+ * without a parser: hex, exactly as config.toml writes a colour. With
+ * color_source = "wallpaper" it is derived from the image and changes when the
+ * image does, which is what makes it worth asking for — a generator like
+ * matugen or pywal subscribes to `palette` and dresses GTK, the terminal and
+ * everything else in the colours fwm is already using. */
+
+/* unsigned char, not int: it is what a colour channel is, and it also tells
+ * the compiler the %02x below can never widen past two digits. */
+static unsigned char hex_byte(double v) {
+    if (!(v > 0)) return 0;   /* the negated test also catches NaN */
+    if (v > 1) v = 1;
+    return (unsigned char)(v * 255.0 + 0.5);
+}
+
+static void hex_rgb(char out[10], const double rgb[3]) {
+    snprintf(out, 10, "#%02x%02x%02x",
+             hex_byte(rgb[0]), hex_byte(rgb[1]), hex_byte(rgb[2]));
+}
+
+/* Border colours are stored premultiplied for wlr_scene_rect; divide the alpha
+ * back out so what comes over the socket is the colour that was written rather
+ * than the colour as it happens to be blended. Opaque ones print as #RRGGBB so
+ * the common case reads like every other entry. */
+static void hex_premul(char out[10], const float c[4]) {
+    double a = c[3], straight[3] = {0, 0, 0};
+    if (a > 0)
+        for (int i = 0; i < 3; i++) straight[i] = c[i] / a;
+    if (a >= 1.0) { hex_rgb(out, straight); return; }
+    snprintf(out, 10, "#%02x%02x%02x%02x", hex_byte(straight[0]),
+             hex_byte(straight[1]), hex_byte(straight[2]), hex_byte(a));
+}
+
+/* The palette's fields, each with its leading comma, shared by the `theme`
+ * reply and the `palette` event so the two can never drift apart. */
+static void palette_fields(FwmServer *server, struct Buf *b) {
+    const FwmTheme *t = theme_get();
+    const DecorConfig *dc = &server->config.decor;
+    bool from_wallpaper = dc->color_source == COLOR_SOURCE_WALLPAPER;
+    char hex[10];
+
+    buf_puts(b, ",\"source\":");
+    buf_json_string(b, from_wallpaper ? "wallpaper" : "config");
+
+    /* The image as well as the colours: matugen and pywal both make a better
+     * scheme from the picture than from one colour lifted out of it, and the
+     * event is the only notice they get that it changed. */
+    if (from_wallpaper && server->config.wallpaper_count > 0) {
+        buf_puts(b, ",\"wallpaper\":");
+        buf_json_string(b, server->config.wallpapers[0].path);
+    }
+
+    buf_printf(b, ",\"generation\":%u,\"colors\":{", theme_generation());
+    const struct { const char *name; const double *rgb; } cols[] = {
+        { "pill",   t->pill   },
+        { "sel",    t->sel    },
+        { "text",   t->text   },
+        { "muted",  t->muted  },
+        { "dim",    t->dim    },
+        { "accent", t->accent },
+    };
+    for (size_t i = 0; i < sizeof(cols) / sizeof(cols[0]); i++) {
+        hex_rgb(hex, cols[i].rgb);
+        buf_printf(b, "%s\"%s\":\"%s\"", i ? "," : "", cols[i].name, hex);
+    }
+    hex_premul(hex, t->border_active);
+    buf_printf(b, ",\"border_active\":\"%s\"", hex);
+    hex_premul(hex, t->border_inactive);
+    buf_printf(b, ",\"border_inactive\":\"%s\"}", hex);
+}
+
+static void cmd_theme(FwmServer *server, struct Buf *b) {
+    buf_puts(b, "{\"ok\":true");
+    palette_fields(server, b);
     buf_puts(b, "}\n");
 }
 
@@ -1123,6 +1209,7 @@ static void ipc_handle_command(struct IpcClient *client, const char *line, struc
     if (IS("config"))  { cmd_config(server, out);  return; }
     if (IS("outputs")) { cmd_outputs(server, out); return; }
     if (IS("memory"))  { cmd_memory(out);          return; }
+    if (IS("theme"))   { cmd_theme(server, out);   return; }
     if (IS("get")) {
         if (!arg) { reply_error(out, "get needs an option name"); return; }
         cmd_get(server, arg, out);
@@ -1174,8 +1261,8 @@ static void ipc_handle_command(struct IpcClient *client, const char *line, struc
     }
 
     reply_error(out, "unknown command (try: version, state, windows, window, outputs, "
-                     "output, config, get, set, save, unsave, saved, dispatch, reload, "
-                     "subscribe)");
+                     "output, config, theme, get, set, save, unsave, saved, "
+                     "dispatch, reload, subscribe)");
     #undef IS
 }
 
@@ -1294,6 +1381,28 @@ void ipc_emit_setting(FwmIpc *ipc, const char *name, const char *value, bool sav
     buf_json_string(&b, value);
     buf_printf(&b, ",\"saved\":%s}\n", saved ? "true" : "false");
     ipc_broadcast(ipc, FWM_EV_SETTING, &b);
+    free(b.data);
+}
+
+/* The palette moved: a wallpaper swap, a reload, or a `set` that touched
+ * color_source or tint_strength. Callers fire this after every theme_build()
+ * without checking anything — the comparison below is what decides whether
+ * there is news. Identical inputs rebuild to identical bits, so a false
+ * "changed" would take a rebuild that genuinely differs somewhere invisible,
+ * and would cost a subscriber one redundant event. */
+void ipc_emit_palette(FwmIpc *ipc) {
+    if (!ipc) return;
+
+    const FwmTheme *t = theme_get();
+    bool changed = memcmp(&ipc->palette, t, sizeof(*t)) != 0;
+    ipc->palette = *t;
+    if (!changed || !ipc_wants(ipc, FWM_EV_PALETTE)) return;
+
+    struct Buf b = {0};
+    buf_puts(&b, "{\"event\":\"palette\"");
+    palette_fields(ipc->server, &b);
+    buf_puts(&b, "}\n");
+    ipc_broadcast(ipc, FWM_EV_PALETTE, &b);
     free(b.data);
 }
 
@@ -1442,6 +1551,7 @@ FwmIpc *ipc_create(struct FwmServer *server, const char *wl_socket) {
     if (!ipc) return NULL;
     ipc->server = server;
     ipc->fd = -1;
+    ipc->palette = *theme_get();
     wl_list_init(&ipc->clients);
 
     int n = snprintf(ipc->path, sizeof(ipc->path), "%s/fwm-%s.sock", dir, wl_socket);

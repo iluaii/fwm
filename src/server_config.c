@@ -561,6 +561,7 @@ void server_set_wallpaper(FwmServer *server, const char *path) {
 
     /* The palette may be derived from the image that just changed. */
     theme_build(&server->config);
+    ipc_emit_palette(server->ipc);
     server_request_tray_redraw(server);
 
     server_state_save_wallpaper(path);
@@ -606,6 +607,7 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
     /* Before anything reads colours: a new wallpaper or color_source repaints
      * the whole system. */
     theme_build(&server->config);
+    ipc_emit_palette(server->ipc);
 
     server_apply_physics_config(server);
 

@@ -48,6 +48,10 @@ void ipc_emit_desktop(FwmIpc *ipc, int desktop);
 void ipc_emit_mode(FwmIpc *ipc, int desktop, int mode);
 void ipc_emit_gravity(FwmIpc *ipc, double gravity_scale);
 void ipc_emit_config_reload(FwmIpc *ipc);
+/* The UI palette changed — a new wallpaper, a reload, a `set` that reached
+ * [decor]. Safe to call after any theme_build(): nothing goes out unless the
+ * colours actually differ from the ones last announced. */
+void ipc_emit_palette(FwmIpc *ipc);
 /* One of fwm's own panels opened or closed: "launcher", "wallpaper_picker",
  * "radial" or "expo". They are not windows, so no other event covers them. */
 void ipc_emit_ui(FwmIpc *ipc, const char *what, bool open);
