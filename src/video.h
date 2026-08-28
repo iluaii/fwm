@@ -64,4 +64,9 @@ void video_destroy(FwmVideo *v);
  * (cairo_surface_destroy). */
 cairo_surface_t *video_thumbnail(const char *path, int max_w, int max_h);
 
+/* Same, but from a fixed point `frac` (0..1) through the clip instead of a
+ * random one, so repeated calls on the same file give the same frame — what the
+ * theme sampler needs to derive stable colours from a video wallpaper. */
+cairo_surface_t *video_still_at(const char *path, int max_w, int max_h, double frac);
+
 #endif /* FWM_VIDEO_H */

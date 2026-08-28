@@ -481,7 +481,11 @@ fail:
     return NULL;
 }
 
-cairo_surface_t *video_thumbnail(const char *path, int max_w, int max_h) {
+/* frac < 0 picks a random point in the clip; otherwise the frame nearest that
+ * fraction of the duration, which is what the theme sampler wants — a wallpaper
+ * must derive the same colours every reload. */
+static cairo_surface_t *decode_still(const char *path, int max_w, int max_h,
+                                     double frac) {
     if (!path || !path[0] || max_w <= 0 || max_h <= 0) return NULL;
 
     AVFormatContext   *fmt = NULL;
@@ -508,13 +512,15 @@ cairo_surface_t *video_thumbnail(const char *path, int max_w, int max_h) {
     if (avcodec_open2(cc, codec, NULL) < 0) goto done;
     if (cc->width <= 0 || cc->height <= 0) goto done;
 
-    /* Seek to a random point so the icon is a real frame from the clip, not the
-     * often-black or logo first frame. Landing on the nearest earlier keyframe
-     * is fine — any representative frame will do. */
+    /* Seek into the clip rather than take the often-black or logo first frame.
+     * Landing on the nearest earlier keyframe is fine — any representative
+     * frame will do. */
     if (fmt->duration > 0) {
-        static int seeded = 0;
-        if (!seeded) { srand((unsigned)time(NULL)); seeded = 1; }
-        double frac = 0.1 + (rand() / ((double)RAND_MAX + 1.0)) * 0.8;
+        if (frac < 0.0) {
+            static int seeded = 0;
+            if (!seeded) { srand((unsigned)time(NULL)); seeded = 1; }
+            frac = 0.1 + (rand() / ((double)RAND_MAX + 1.0)) * 0.8;
+        }
         int64_t target = (int64_t)(frac * fmt->duration); /* AV_TIME_BASE units */
         int64_t seek_ts = av_rescale_q(target, AV_TIME_BASE_Q, st->time_base);
         if (av_seek_frame(fmt, si, seek_ts, AVSEEK_FLAG_BACKWARD) >= 0)
@@ -596,6 +602,16 @@ done:
     if (cc) avcodec_free_context(&cc);
     if (fmt) avformat_close_input(&fmt);
     return surf;
+}
+
+cairo_surface_t *video_thumbnail(const char *path, int max_w, int max_h) {
+    return decode_still(path, max_w, max_h, -1.0);
+}
+
+cairo_surface_t *video_still_at(const char *path, int max_w, int max_h, double frac) {
+    if (frac < 0.0) frac = 0.0;
+    if (frac > 1.0) frac = 1.0;
+    return decode_still(path, max_w, max_h, frac);
 }
 
 void video_destroy(FwmVideo *v) {

@@ -20,6 +20,8 @@
 #include <string.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
+#include "video.h"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -28,6 +30,12 @@
  * wallpaper costs a decode and a few thousand pixels, not megapixels. */
 #define SAMPLE_W  200
 #define HUE_BINS  36
+
+/* A video wallpaper has no single frame to sample: a clip that opens on a dark
+ * sky and ends in daylight would derive a different theme depending on which
+ * still we grabbed. Take a few frames spread through the clip and pour them all
+ * into one histogram, so the theme follows the piece rather than a moment. */
+#define VIDEO_SAMPLE_FRAMES 3
 
 /* The built-in dark scheme — also the base the wallpaper tint moves away
  * from, so "wallpaper" mode stays recognisably fwm. */
@@ -116,32 +124,24 @@ struct HueBin {
     double sum_s, sum_v;
 };
 
-static int sample_wallpaper(const char *path, struct Sampled *out) {
-    GError *err = NULL;
-    GdkPixbuf *pb = gdk_pixbuf_new_from_file_at_scale(path, SAMPLE_W, -1, TRUE, &err);
-    if (!pb) {
-        if (err) g_error_free(err);
-        return 0;
-    }
-
-    int w = gdk_pixbuf_get_width(pb);
-    int h = gdk_pixbuf_get_height(pb);
-    int nch = gdk_pixbuf_get_n_channels(pb);
-    int stride = gdk_pixbuf_get_rowstride(pb);
-    int has_alpha = gdk_pixbuf_get_has_alpha(pb);
-    const guchar *pix = gdk_pixbuf_get_pixels(pb);
-
+/* Histogram in progress: one image, or several frames of a video, poured in. */
+struct Accum {
     struct HueBin bins[HUE_BINS];
-    memset(bins, 0, sizeof(bins));
+    double cast_x, cast_y, cast_s, cast_w;
+    long   cast_n;
+};
 
-    double cast_x = 0, cast_y = 0, cast_s = 0, cast_w = 0;
-    long cast_n = 0;
-
+/* One image's worth of pixels, given as byte offsets within a pixel so both
+ * gdk-pixbuf's RGB(A) and cairo's native-endian BGRA feed the same code.
+ * `ao` is the alpha offset, or -1 when the buffer is opaque. */
+static void accum_pixels(struct Accum *a, const unsigned char *pix,
+                         int w, int h, int nch, int stride,
+                         int ro, int go, int bo, int ao) {
     for (int y = 0; y < h; y++) {
-        const guchar *s = pix + (size_t)y * stride;
+        const unsigned char *s = pix + (size_t)y * stride;
         for (int x = 0; x < w; x++, s += nch) {
-            if (has_alpha && s[3] < 128) continue;
-            double rgb[3] = { s[0] / 255.0, s[1] / 255.0, s[2] / 255.0 };
+            if (ao >= 0 && s[ao] < 128) continue;
+            double rgb[3] = { s[ro] / 255.0, s[go] / 255.0, s[bo] / 255.0 };
             double hh, ss, vv;
             rgb_to_hsv(rgb, &hh, &ss, &vv);
 
@@ -153,11 +153,11 @@ static int sample_wallpaper(const char *path, struct Sampled *out) {
             if (ss > 0.08 && vv > 0.06) {
                 double rad = hh * M_PI / 180.0;
                 double wgt = ss;
-                cast_x += cos(rad) * wgt;
-                cast_y += sin(rad) * wgt;
-                cast_s += ss * wgt;
-                cast_w += wgt;
-                cast_n++;
+                a->cast_x += cos(rad) * wgt;
+                a->cast_y += sin(rad) * wgt;
+                a->cast_s += ss * wgt;
+                a->cast_w += wgt;
+                a->cast_n++;
             }
 
             /* Accent candidates: skip greys, near-blacks and blown highlights —
@@ -168,14 +168,77 @@ static int sample_wallpaper(const char *path, struct Sampled *out) {
             if (bin >= HUE_BINS) bin = HUE_BINS - 1;
             double wgt = ss * ss * vv; /* saturation dominates: vivid beats merely present */
             double rad = hh * M_PI / 180.0;
-            bins[bin].weight += wgt;
-            bins[bin].sx += cos(rad) * wgt;
-            bins[bin].sy += sin(rad) * wgt;
-            bins[bin].sum_s += ss * wgt;
-            bins[bin].sum_v += vv * wgt;
+            a->bins[bin].weight += wgt;
+            a->bins[bin].sx += cos(rad) * wgt;
+            a->bins[bin].sy += sin(rad) * wgt;
+            a->bins[bin].sum_s += ss * wgt;
+            a->bins[bin].sum_v += vv * wgt;
         }
     }
-    g_object_unref(pb);
+}
+
+/* Kept in step with is_video_layer() in src/wallpaper.c. */
+static int path_is_video(const char *path) {
+    const char *dot = strrchr(path, '.');
+    if (!dot) return 0;
+    static const char *ext[] = { "mp4", "mkv", "webm", "mov", "m4v", "avi", NULL };
+    for (int i = 0; ext[i]; i++)
+        if (g_ascii_strcasecmp(dot + 1, ext[i]) == 0) return 1;
+    return 0;
+}
+
+/* Frames spread through a video wallpaper. Returns the number accumulated. */
+static int accum_video(struct Accum *a, const char *path) {
+    int got = 0;
+    for (int i = 0; i < VIDEO_SAMPLE_FRAMES; i++) {
+        double frac = (i + 1.0) / (VIDEO_SAMPLE_FRAMES + 1.0);
+        cairo_surface_t *surf = video_still_at(path, SAMPLE_W, SAMPLE_W, frac);
+        if (!surf) continue;
+        cairo_surface_flush(surf);
+        const unsigned char *pix = cairo_image_surface_get_data(surf);
+        if (pix) {
+            /* CAIRO_FORMAT_ARGB32 is a native-endian 32-bit word, so on
+             * little-endian the bytes land B, G, R, A. Video frames are opaque,
+             * and premultiplication by alpha 255 is the identity. */
+            accum_pixels(a, pix, cairo_image_surface_get_width(surf),
+                         cairo_image_surface_get_height(surf), 4,
+                         cairo_image_surface_get_stride(surf), 2, 1, 0, -1);
+            got++;
+        }
+        cairo_surface_destroy(surf);
+    }
+    return got;
+}
+
+static int sample_wallpaper(const char *path, struct Sampled *out) {
+    struct Accum acc;
+    memset(&acc, 0, sizeof(acc));
+
+    if (path_is_video(path)) {
+        if (accum_video(&acc, path) == 0) return 0;
+    } else {
+        GError *err = NULL;
+        GdkPixbuf *pb = gdk_pixbuf_new_from_file_at_scale(path, SAMPLE_W, -1, TRUE, &err);
+        if (!pb) {
+            if (err) g_error_free(err);
+            /* A video with an unfamiliar extension still decodes; better to try
+             * than to tell the user their wallpaper has no colour in it. */
+            if (accum_video(&acc, path) == 0) return 0;
+        } else {
+            int has_alpha = gdk_pixbuf_get_has_alpha(pb);
+            accum_pixels(&acc, gdk_pixbuf_get_pixels(pb),
+                         gdk_pixbuf_get_width(pb), gdk_pixbuf_get_height(pb),
+                         gdk_pixbuf_get_n_channels(pb),
+                         gdk_pixbuf_get_rowstride(pb),
+                         0, 1, 2, has_alpha ? 3 : -1);
+            g_object_unref(pb);
+        }
+    }
+
+    struct HueBin *bins = acc.bins;
+    double cast_x = acc.cast_x, cast_y = acc.cast_y;
+    double cast_s = acc.cast_s, cast_w = acc.cast_w;
+    long cast_n = acc.cast_n;
 
     if (cast_n == 0) return 0; /* fully greyscale image: nothing to derive */
 
