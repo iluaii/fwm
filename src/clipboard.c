@@ -309,6 +309,30 @@ static bool source_offers(struct wlr_data_source *source, const char *mime) {
     return false;
 }
 
+/* Is what was copied a PICTURE that happens to come with some text beside it?
+ *
+ * Chat clients and browsers offer both for one copy — an emoji, an image out
+ * of a page — where the image is the thing and the text is a URL or a name for
+ * it. Two reasons not to touch those.
+ *
+ * The honest one: keeping that text is keeping the wrong half. The window dies
+ * and the paste that used to be a picture silently turns into a link, which is
+ * worse than the empty clipboard this feature exists to prevent.
+ *
+ * The one that was actually costing something: reading it means asking the
+ * client for its bytes the instant it copies, and a client that is asked for
+ * one flavour while it is still arranging the other does not always answer the
+ * second request. The selection then advertises image/png and hands over
+ * nothing at all — copy in a chat client, paste anywhere, get an empty
+ * clipboard, and every copy after it looks broken too because the paste that
+ * failed was never the one just made. Not asking is the whole fix. */
+static bool source_is_a_picture(struct wlr_data_source *source) {
+    char **m;
+    wl_array_for_each(m, &source->mime_types)
+        if (strncmp(*m, "image/", 6) == 0) return true;
+    return false;
+}
+
 /* Put the kept text back on the seat, under every name it goes by. */
 static void restore(FwmClipboard *cb) {
     unsigned char *copy = malloc(cb->saved_len);
@@ -337,10 +361,12 @@ static void handle_set_selection(struct wl_listener *listener, void *data) {
         read_cancel(cb);
         saved_drop(cb);
 
-        for (int i = 0; i < TEXT_MIME_COUNT; i++) {
-            if (!source_offers(source, TEXT_MIMES[i])) continue;
-            read_start(cb, source, TEXT_MIMES[i]);
-            break;
+        if (!source_is_a_picture(source)) {
+            for (int i = 0; i < TEXT_MIME_COUNT; i++) {
+                if (!source_offers(source, TEXT_MIMES[i])) continue;
+                read_start(cb, source, TEXT_MIMES[i]);
+                break;
+            }
         }
         /* No text on offer (an image, a file drag): nothing kept, and the
          * selection behaves as it always did. */
