@@ -14,6 +14,7 @@
 
 
 #include "view_internal.h"
+#include "rubber.h"
 #include "server.h"
 #include "physics.h"
 #include "shadow.h"
@@ -26,6 +27,7 @@
 #include <time.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/render/pass.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/render/wlr_texture.h>
@@ -256,6 +258,8 @@ void view_set_content_enabled(FwmView *view, bool enabled) {
         if (view->spin_buf && node == &view->spin_buf->node) ours = true;
         if (view->jelly_buf && node == &view->jelly_buf->node) ours = true;
         if (view->rub_buf && node == &view->rub_buf->node) ours = true;
+        for (int i = 0; i < 3; i++)
+            if (view->rub_fill[i] && node == &view->rub_fill[i]->node) ours = true;
         /* The shadow is nine nodes of ours whose state belongs to the sun and
          * not to this call: half of them are deliberately dark at any moment,
          * and switching the lot back on would paint the whole image where a
@@ -313,6 +317,39 @@ static struct wlr_buffer *view_rubber_source(FwmView *view, int *live) {
     return view_snapshot_content(view);
 }
 
+/* Lay the picture, and whatever edge fill the box needs, into the box the hand
+ * is asking for. Called for every size the drag passes through.
+ *
+ * All of the arithmetic is in rubber.c, which knows nothing about the scene
+ * graph so that it can be tested without a compositor; this is the half that
+ * puts the answer into nodes. */
+static void rubber_layout(FwmView *view, int w, int h) {
+    if (!view->rub_buf) return;
+
+    RubberPart part[RUBBER_PARTS];
+    rubber_parts(view->rub_w, view->rub_h, view->rub_bw, view->rub_bh,
+                 w, h, part);
+    if (!part[RUBBER_PICTURE].on) return;   /* nothing sane to draw */
+
+    struct wlr_scene_buffer *node[RUBBER_PARTS] = {
+        view->rub_buf,
+        view->rub_fill[0], view->rub_fill[1], view->rub_fill[2],
+    };
+    for (int i = 0; i < RUBBER_PARTS; i++) {
+        struct wlr_scene_buffer *b = node[i];
+        if (!b) continue;
+        if (!part[i].on) {
+            wlr_scene_node_set_enabled(&b->node, false);
+            continue;
+        }
+        struct wlr_fbox src = { part[i].sx, part[i].sy, part[i].sw, part[i].sh };
+        wlr_scene_buffer_set_source_box(b, &src);
+        wlr_scene_buffer_set_dest_size(b, part[i].w, part[i].h);
+        wlr_scene_node_set_position(&b->node, part[i].x, part[i].y);
+        wlr_scene_node_set_enabled(&b->node, true);
+    }
+}
+
 bool view_rubber_begin(FwmView *view) {
     /* A fresh grab cancels whatever the last one was still settling. */
     view->rs_t = 0.0;
@@ -336,6 +373,12 @@ bool view_rubber_begin(FwmView *view) {
     struct wlr_buffer *src = view_rubber_source(view, &live);
     if (!src) return false;
 
+    /* The picture's size in its own pixels, read while we still plainly hold
+     * the buffer. It is not w x h on a scaled output, and it is what every
+     * source box below is measured in. */
+    view->rub_bw = src->width;
+    view->rub_bh = src->height;
+
     view->rub_buf = wlr_scene_buffer_create(view->scene_tree, src);
     if (!view->rub_buf) {
         if (!live) wlr_buffer_drop(src);
@@ -349,18 +392,53 @@ bool view_rubber_begin(FwmView *view) {
         wlr_buffer_drop(src);
     }
     view->rub_live = live;
-    view->rub_w = w;
-    view->rub_h = h;
+    /* What the picture SPANS, in layout pixels, which the two ways of taking
+     * it answer differently. The client's own buffer is the window and nothing
+     * else — view_rubber_source only takes that path once it has checked so —
+     * and it spans the box the client committed. A composited one is drawn
+     * into a buffer of the view's size at scale 1, so it spans that instead.
+     * Getting this wrong does not show as a wrong size: everything is drawn
+     * 1:1 from here on, and it would show as the fill sampling a column of the
+     * picture that is not its edge. */
+    view->rub_w = live ? w : view->width;
+    view->rub_h = live ? h : view->height;
     view->rub_frame_t = 0.0;
     view_log_effect_path(view, "resize rubber", live);
 
     /* Under the borders, like the squash: the frame still outlines the window,
-     * and here it outlines the box being ASKED for (view_border_box). */
+     * and here it outlines the box being ASKED for (view_border_box).
+     *
+     * No input region is set on any of these: the pointer is held by the
+     * resize for as long as they exist, so there is nothing for a picture to
+     * accept. */
     wlr_scene_node_lower_to_bottom(&view->rub_buf->node);
     view->rub_buf->node.data = view;
-    /* The pointer is held by the resize for as long as this exists, so there is
-     * nothing for the picture to accept. */
-    wlr_scene_buffer_set_dest_size(view->rub_buf, view->width, view->height);
+    /* Nearest, on all four nodes, and it is not an aesthetic choice.
+     *
+     * The picture is drawn 1:1, where the two filters agree. The fill is a
+     * SINGLE row or column blown out to cover the gap, and a source box does
+     * not clamp the sampler: bilinear reaches past it into the neighbouring
+     * texels, so the band came out as a gradient running from the colour
+     * beside the edge to the edge itself — a smear, which is the one thing
+     * this effect is not allowed to produce. Nearest gives the edge exactly,
+     * flat across the whole band. */
+    wlr_scene_buffer_set_filter_mode(view->rub_buf, WLR_SCALE_FILTER_NEAREST);
+
+    /* The edge fill, made now and left switched off: a drag that only ever
+     * shrinks the window never shows it, and one that grows must not be
+     * allocating scene nodes while the hand is moving. Each shares the same
+     * picture — a scene buffer takes its own reference — so this costs three
+     * nodes and no pixels. */
+    for (int i = 0; i < 3; i++) {
+        view->rub_fill[i] = wlr_scene_buffer_create(view->scene_tree, src);
+        if (!view->rub_fill[i]) continue;
+        wlr_scene_node_lower_to_bottom(&view->rub_fill[i]->node);
+        view->rub_fill[i]->node.data = view;
+        wlr_scene_buffer_set_filter_mode(view->rub_fill[i], WLR_SCALE_FILTER_NEAREST);
+        wlr_scene_node_set_enabled(&view->rub_fill[i]->node, false);
+    }
+
+    rubber_layout(view, view->width, view->height);
     view_set_content_enabled(view, false);
     view_update_border_geometry(view);
     return true;
@@ -368,7 +446,7 @@ bool view_rubber_begin(FwmView *view) {
 
 void view_rubber_to(FwmView *view, int w, int h) {
     if (!view->rub_buf || w <= 0 || h <= 0) return;
-    wlr_scene_buffer_set_dest_size(view->rub_buf, w, h);
+    rubber_layout(view, w, h);
     view_update_border_geometry(view);
 }
 
@@ -462,6 +540,11 @@ void view_rubber_tick(FwmView *view, double dt) {
 
 void view_rubber_end(FwmView *view) {
     if (!view->rub_buf) return;
+    for (int i = 0; i < 3; i++) {
+        if (!view->rub_fill[i]) continue;
+        wlr_scene_node_destroy(&view->rub_fill[i]->node);
+        view->rub_fill[i] = NULL;
+    }
     wlr_scene_node_destroy(&view->rub_buf->node);
     view->rub_buf = NULL;
     if (view->rub_lock) {
@@ -470,6 +553,7 @@ void view_rubber_end(FwmView *view) {
     }
     view->rub_live = 0;
     view->rub_w = view->rub_h = 0;
+    view->rub_bw = view->rub_bh = 0;
     view_set_content_enabled(view, true);
     view_update_border_geometry(view);   /* back to the client's own box */
 }

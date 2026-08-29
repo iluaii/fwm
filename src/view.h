@@ -240,24 +240,46 @@ typedef struct FwmView {
      * A resize is a conversation — we ask, the client redraws, and only then is
      * there a picture of the new size. So the window moves in the client's
      * steps, not the hand's: a terminal jumps a whole character cell at a time
-     * and everything lags a frame or three behind the cursor. Stretching the
-     * picture we already have to the box being asked for hides all of it; the
-     * client's real content arrives underneath and takes over at the release.
-     * It is the same trade every compositor that feels smooth here makes — the
-     * content is slightly scaled for as long as the drag lasts.
+     * and everything lags a frame or three behind the cursor. The picture we
+     * already have covers the box being asked for in the meantime, and the
+     * client's real content takes over at the release.
+     *
+     * It is NEVER SCALED. Stretching it into the box is the obvious way and
+     * the wrong one: at a few percent nobody notices, but squeeze a window to
+     * its minimum and pull it out to the full screen and the same picture is
+     * being magnified tenfold — a cursor as wide as a finger and text that has
+     * melted. So the picture is drawn at 1:1 and the box is satisfied at its
+     * edges instead:
+     *
+     *   smaller than the picture — the picture is CROPPED to the box.
+     *   larger — the picture sits at its own size and the strip left over is
+     *            filled by the edge pixels beside it, stretched along one axis
+     *            only (rub_fill). A column of pixels drawn 300px wide is one
+     *            flat band, not a blur, because there is nothing across it to
+     *            blur — which is what a window that has grown and not yet
+     *            redrawn honestly looks like.
      *
      * The picture is taken once, at the grab, and held for the whole drag. The
      * client's newer frames are deliberately not swapped in: each answer it
-     * sends is a different size, so a picture kept up to date was being
-     * squeezed a few percent one way and then the other several times a second
-     * on top of the stretch, and the window shuddered. `rub_live` marks the
-     * cheap way of taking it — a single-surface window is stretched straight
-     * from the client's own buffer and nothing is copied at all; anything with
-     * a subsurface or an open menu is composited into `rub_lock` instead. */
+     * sends is a different size, and a picture kept up to date jumped between
+     * them several times a second. Held still and never scaled, it cannot
+     * shimmer at all. `rub_live` marks the cheap way of taking it — a
+     * single-surface window is drawn straight from the client's own buffer and
+     * nothing is copied; anything with a subsurface or an open menu is
+     * composited into `rub_lock` instead. */
     struct wlr_scene_buffer *rub_buf;
     struct wlr_buffer *rub_lock;      /* the composited picture, when copied */
     int rub_live;                     /* the client's own buffer, no copy */
-    int rub_w, rub_h;                 /* size the picture holds */
+    int rub_w, rub_h;                 /* size the picture holds, layout px */
+    /* ...and in BUFFER px, which is not the same on a scaled output. Kept
+     * rather than read back off the buffer, because for a live source the
+     * view's `last_buffer` moves on with the client while the scene node keeps
+     * showing the one it was handed. */
+    int rub_bw, rub_bh;
+    /* Edge fill for a box bigger than the picture: right, bottom, corner.
+     * Created with the picture and left switched off until the box outgrows
+     * it, so a drag allocates nothing. */
+    struct wlr_scene_buffer *rub_fill[3];
     double rub_frame_t;               /* since the last frame callback, s */
     /* The moment after the hand comes off. The client is still answering the
      * last size it was asked for, and every answer changes the window — so the

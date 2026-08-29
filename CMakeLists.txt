@@ -146,6 +146,7 @@ set(SOURCES
     src/foreign.c
     src/workspace.c
     src/urgent.c
+    src/rubber.c
     src/shortcuts.c
     src/sandbox.c
     src/group.c
@@ -374,6 +375,12 @@ if(FWM_TESTS)
     target_include_directories(test_seam PRIVATE src tests)
     target_link_libraries(test_seam PRIVATE m)
 
+    # The resize rubber's geometry. Split out of view_effects.c for exactly
+    # this: the effect only runs under a hand on a window edge, and there is no
+    # pointer here to put one there.
+    add_executable(test_rubber tests/test_rubber.c src/rubber.c)
+    target_include_directories(test_rubber PRIVATE src tests)
+
     # Where the sun is, which is a question about the hour of the day: half of
     # what it does only happens at dusk, and none of it can be watched on
     # demand. sun.c reaches no further than config.h's types, so the day is
@@ -434,6 +441,7 @@ if(FWM_TESTS)
     add_test(NAME droplet    COMMAND test_droplet)
     add_test(NAME gestures   COMMAND test_gestures)
     add_test(NAME seam       COMMAND test_seam)
+    add_test(NAME rubber     COMMAND test_rubber)
     add_test(NAME sun        COMMAND test_sun)
     add_test(NAME star       COMMAND test_star)
     add_test(NAME ram        COMMAND test_ram)

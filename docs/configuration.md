@@ -683,10 +683,18 @@ shot_fly     = 1.0   # region screenshot peels off and flies away; 0 disables
 client's to decide: the compositor asks, the client redraws, and only then is
 there a picture of the new size — in whatever unit that client works in, a whole
 character cell at a time for a terminal, always a frame or three behind the
-hand. With `rubber` on, the window is drawn at the size you are *asking* for,
-stretched from the frame the client has already given us, and the real content
-takes over the moment you let go. The picture is frozen and scaled for as long
-as the drag lasts; that is the whole cost, and it is why `0` is there.
+hand. With `rubber` on, the window occupies the box you are *asking* for from
+the first frame, using the picture the client has already given us, and the real
+content takes over the moment you let go.
+
+That picture is never scaled. Ask for less than it and it is cropped; ask for
+more and it stays its own size while the strip left over is filled by the
+pixels along its edge. So a window pulled from its minimum out to the whole
+screen is a sharp small window with a band of its own edge colour around it —
+which is honestly what a window that has not redrawn yet looks like — instead
+of one frame magnified tenfold into mush. Frozen for the length of the drag and
+drawn 1:1, it cannot shimmer, blur or crawl; the cost is that what you see
+during the drag is one frame old, and that is why `0` is there.
 
 `shot_fly` is the one effect that is not about windows: when `screenshot_region`
 takes its picture, a frozen copy of the region lifts off the screen, shrinks,
