@@ -95,6 +95,13 @@ typedef struct FwmView {
      * commit, cursor blink included. */
     int aligned_w, aligned_h;
 
+    /* The serial of the last configure we sent an xdg client, so that a
+     * commit can be told from an ANSWER to it: xdg_surface carries the serial
+     * the client acked, and a commit whose serial is older than this one is a
+     * frame that was already on its way. Zero for X11, which has no such
+     * handshake. See rs_serial for the one place it decides anything. */
+    uint32_t cfg_serial;
+
     /* The smallest this window has been seen to accept, learned from the sizes
      * it commits against the sizes it is offered (see tile_actuals). The tiling
      * layout keeps this much room for it; 0 until it refuses something.
@@ -278,18 +285,41 @@ typedef struct FwmView {
     int rub_bw, rub_bh;
     /* Edge fill for a box bigger than the picture: right, bottom, corner.
      * Created with the picture and left switched off until the box outgrows
-     * it, so a drag allocates nothing. */
+     * it, so a drag allocates nothing while the hand is moving.
+     *
+     * Each draws its own little buffer — the picture's last column, its last
+     * row, its corner pixel, cut out at the grab — rather than sampling a
+     * strip of the picture through a source box. The scene does not keep the
+     * sampler inside such a strip when it is drawn many times its own size:
+     * the band came out solid for its first stretch and then bled into what
+     * lies past the row. A texture that IS the row leaves nowhere to bleed
+     * from. Three buffers of a few hundred bytes, made once per grab. */
     struct wlr_scene_buffer *rub_fill[3];
+    struct wlr_buffer *rub_edge[3];
     double rub_frame_t;               /* since the last frame callback, s */
     /* The moment after the hand comes off. The client is still answering the
      * last size it was asked for, and every answer changes the window — so the
      * edges that were NOT being dragged are held where the grab left them
      * until it stops, and the stretched picture stays up until the client's
      * next frame rather than snapping to a size it has already left behind.
-     * `rs_x1`/`rs_y1` are where the held right and bottom edges stand. */
+     * `rs_x1`/`rs_y1` are where the held right and bottom edges stand.
+     *
+     * What ends the wait is THE ANSWER TO THE LAST CONFIGURE, named by its
+     * serial (`rs_serial`), and not merely the next frame the client draws.
+     * That distinction is the jerk this used to end on: a client mid-resize
+     * has frames in flight for sizes the hand left behind, and a damage-only
+     * commit — a terminal's cursor blinking — is a frame too. Taking one of
+     * those for the answer adopted a stale size, and the real answer then
+     * arrived through the ordinary commit path, where nothing is pinning the
+     * far edge any more: the window changed size once more and the edge
+     * nobody had touched moved with it. `rs_w`/`rs_h` is the same question
+     * for an X11 window, which has no serial to ask it with. */
     int rub_settling;
     int rs_pin_r, rs_pin_b;
     int rs_x1, rs_y1;
+    uint32_t rs_serial;               /* configure the answer must carry */
+    int rs_w, rs_h;                   /* ...or, for X11, the size it must be */
+    int rs_cw, rs_ch;                 /* ...measured against the size at release */
     double rs_t;                      /* grace left, s; 0 = nothing pending */
 
     /* Wobble ("jelly") while a window is dragged: KDE's effect, a sheet of

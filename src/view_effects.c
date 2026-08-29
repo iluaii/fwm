@@ -317,6 +317,29 @@ static struct wlr_buffer *view_rubber_source(FwmView *view, int *live) {
     return view_snapshot_content(view);
 }
 
+/* Cut the picture's last column, last row and corner pixel out into buffers of
+ * their own. Best-effort: what cannot be made is simply not drawn. */
+static void rubber_build_edges(FwmView *view, struct wlr_buffer *src) {
+    FwmServer *server = view->server;
+    int bw = view->rub_bw, bh = view->rub_bh;
+    if (bw <= 0 || bh <= 0) return;
+
+    /* The client's own buffer already has a texture — wlroots imported it when
+     * the client committed — and importing a dmabuf again costs about as much
+     * as the pass that follows. Borrow it, exactly as snapshot.c does. */
+    struct wlr_texture *cached = view->rub_live
+        ? wlr_surface_get_texture(view_surface(view)) : NULL;
+    struct wlr_texture *tex = cached
+        ? cached : wlr_texture_from_buffer(server->wlr_renderer, src);
+    if (!tex) return;
+
+    view->rub_edge[0] = snapshot_rect(server, tex, bw - 1, 0, 1, bh);
+    view->rub_edge[1] = snapshot_rect(server, tex, 0, bh - 1, bw, 1);
+    view->rub_edge[2] = snapshot_rect(server, tex, bw - 1, bh - 1, 1, 1);
+
+    if (!cached) wlr_texture_destroy(tex);
+}
+
 /* Lay the picture, and whatever edge fill the box needs, into the box the hand
  * is asking for. Called for every size the drag passes through.
  *
@@ -342,8 +365,28 @@ static void rubber_layout(FwmView *view, int w, int h) {
             wlr_scene_node_set_enabled(&b->node, false);
             continue;
         }
-        struct wlr_fbox src = { part[i].sx, part[i].sy, part[i].sw, part[i].sh };
-        wlr_scene_buffer_set_source_box(b, &src);
+        if (i == RUBBER_PICTURE) {
+            /* The crop. It never asks for less than a whole texel and never
+             * scales what it takes. */
+            struct wlr_fbox src = { part[i].sx, part[i].sy, part[i].sw, part[i].sh };
+            wlr_scene_buffer_set_source_box(b, &src);
+        } else if (view->rub_edge[i - 1]) {
+            /* The strip's own buffer IS the strip, so the only thing left to
+             * say is how much of it the box has room for — which is not all of
+             * it when the box is WIDER than the picture and SHORTER: the right
+             * fill then stands beside a cropped picture and must be cropped to
+             * the same height, or the column is squeezed into it and the band
+             * stops matching the edge it continues. Across the strip the box
+             * covers the whole texel and the sampler has nowhere else to go,
+             * which is the entire point of cutting these out (see view.h). */
+            struct wlr_buffer *eb = view->rub_edge[i - 1];
+            struct wlr_fbox src = {
+                0.0, 0.0,
+                i == RUBBER_BOTTOM ? part[i].sw : (double)eb->width,
+                i == RUBBER_RIGHT  ? part[i].sh : (double)eb->height,
+            };
+            wlr_scene_buffer_set_source_box(b, &src);
+        }
         wlr_scene_buffer_set_dest_size(b, part[i].w, part[i].h);
         wlr_scene_node_set_position(&b->node, part[i].x, part[i].y);
         wlr_scene_node_set_enabled(&b->node, true);
@@ -428,11 +471,14 @@ bool view_rubber_begin(FwmView *view) {
 
     /* The edge fill, made now and left switched off: a drag that only ever
      * shrinks the window never shows it, and one that grows must not be
-     * allocating scene nodes while the hand is moving. Each shares the same
-     * picture — a scene buffer takes its own reference — so this costs three
-     * nodes and no pixels. */
+     * allocating while the hand is moving. See the rub_edge comment in view.h
+     * for why each strip gets a buffer of its own instead of a source box into
+     * the picture. A failure here is not fatal — the window simply grows with
+     * the desktop showing through the strip, as it did before any of this. */
+    rubber_build_edges(view, src);
     for (int i = 0; i < 3; i++) {
-        view->rub_fill[i] = wlr_scene_buffer_create(view->scene_tree, src);
+        if (!view->rub_edge[i]) continue;
+        view->rub_fill[i] = wlr_scene_buffer_create(view->scene_tree, view->rub_edge[i]);
         if (!view->rub_fill[i]) continue;
         wlr_scene_node_lower_to_bottom(&view->rub_fill[i]->node);
         view->rub_fill[i]->node.data = view;
@@ -487,18 +533,63 @@ static void view_resize_adopt(FwmView *view) {
     if (view->scene_tree) server_place_view(server, view, view->x, view->y);
 }
 
+/* Has the client answered the last size it was asked for?
+ *
+ * An xdg client says so itself: it acks the configure it is drawing for, and
+ * the serial it acked comes back on the surface's committed state. Anything
+ * older than the one we sent last is a frame that was already in flight for a
+ * size the hand has left behind — including a commit that redraws nothing but
+ * a blinking cursor, which is a frame like any other and used to end the wait.
+ *
+ * X11 has no such handshake, so the question is asked of the size instead: the
+ * window has answered when it IS the size we asked for, or when it has at
+ * least stopped being the size it was at the release. A client whose units do
+ * not divide the request — xterm, in whole character cells — never satisfies
+ * the first and always satisfies the second. */
+static bool view_resize_answered(FwmView *view) {
+    int cw, ch;
+    view_committed_size(view, &cw, &ch);
+    /* Already the size we asked for. Asked first and without waiting for a
+     * frame, because a client that kept up with the drag has nothing left to
+     * draw: there may be no commit coming at all, and the point of consulting
+     * the serial is to catch frames that arrive EARLY, not to make a window
+     * that is already right sit out a third of a second. */
+    if (cw == view->rs_w && ch == view->rs_h) return true;
+
+    /* Otherwise the client is redrawing, and the answer arrives as a frame. */
+    if (!view->content_dirty) return false;
+
+    if (view->type == FWM_VIEW_XDG) {
+        if (!view->xdg_toplevel || !view->rs_serial) return true;
+        uint32_t acked = view->xdg_toplevel->base->current.configure_serial;
+        return (int32_t)(acked - view->rs_serial) >= 0;
+    }
+    /* An X11 window has answered when it has at least stopped being the size
+     * it was at the release. */
+    return cw != view->rs_cw || ch != view->rs_ch;
+}
+
 void view_resize_settle(FwmView *view, int pin_r, int pin_b, int x1, int y1) {
     view->rs_pin_r = pin_r;
     view->rs_pin_b = pin_b;
     view->rs_x1 = x1;
     view->rs_y1 = y1;
+    /* What the answer will look like when it comes: the configure the client
+     * must ack, and — for an X11 window, which acks nothing — the size that
+     * configure asked for. */
+    view->rs_serial = view->cfg_serial;
+    view->rs_w = view->width;
+    view->rs_h = view->height;
     /* Long enough for a client to answer one configure, short enough that a
      * client which never answers is not left frozen. */
     view->rs_t = 0.35;
     view->rub_settling = view->rub_buf != NULL;
-    /* The next frame the client draws is its answer to the last size it was
-     * asked for, and that is the moment to hand the window back. */
+    /* Frames from here on are candidates for the answer; what came before the
+     * release was drawn for a size the hand has already left. */
     view->content_dirty = 0;
+    /* The size at the release, so the X11 test above can tell a window that
+     * has moved from one that has not. */
+    view_committed_size(view, &view->rs_cw, &view->rs_ch);
 }
 
 void view_rubber_tick(FwmView *view, double dt) {
@@ -518,16 +609,18 @@ void view_rubber_tick(FwmView *view, double dt) {
             view->rs_t = 0.0;
             view->rub_settling = 0;
             view->rs_pin_r = view->rs_pin_b = 0;
+            view->rs_serial = 0;
             view_rubber_end(view);
             return;
         }
         view->rs_t -= dt;
-        if (view->rs_t <= 0.0 || view->content_dirty) {
+        if (view->rs_t <= 0.0 || view_resize_answered(view)) {
             view->rs_t = 0.0;
             view->rub_settling = 0;
             view_rubber_end(view);       /* no-op when there was no rubber */
             view_resize_adopt(view);
             view->rs_pin_r = view->rs_pin_b = 0;
+            view->rs_serial = 0;
             return;
         }
     }
@@ -563,9 +656,14 @@ void view_rubber_tick(FwmView *view, double dt) {
 void view_rubber_end(FwmView *view) {
     if (!view->rub_buf) return;
     for (int i = 0; i < 3; i++) {
-        if (!view->rub_fill[i]) continue;
-        wlr_scene_node_destroy(&view->rub_fill[i]->node);
-        view->rub_fill[i] = NULL;
+        if (view->rub_fill[i]) {
+            wlr_scene_node_destroy(&view->rub_fill[i]->node);
+            view->rub_fill[i] = NULL;
+        }
+        if (view->rub_edge[i]) {
+            wlr_buffer_drop(view->rub_edge[i]);
+            view->rub_edge[i] = NULL;
+        }
     }
     wlr_scene_node_destroy(&view->rub_buf->node);
     view->rub_buf = NULL;

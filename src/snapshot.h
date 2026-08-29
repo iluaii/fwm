@@ -20,6 +20,7 @@
 struct FwmServer;
 struct FwmOutput;
 struct wlr_buffer;
+struct wlr_texture;
 struct wlr_scene_node;
 
 /* Photographing a piece of the scene graph into a buffer of our own.
@@ -61,6 +62,19 @@ bool snapshot_subtree(struct FwmServer *server, struct wlr_buffer *dst,
  * is why the first version of this came out black behind the windows. */
 bool snapshot_world(struct FwmServer *server, struct FwmOutput *out,
                     struct wlr_buffer *dst);
+
+/* One rectangle of `tex`, copied into a buffer of its own at 1:1 and with no
+ * filtering. The caller owns the reference that comes back; NULL if the
+ * allocator or the pass would not serve it.
+ *
+ * For the resize rubber's edge fill, and the reason it exists rather than the
+ * scene's own source box: a scene buffer told to sample a one-texel strip and
+ * draw it two hundred pixels tall did not stay inside that strip — the band
+ * came out solid for the first stretch and then bled into whatever lies past
+ * the row. Cutting the strip out into a texture that IS the strip leaves the
+ * sampler nowhere else to go, whatever it does with the coordinates. */
+struct wlr_buffer *snapshot_rect(struct FwmServer *server, struct wlr_texture *tex,
+                                 int sx, int sy, int w, int h);
 
 /* One WINDOW onto the desktop, at layout position (lx, ly), the size of `dst`:
  * wallpaper first, then everything the scene graph draws over it.

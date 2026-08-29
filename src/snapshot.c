@@ -107,6 +107,44 @@ struct wlr_buffer *snapshot_alloc(FwmServer *server, int w, int h) {
     return buf;
 }
 
+struct wlr_buffer *snapshot_rect(FwmServer *server, struct wlr_texture *tex,
+                                 int sx, int sy, int w, int h) {
+    if (!server->wlr_renderer || !tex || w <= 0 || h <= 0) return NULL;
+    /* Held inside the texture. The caller measures the strip off a picture it
+     * believes is the window's size, and a client whose buffer is a pixel
+     * short of that would otherwise have the pass sample past its own edge —
+     * where the copy is exact only because nothing is scaled, so there is
+     * nothing to clamp it. */
+    if (w > (int)tex->width)  w = (int)tex->width;
+    if (h > (int)tex->height) h = (int)tex->height;
+    if (sx > (int)tex->width  - w) sx = (int)tex->width  - w;
+    if (sy > (int)tex->height - h) sy = (int)tex->height - h;
+    if (sx < 0) sx = 0;
+    if (sy < 0) sy = 0;
+
+    struct wlr_buffer *dst = snapshot_alloc(server, w, h);
+    if (!dst) return NULL;
+
+    struct wlr_render_pass *pass =
+        wlr_renderer_begin_buffer_pass(server->wlr_renderer, dst, NULL);
+    if (!pass) { wlr_buffer_drop(dst); return NULL; }
+
+    /* Source and destination are the same size, so nothing is scaled and the
+     * copy is exact — NEAREST and BILINEAR agree at 1:1, and NEAREST says so.
+     * NONE rather than a blend: this is a copy, and the buffer the allocator
+     * handed back holds whatever it held before. */
+    wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
+        .texture = tex,
+        .src_box = { .x = sx, .y = sy, .width = w, .height = h },
+        .dst_box = { .x = 0, .y = 0, .width = w, .height = h },
+        .filter_mode = WLR_SCALE_FILTER_NEAREST,
+        .blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+    });
+
+    if (!wlr_render_pass_submit(pass)) { wlr_buffer_drop(dst); return NULL; }
+    return dst;
+}
+
 bool snapshot_subtree(FwmServer *server, struct wlr_buffer *dst,
                       struct wlr_scene_node *node,
                       int origin_x, int origin_y, double scale) {

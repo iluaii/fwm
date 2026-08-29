@@ -44,6 +44,8 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+static bool view_box_is_the_slot(FwmView *view);
+
 static void handle_map(struct wl_listener *listener, void *data) {
     FwmView *view = wl_container_of(listener, view, map);
     view_map(view);
@@ -117,9 +119,17 @@ static void handle_commit(struct wl_listener *listener, void *data) {
         FwmInteractiveState *in = &view->server->interactive;
         bool held = in->action == FWM_ACTION_RESIZE && in->view == view;
         bool ours = pb && pb->fullscreen;
-        if (view->rub_buf) {
-            /* The rubber owns the drawn size — during the drag and for the
-             * moment after it, until the client has answered. */
+        if (view->rub_buf || view_box_is_the_slot(view)) {
+            /* Somebody else owns the drawn size. The rubber holds it at what
+             * the hand asked for; a divider under the hand holds it at the
+             * slot, which server_align_tiles has just written and will write
+             * again on the next motion event. Adopting the client's answer
+             * here made view->width alternate between the two several times a
+             * second — the slot on every event of the drag, the client's own
+             * quantised answer on every commit — and everything measured from
+             * it, the frame included, stepped back and forth with it. The
+             * rubber holds it for the moment AFTER the drag too, until the
+             * client has answered the last size it was asked for. */
         } else if (!ours && cw > 0 && ch > 0 && (cw != view->width || ch != view->height)) {
             if (held) {
                 if (in->resize_left)
@@ -192,7 +202,10 @@ const char *view_app_id(FwmView *view) {
 
 void view_set_size(FwmView *view, int width, int height) {
     if (view->type == FWM_VIEW_XDG) {
-        wlr_xdg_toplevel_set_size(view->xdg_toplevel, width, height);
+        /* The serial the client will ack when it has drawn this size. Kept so
+         * that the end of a resize can wait for the answer to THIS configure
+         * rather than for the next frame to arrive from any cause at all. */
+        view->cfg_serial = wlr_xdg_toplevel_set_size(view->xdg_toplevel, width, height);
     } else {
         /* X11 configure carries position too, and X clients read it as global
          * root coordinates — which are our SCREEN coordinates, not the world
