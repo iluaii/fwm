@@ -458,13 +458,33 @@ static void view_resize_adopt(FwmView *view) {
     int cw, ch;
     view_committed_size(view, &cw, &ch);
     if (cw <= 0 || ch <= 0) return;
+
+    /* Which column the window is in, asked BEFORE anything moves. Holding a
+     * far edge means measuring the near one back from it, and the client's
+     * answer is not bound by the clamps the drag applied to what we asked for
+     * — so a window that answers bigger than the room left walks its near edge
+     * out of the desktop, and the desktop is decided from the centre. */
+    FwmServer *server = view->server;
+    int sw = server->screen_width;
+    int col = sw > 0 ? server_desktop_at_x(server, view->x + view->width / 2.0) : 0;
+
     if (view->rs_pin_r) view->x = view->rs_x1 - cw;
     if (view->rs_pin_b) view->y = view->rs_y1 - ch;
     view->width = cw;
     view->height = ch;
-    physics_sync_body(&view->server->physics, view->id, view->x, view->y,
-                      cw, ch, view->server->screen_width);
-    if (view->scene_tree) server_place_view(view->server, view, view->x, view->y);
+
+    if (sw > 0) {
+        /* Keep the centre in the column it was already in. Not the whole
+         * window: one that overhangs its screen is an ordinary thing here, and
+         * it is the centre alone that names the desktop. */
+        double cx = view->x + cw / 2.0;
+        double lo = (double)col * sw, hi = lo + sw - 1;
+        if (cx < lo) view->x += (int)lround(lo - cx);
+        else if (cx > hi) view->x -= (int)lround(cx - hi);
+    }
+    physics_sync_body(&server->physics, view->id, view->x, view->y,
+                      cw, ch, sw);
+    if (view->scene_tree) server_place_view(server, view, view->x, view->y);
 }
 
 void view_resize_settle(FwmView *view, int pin_r, int pin_b, int x1, int y1) {

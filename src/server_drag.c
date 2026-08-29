@@ -790,6 +790,16 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
             view_committed_size(view, &cw, &ch);
             if (cw > 0) draw_w = cw;
             if (ch > 0) draw_h = ch;
+            /* The clamps above bound what we ASK for, and a client is free to
+             * answer with something bigger — a minimum it never declared. The
+             * position is measured back from the far edge using this size, so
+             * an unbounded answer walks the near edge out of the desktop
+             * altogether: drag the left edge fast on a window near the join
+             * and it crossed the column boundary, where the desktop is decided
+             * from the body's centre, and the window changed desktop under the
+             * hand and came back when the client caught up. */
+            if (draw_w > max_w) draw_w = max_w;
+            if (draw_h > max_h) draw_h = max_h;
         }
         int new_x = server->interactive.resize_left
                   ? server->interactive.view_start_x + start_w - draw_w
