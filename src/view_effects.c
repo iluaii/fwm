@@ -363,9 +363,11 @@ bool view_rubber_begin(FwmView *view) {
     if (view->spin_buf || view->jelly || view->squash_buf) return false;
 
     /* The size the picture actually holds — what the CLIENT last committed,
-     * not what we may already have asked it for. */
+     * not what we may already have asked it for. Asked of the committed size
+     * directly: view_border_box answers with the asked-for box whenever a hand
+     * is on the window, which is exactly when this runs. */
     int w, h;
-    view_border_box(view, &w, &h);
+    view_committed_size(view, &w, &h);
     if (w <= 0 || h <= 0) { w = view->width; h = view->height; }
     if (w <= 0 || h <= 0) return false;
 

@@ -263,15 +263,7 @@ void view_place_borders(FwmView *view, int x, int y, int w, int h) {
 }
 
 /* The window's own box, as committed. */
-void view_border_box(FwmView *view, int *w, int *h) {
-    /* While the rubber holds the window, the window IS the box being asked
-     * for: the picture is stretched to it, and a frame drawn around the size
-     * the client last committed would sit inside the window it outlines. */
-    if (view->rub_buf) {
-        *w = view->width;
-        *h = view->height;
-        return;
-    }
+void view_committed_size(FwmView *view, int *w, int *h) {
     if (view->type == FWM_VIEW_XDG) {
         *w = view->xdg_toplevel->base->current.geometry.width;
         *h = view->xdg_toplevel->base->current.geometry.height;
@@ -280,12 +272,48 @@ void view_border_box(FwmView *view, int *w, int *h) {
         *w = s ? s->current.width : 0;
         *h = s ? s->current.height : 0;
     }
+    /* Before the first commit there is nothing committed to report, and the
+     * size we asked for is the only answer anyone can act on. */
     if (*w <= 0) *w = view->width;
     if (*h <= 0) *h = view->height;
 }
 
-void view_committed_size(FwmView *view, int *w, int *h) {
-    view_border_box(view, w, h);
+/* Is a divider under the hand deciding this window's size right now?
+ *
+ * Asked of the drag rather than remembered on the view, so a window that
+ * leaves the tree mid-drag — closed, floated, thrown to another desktop —
+ * cannot be left carrying a stale yes. */
+static bool view_box_is_the_slot(FwmView *view) {
+    FwmServer *server = view->server;
+    if (server->interactive.action != FWM_ACTION_BSP_RESIZE) return false;
+    PhysicsBody *b = physics_find_body(&server->physics, view->id);
+    return b && b->tiled && b->desktop_id == server->interactive.bsp_desktop;
+}
+
+void view_border_box(FwmView *view, int *w, int *h) {
+    /* What to draw AROUND the window, which is not always the size the client
+     * has committed — and when the two differ it is the frame, the shadow and
+     * anything else outlining the window that must follow the box being ASKED
+     * for, or they draw the window's last answer instead of the window.
+     *
+     * Two cases where they differ, and both are a hand in motion:
+     *
+     *   the rubber, where the picture already covers the asked-for box;
+     *   a tiling divider being dragged, where the slot is decided continuously
+     *     and the client answers in its own units. A terminal answers in whole
+     *     character cells — some 20px vertically — so a frame following the
+     *     answer stands still and then jumps a cell, which is the drag itself
+     *     appearing to stutter even though the layout underneath is smooth.
+     *
+     * Deliberately NOT view_committed_size: that one stays honest, because the
+     * layout learns a window's floor from it (server_tiling.c) and a floor
+     * learned from what we asked for would be no floor at all. */
+    if (view->rub_buf || view_box_is_the_slot(view)) {
+        *w = view->width;
+        *h = view->height;
+        return;
+    }
+    view_committed_size(view, w, h);
 }
 
 /* The smallest size the client says it will accept, in the same units as

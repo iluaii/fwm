@@ -337,6 +337,14 @@ void server_align_tiles(FwmServer *server, int desktop) {
             view->width  = pb->width;
             view->height = pb->height;
             view_set_size(view, view->width, view->height);
+            /* The frame, now rather than when the client answers. It hugs the
+             * committed size at rest, but while a divider is under the hand
+             * view_border_box gives the SLOT — and this is the only place that
+             * knows the slot moved, since a client is asked for a size and
+             * only commits one when its own units allow it (a terminal, whole
+             * character cells). Without this the frame stood still through a
+             * smooth drag and then jumped a cell. */
+            view_update_border_geometry(view);
         }
         tile_move_to(server, view, pb, n->ax, n->ay + bar[i]);
     }
