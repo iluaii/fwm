@@ -1471,6 +1471,19 @@ static int physics_tick_cb(void *data) {
     uint32_t resize_win = ((server->interactive.action == FWM_ACTION_RESIZE ||
                             server->interactive.action == FWM_ACTION_TWIST) &&
                            server->interactive.view) ? server->interactive.view->id : 0;
+    if (!resize_win) {
+        /* The hand is off, but the window is not settled: the client is still
+         * answering the last size it was asked for, and until it does, the
+         * collision box is the one the DRAG asked for rather than the one the
+         * window will be (view_resize_adopt sets it right). A body shoved off
+         * a box that is about to change is a window that hops once at the
+         * release, for reasons nothing on screen can account for. Freeze it
+         * for the same reason and for the same length of time as the drag. */
+        FwmView *sv;
+        wl_list_for_each(sv, &server->views, link) {
+            if (sv->rs_t > 0.0) { resize_win = sv->id; break; }
+        }
+    }
 
     if (resize_win) {
         PhysicsBody *rb = physics_find_body(&server->physics, resize_win);

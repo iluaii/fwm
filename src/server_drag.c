@@ -844,6 +844,11 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
             server->interactive.bsp_node_v = NULL;
         if (!server->interactive.bsp_node && !server->interactive.bsp_node_v) {
             server->interactive.action = FWM_ACTION_NONE;
+            /* The gesture is over without a button ever coming up — the tree
+             * under it was freed by a window closing or the desktop leaving
+             * tiling. The pictures still have to be handed back, or the
+             * windows they stand in front of stay frozen for good. */
+            server_tile_rubber_settle(server);
             return true;
         }
 
@@ -1088,6 +1093,11 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
                                 server->interactive.bsp_start_ratio_v = vn ? vn->ratio : 0.5f;
                                 server->interactive.start_x = lx;
                                 server->interactive.start_y = ly;
+                                /* Every window this divider resizes is drawn
+                                 * at the size the layout asks for from here
+                                 * until the release, the same way a floating
+                                 * window is; the clients catch up behind. */
+                                server_tile_rubber_begin(server, hn, vn);
                             }
                         }
                     } else {
@@ -1323,5 +1333,14 @@ void server_drag_release(FwmServer *server, double lx, double ly) {
         server->interactive.bsp_node = NULL;
         server->interactive.bsp_node_v = NULL;
 
-        if (settle_d >= 0) server_apply_tiling(server, settle_d);
+        if (settle_d >= 0) {
+            server_apply_tiling(server, settle_d);
+            /* And only now the pictures the tiles were drawn from are let go —
+             * after that last layout, so what each window waits for is the
+             * answer to the size it has just been asked for and not to one
+             * from the middle of the drag. They come down one at a time, as
+             * the answers arrive; dropping them here would be the jump this
+             * whole mechanism exists to remove. */
+            server_tile_rubber_settle(server);
+        }
 }

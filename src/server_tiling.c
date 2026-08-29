@@ -156,11 +156,16 @@ static void tile_move_to(FwmServer *server, FwmView *view, PhysicsBody *pb, int 
         pb->y = ny;
         view->x = pb->x;
         view->y = pb->y;
-        if (view->scene_tree) {
-            wlr_scene_node_set_position(&view->scene_tree->node,
-                                        (int)lround(view->x),
-                                        (int)lround(view->y));
-        }
+        /* Through server_place_view, because the window's coordinates are
+         * WORLD ones and a scene node's are its monitor's. The two agree only
+         * on desktop 0 with the camera parked at the origin — anywhere else,
+         * writing the world position straight into the node drew the window a
+         * whole desktop or more to the right, and the next tick placed it back
+         * properly. Which is one frame per pointer event: a slow drag flickered
+         * and a fast one looked like the window leaving for another desktop and
+         * coming back. This branch is the one a divider drag takes, so that is
+         * exactly where it showed. */
+        server_place_view(server, view, view->x, view->y);
         /* The size configure above went out with the OLD position — an X11
          * client that believed it would put its menus at the slot it just
          * left. Tell it where it actually is now. */
@@ -203,8 +208,30 @@ static double tile_now(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
-static int tile_actuals(FwmServer *server, BspNode **leaves, int count,
+/* `learn` is off while a DIVIDER IS UNDER THE HAND, and that is the whole of
+ * the reason this is a parameter.
+ *
+ * The floor above is read off a client that is too big for its slot and stays
+ * too big, and a drag is exactly the gesture during which those two are
+ * indistinguishable. The slot is being redecided every couple of milliseconds
+ * and the client answers at its own pace, so a window that is simply behind
+ * looks like one that is refusing — TILE_FLOOR_SETTLE only asks that it stay
+ * behind for a fifth of a second, which a slow client under a fast hand
+ * manages easily. What it cost: the drag banked a floor at whatever size the
+ * client happened to be showing, the ratio limits pinned the divider there,
+ * and the divider stopped dead under a hand that was still moving — then the
+ * client caught up, the floor fell away, and the divider jumped the whole
+ * distance the hand had travelled meanwhile, because the ratio is measured
+ * from where the drag STARTED. Step, stick, bolt, repeat.
+ *
+ * Floors already learned still apply: this stops the layout learning a new one
+ * from lag, it does not let a drag squeeze a window under a limit it really
+ * has. And the release re-runs the layout with learning back on, which is why
+ * everything looked right again the moment the button came up. */
+static int tile_actuals(FwmServer *server, int desktop, BspNode **leaves, int count,
                         BspActual *actual, int *bar) {
+    bool learn = !(server->interactive.action == FWM_ACTION_BSP_RESIZE
+                   && server->interactive.bsp_desktop == desktop);
     for (int i = 0; i < count; i++) {
         BspNode *n = leaves[i];
         FwmView *view = server_find_view(server, n->id);
@@ -217,7 +244,7 @@ static int tile_actuals(FwmServer *server, BspNode **leaves, int count,
         int min_w = 0, min_h = 0;
         if (view) {
             view_min_size(view, &min_w, &min_h);
-            if (n->aw > 0 && n->ah > 0) {
+            if (learn && n->aw > 0 && n->ah > 0) {
                 double now = tile_now();
                 if (w > n->aw) {
                     if (view->tile_over_w != w) {
@@ -277,8 +304,39 @@ void server_tile_ratio_limits(FwmServer *server, int desktop, BspNode *node,
 
     BspActual actual[MAX_WINDOWS];
     int bar[MAX_WINDOWS];
-    tile_actuals(server, leaves, count, actual, bar);
+    tile_actuals(server, desktop, leaves, count, actual, bar);
     bsp_ratio_limits(node, server->config.tiling.gaps_in, actual, count, lo, hi);
+}
+
+static void tile_rubber_subtree(FwmServer *server, BspNode *n) {
+    if (!n) return;
+    if (n->id != 0) {
+        FwmView *view = server_find_view(server, n->id);
+        if (view) view_rubber_begin(view);
+        return;
+    }
+    tile_rubber_subtree(server, n->left);
+    tile_rubber_subtree(server, n->right);
+}
+
+void server_tile_rubber_begin(FwmServer *server, BspNode *a, BspNode *b) {
+    tile_rubber_subtree(server, a);
+    /* The two splits usually share most of their leaves — a corner grab takes
+     * the divider along each axis — and view_rubber_begin returns early on a
+     * window that already has a picture, so the overlap costs a call. */
+    tile_rubber_subtree(server, b);
+}
+
+void server_tile_rubber_settle(FwmServer *server) {
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        if (!view->rub_buf) continue;
+        /* Nothing is pinned: which edge of a tile stays put is the layout's
+         * business, and the layout is about to be run again against the sizes
+         * the clients really took. All this asks for is the picture to stay up
+         * until each client has answered. */
+        view_resize_settle(view, 0, 0, 0, 0);
+    }
 }
 
 void server_align_tiles(FwmServer *server, int desktop) {
@@ -293,7 +351,7 @@ void server_align_tiles(FwmServer *server, int desktop) {
 
     BspActual actual[MAX_WINDOWS];
     int bar[MAX_WINDOWS];
-    tile_actuals(server, leaves, count, actual, bar);
+    tile_actuals(server, desktop, leaves, count, actual, bar);
 
     /* While a divider is being dragged, place from the SLOTS instead — each
      * window gets exactly the space the ratio gives it, whatever it has
@@ -337,6 +395,13 @@ void server_align_tiles(FwmServer *server, int desktop) {
             view->width  = pb->width;
             view->height = pb->height;
             view_set_size(view, view->width, view->height);
+            /* And on screen it is that size NOW, whatever the client has drawn
+             * so far — the same bargain a floating resize makes. Without it
+             * the frame followed the divider smoothly while the window inside
+             * it jumped a character cell at a time, half a cell out of the
+             * frame in each direction. Costs nothing on a window with no
+             * picture up, which is every window outside a drag. */
+            view_rubber_to(view, view->width, view->height);
             /* The frame, now rather than when the client answers. It hugs the
              * committed size at rest, but while a divider is under the hand
              * view_border_box gives the SLOT — and this is the only place that

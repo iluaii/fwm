@@ -987,6 +987,20 @@ void server_apply_tiling(FwmServer *server, int desktop);
 void server_align_tiles(FwmServer *server, int desktop);
 void server_tile_ratio_limits(FwmServer *server, int desktop, BspNode *node,
                               float *lo, float *hi);
+/* The resize rubber, for the windows a divider drag is about to resize: every
+ * leaf under `a` or `b`, which are the two splits the hand has hold of (either
+ * may be NULL). A tiled window has the same problem a floating one does — it
+ * is asked for a size and answers in its own units, a character cell at a time
+ * — and this is the same answer: the window is drawn at the size the LAYOUT
+ * says, from the picture it already had, and the client catches up behind it.
+ * Only the windows the drag actually resizes, so a video in a tile the divider
+ * does not touch is not frozen for the length of it. */
+void server_tile_rubber_begin(FwmServer *server, BspNode *a, BspNode *b);
+/* ...and the hand off it: every picture still up is held until its client has
+ * answered the last size it was asked for, then dropped (view_resize_settle).
+ * Swept over every view rather than the desktop's leaves, so a window that
+ * left the tree mid-drag cannot be left frozen behind a picture of itself. */
+void server_tile_rubber_settle(FwmServer *server);
 /* Move one desktop to DESKTOP_MODE_*, running the leave/enter work for both
  * the old and the new mode. No-op when the desktop is already in that mode. */
 void server_set_desktop_mode(FwmServer *server, int d, int mode);
