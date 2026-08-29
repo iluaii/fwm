@@ -252,26 +252,33 @@ can do the rest:
 #!/bin/sh
 # Follow fwm's palette into GTK and everything else. Name this in
 # [startup] exec and it runs for the life of the session.
-fwmctl subscribe palette | while read -r ev; do
-    # The first line is the subscription's own reply, not a palette.
-    printf '%s' "$ev" | jq -e '.event == "palette"' >/dev/null || continue
-
-    wall=$(printf '%s' "$ev" | jq -r '.wallpaper // empty')
+apply() {
+    wall=$(printf '%s' "$1" | jq -r '.wallpaper // empty')
     if [ -n "$wall" ]; then
         # The picture beats one colour out of it: a generator building a whole
         # scheme has more to work with.
         matugen image "$wall"
     else
-        matugen color hex "$(printf '%s' "$ev" | jq -r .colors.accent)"
+        matugen color hex "$(printf '%s' "$1" | jq -r .colors.accent)"
     fi
+}
+
+# The stream only ever reports a *change*, and at login nothing has changed
+# yet — so dress what is already on screen before waiting for news.
+apply "$(fwmctl theme)"
+
+fwmctl subscribe palette | while read -r ev; do
+    # The first line is the subscription's own reply, not a palette.
+    printf '%s' "$ev" | jq -e '.event == "palette"' >/dev/null || continue
+    apply "$ev"
 done
 ```
 
-With `adw-gtk3` installed and `gtk-application-prefer-dark-theme` set, that is
-GTK 3 and libadwaita apps following the wallpaper along with the tray. The
-stream only ever reports a *change*, so a script that wants to be right from the
-moment it starts should run one `fwmctl theme` before the loop and treat it the
-same way.
+`theme` and the event carry the same fields, which is why one function handles
+both. With `adw-gtk3` installed and `gtk-application-prefer-dark-theme` set,
+that is GTK 3 and libadwaita apps following the wallpaper along with the tray —
+the ones already open when the wallpaper changes read the new `gtk.css` at their
+next start, not before.
 
 ## Events
 
