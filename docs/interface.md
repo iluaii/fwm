@@ -38,6 +38,10 @@ Left to right:
   size, gliding with their screen's camera the same way: a desktop is shown by
   one monitor at a time, so asking this screen for a taken one trades the two
   screens' desktops rather than moving only this one.
+  A desktop that has asked to be looked at is drawn **red** — an app on it wanted
+  the keyboard and did not get it, an XWayland client set its urgency hint, or a
+  notification daemon called `fwmctl urgent`. It stays red until you go there;
+  see [Notifications](fwmctl.md#notifications-and-the-red-desktop).
 - **The stats pill** — what the machine is doing: `CPU 12% • RAM 7.4G • GPU 41%`.
   Click it for the menu below. Ellipsized rather than dropped on a narrow screen:
   it is the only way to reach its own menu, and the switches in that menu are

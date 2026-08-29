@@ -21,6 +21,7 @@
 #include "theme.h"
 #include "view.h"
 #include "physics.h"
+#include "urgent.h"
 /* For the settings overlay and the window verbs: acting on one window by id is
  * the same work a keybind does, and it goes through the same functions. */
 #include "server_internal.h"
@@ -304,6 +305,21 @@ static void cmd_state(FwmServer *server, struct Buf *b) {
         buf_json_string(b, mode_name(server->desktop_mode[d]));
     }
     buf_puts(b, "],");
+
+    /* Which desktops are asking to be looked at. The list, not a count: a bar
+     * drawing the strip has to colour a particular digit, and `subscribe
+     * urgent` only tells it what changed since it asked. */
+    buf_puts(b, "\"urgent\":[");
+    {
+        int first = 1;
+        for (int d = 0; d < FWM_DESKTOPS; d++) {
+            if (!urgent_get(server, d)) continue;
+            buf_printf(b, "%s%d", first ? "" : ",", d);
+            first = 0;
+        }
+    }
+    buf_puts(b, "],");
+
     buf_puts(b, "\"focused\":");
     buf_json_string(b, server->focused_view ? view_title(server->focused_view) : "");
     buf_puts(b, "}\n");
@@ -1125,6 +1141,57 @@ static void ipc_refresh_subscriptions(FwmIpc *ipc) {
     ipc->subscribed = mask;
 }
 
+/* `urgent <desktop> [on|off]` — light a desktop's number red, or put it out.
+ *
+ * This is how a notification daemon reaches the tray: dunst or mako already
+ * knows a message arrived and which application sent it, fwm knows which
+ * desktop that application's window is on, and one line of shell joins them.
+ * Nothing here decides what deserves attention, which is exactly why it is a
+ * command and not a protocol.
+ *
+ * The desktop is numbered from 0, like every other desktop in the IPC (`state`,
+ * `windows`, `window <id> desktop=`) and unlike the keys, where super+1 reaches
+ * desktop 0.
+ *
+ * Raising it on a desktop that is on a screen does nothing, and the reply says
+ * so with `urgent: false` rather than failing — "you are already looking at it"
+ * is an answer, not the script's mistake. */
+static void cmd_urgent(FwmServer *server, const char *arg, struct Buf *b) {
+    char err[96];
+    if (!arg) {
+        snprintf(err, sizeof err, "urgent needs a desktop, 0..%d", FWM_DESKTOPS - 1);
+        reply_error(b, err);
+        return;
+    }
+
+    char *end = NULL;
+    long n = strtol(arg, &end, 10);
+    if (end == arg || n < 0 || n >= FWM_DESKTOPS) {
+        snprintf(err, sizeof err, "urgent: desktop must be 0..%d", FWM_DESKTOPS - 1);
+        reply_error(b, err);
+        return;
+    }
+    int d = (int)n;
+
+    while (*end == ' ') end++;
+    bool on = true;
+    if (*end) {
+        if      (strcmp(end, "on")  == 0) on = true;
+        else if (strcmp(end, "off") == 0) on = false;
+        else {
+            snprintf(err, sizeof err, "urgent: expected on|off, got \"%.32s\"", end);
+            reply_error(b, err);
+            return;
+        }
+    }
+
+    if (on) urgent_raise(server, d);
+    else    urgent_drop(server, d);
+
+    buf_printf(b, "{\"ok\":true,\"desktop\":%d,\"urgent\":%s}\n",
+               d, urgent_get(server, d) ? "true" : "false");
+}
+
 /* `subscribe [events]` — everything, or a comma/space separated subset. The
  * reply names what was actually subscribed, so a client can log it instead of
  * assuming its request was understood. */
@@ -1254,6 +1321,10 @@ static void ipc_handle_command(struct IpcClient *client, const char *line, struc
         cmd_output(server, arg, out);
         return;
     }
+    if (IS("urgent")) {
+        cmd_urgent(server, arg, out);
+        return;
+    }
     if (IS("reload")) {
         server_reload_config(server);
         reply_ok(out);
@@ -1262,7 +1333,7 @@ static void ipc_handle_command(struct IpcClient *client, const char *line, struc
 
     reply_error(out, "unknown command (try: version, state, windows, window, outputs, "
                      "output, config, theme, get, set, save, unsave, saved, "
-                     "dispatch, reload, subscribe)");
+                     "dispatch, urgent, reload, subscribe)");
     #undef IS
 }
 
@@ -1341,6 +1412,16 @@ void ipc_emit_mode(FwmIpc *ipc, int desktop, int mode) {
     buf_json_string(&b, mode_name(mode));
     buf_puts(&b, "}\n");
     ipc_broadcast(ipc, FWM_EV_MODE, &b);
+    free(b.data);
+}
+
+void ipc_emit_urgent(FwmIpc *ipc, int desktop, bool urgent) {
+    if (!ipc_wants(ipc, FWM_EV_URGENT)) return;
+
+    struct Buf b = {0};
+    buf_printf(&b, "{\"event\":\"urgent\",\"desktop\":%d,\"urgent\":%s}\n",
+               desktop, urgent ? "true" : "false");
+    ipc_broadcast(ipc, FWM_EV_URGENT, &b);
     free(b.data);
 }
 

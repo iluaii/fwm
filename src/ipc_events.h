@@ -36,8 +36,9 @@ enum {
     FWM_EV_SETTING       = 1u << 8,
     FWM_EV_UI            = 1u << 9,
     FWM_EV_PALETTE       = 1u << 10,
+    FWM_EV_URGENT        = 1u << 11,
 
-    FWM_EV_COUNT = 11,
+    FWM_EV_COUNT = 12,
     FWM_EV_ALL   = (1u << FWM_EV_COUNT) - 1
 };
 

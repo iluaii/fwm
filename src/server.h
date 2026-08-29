@@ -725,6 +725,10 @@ typedef struct FwmServer {
 
     BspNode *bsp_roots[10];
     int desktop_mode[10];
+    /* Desktops asking to be looked at — the red digit in the tray. Per desktop
+     * rather than per window on purpose; see src/urgent.h for why, and for the
+     * three things that raise one. */
+    bool desktop_urgent[FWM_DESKTOPS];
     
     FwmConfig config;
     FwmInteractiveState interactive;

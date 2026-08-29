@@ -62,6 +62,7 @@ typedef struct FwmView {
     struct wl_listener xwl_dissociate;
     struct wl_listener xwl_request_configure;
     struct wl_listener xwl_set_override_redirect;
+    struct wl_listener xwl_set_hints;
     
     /* Saved geometry (local coordinates in desktop) */
     int x, y;

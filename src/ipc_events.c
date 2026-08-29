@@ -30,6 +30,7 @@ static const char *const names[FWM_EV_COUNT] = {
     "setting",
     "ui",
     "palette",
+    "urgent",
 };
 
 uint32_t fwm_ipc_event_bit(const char *name, size_t len) {

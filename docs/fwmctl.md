@@ -33,6 +33,7 @@ at it explicitly or you will be talking to the outer session.
 | `fwmctl saved` | what is remembered, and what each of those is worth right now |
 | `fwmctl window <id> k=v …` | change one window: desktop, position, pin, collision, focus, close |
 | `fwmctl dispatch <action>` | run any keybind action |
+| `fwmctl urgent <d> [on\|off]` | light desktop `d`'s number red until you go there |
 | `fwmctl reload` | reload `config.toml`, discarding every `set` |
 | `fwmctl version` | the running fwm's release, which binary is answering (path, mtime, pid) and the IPC version |
 | `fwmctl subscribe [events]` | stream events as JSON lines until killed |
@@ -46,7 +47,7 @@ $ fwmctl state
 {"ok":true,"desktop":2,"camera_x":3840,"windows":4,"screen_width":1920,
  "screen_height":1080,"outputs":[{"name":"eDP-1","desktop":2,...}],
  "gravity":1.000,"locked":false,"mode":"physics",
- "modes":["physics","tiling",...],"focused":"~/fwm"}
+ "modes":["physics","tiling",...],"urgent":[5],"focused":"~/fwm"}
 ```
 
 `state` is the only place that answers "which desktop am I on" for every monitor
@@ -280,6 +281,81 @@ that is GTK 3 and libadwaita apps following the wallpaper along with the tray �
 the ones already open when the wallpaper changes read the new `gtk.css` at their
 next start, not before.
 
+## Notifications, and the red desktop
+
+fwm is not a notification daemon and has no plans to become one: popups, actions
+and history are what `dunst` and `mako` already do well, and taking the D-Bus
+service over would mean re-implementing all of it inside the compositor. What
+those daemons cannot answer is the one thing the compositor knows — **where** the
+thing that wants you is. So fwm draws that half, and only that half: a desktop
+can be marked urgent, and its number in the tray goes red until you go and look.
+
+```console
+$ fwmctl urgent 3
+{"ok":true,"desktop":3,"urgent":true}
+```
+
+Desktops count from 0, as everywhere else in the IPC — `urgent 3` is the number
+you reach with super+4. It goes out on its own the moment that desktop is on a
+screen, however you got there: the `view:` binds, a click in the tray, a
+three-finger swipe, expo, or a second monitor being plugged in. Nothing has to
+clear it, and `fwmctl urgent 3 off` exists only for a script that changed its
+mind.
+
+A desktop that is already on a screen is never marked. The reply says so with
+`"urgent":false` instead of failing — on a two-monitor setup half the strip is in
+front of you at all times, and a red number for something you are looking at is
+noise, not a signal. `state` lists the ones that are lit, and the `urgent` event
+reports both edges:
+
+```console
+$ fwmctl subscribe urgent
+{"event":"urgent","desktop":3,"urgent":true}
+{"event":"urgent","desktop":3,"urgent":false}
+```
+
+Two things raise it without any script at all. An **xdg-activation** request for
+a window on a desktop nobody is showing — that is a Wayland app asking for the
+keyboard, and `[focus] on_activate` decides what happens: `always` takes the
+camera there, while `same_desktop` (the default) and `never` turn it into the red
+number instead of dropping it silently. And the **X11 urgency hint**, which is
+what Telegram, Thunderbird and every other XWayland client with an inbox still
+sets — on X11 a window manager answers it by flashing a taskbar entry; here it is
+the same red number. The hint is only ever raised from, never lowered: clients
+drop it when their window is activated, which under XWayland it usually is not,
+so honouring the falling edge would put the digit out while the message is still
+unread.
+
+For everything else — a Wayland app that notifies without asking for focus, a
+build that finished, a script of your own — the daemon calls `fwmctl`. In dunst
+that is a rule with a `script`, which is handed the notification's own fields:
+
+```sh
+#!/bin/sh
+# ~/.local/bin/fwm-urgent — from dunstrc:
+#
+#   [fwm-urgent]
+#       appname = "*"
+#       script  = fwm-urgent
+#
+# Whichever window belongs to the app that notified decides which number
+# lights up. DUNST_DESKTOP_ENTRY is the desktop-entry hint, which is what
+# app_id is; the app name is the fallback for daemons that send neither.
+app=$(printf '%s' "${DUNST_DESKTOP_ENTRY:-$DUNST_APP_NAME}" | tr 'A-Z' 'a-z')
+[ -n "$app" ] || exit 0
+
+d=$(fwmctl windows | jq --arg app "$app" '
+      [.windows[] | select((.app_id | ascii_downcase) | contains($app))]
+      | first | .desktop // empty')
+
+# No window: the message came from something with no face on screen, and
+# there is no desktop to point at. Say nothing rather than guess.
+[ -n "$d" ] && fwmctl urgent "$d"
+```
+
+mako reaches the same script through `on-notify=exec`; it hands over no fields,
+so a rule there is per-app in the config rather than per-app in the script.
+
 ## Events
 
 ```console
@@ -293,13 +369,14 @@ $ fwmctl subscribe
 {"event":"config_reload"}
 {"event":"setting","name":"sun.blur","value":"18.000","saved":true}
 {"event":"ui","what":"launcher","open":true}
+{"event":"urgent","desktop":5,"urgent":true}
 {"event":"palette","source":"wallpaper","wallpaper":"/home/me/wall.png","generation":6,
  "colors":{"pill":"#171a16",...,"accent":"#dc781e"}}
 ```
 
 Subscribe to everything, or a comma-separated subset:
 `window_open`, `window_close`, `window_focus`, `window_title`, `desktop`, `mode`,
-`gravity`, `config_reload`, `setting`, `ui`, `palette`. The reply names what was actually subscribed, so a
+`gravity`, `config_reload`, `setting`, `ui`, `palette`, `urgent`. The reply names what was actually subscribed, so a
 client can log it rather than assume its request was understood. Subscribing twice
 widens the set rather than replacing it.
 

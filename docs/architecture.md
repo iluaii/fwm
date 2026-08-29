@@ -91,7 +91,7 @@ price to pay for turning a feature *off*.
 | Light | `sun.c` (where the sun is — arithmetic, no scene), `shadow.c` (what it draws: one shared nine-patch image, nine slices per window) |
 | Glass | `glass.c` (a frosted pane under each of fwm's own panels, cut to the panel's own alpha — no panel describes its shape), `blur.c` (the GLES2 passes that make one) |
 | Session | `server_idle.c` (the blank and lock timers), `lock.c` (the lock protocol), `clipboard.c` (the seat's selection: fwm's own offers, and text kept past the window that copied it), `battery.c` (the charge, and when it is worth interrupting somebody over) |
-| Extras | `ram.c` (memory footprints), `theme.c` (palette), `layer.c`, `foreign.c` |
+| Extras | `ram.c` (memory footprints), `theme.c` (palette), `layer.c`, `foreign.c`, `urgent.c` (the desktops asking to be looked at — the red number in the tray) |
 | UI | `ui/*.c` — see below, plus `ui/toast.c`: one line at the bottom of the screen, used by anything with something short to say (where a screenshot went, how much charge is left) |
 
 `server.c` was split by area rather than by size; `server_internal.h` is the

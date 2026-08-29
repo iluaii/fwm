@@ -26,6 +26,7 @@
 #include "launched.h"
 #include "foreign.h"
 #include "ipc.h"
+#include "urgent.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -641,6 +642,30 @@ void view_xwl_adopt(FwmView *view) {
     if (surface->mapped) view_map(view);
 }
 
+/* The X11 urgency hint — WM_HINTS' XUrgencyHint bit, which is what Telegram,
+ * Thunderbird and every other XWayland client with an inbox still sets when a
+ * message lands. On X11 a window manager answers it by flashing the taskbar
+ * entry; here the answer is the desktop's number going red (src/urgent.h).
+ *
+ * Only ever RAISED from here, never lowered. A client drops the hint when its
+ * window is activated, which under XWayland it usually is not — so honouring
+ * the falling edge would mean the digit going out while the message is still
+ * unread. Arriving on the desktop is what clears it.
+ *
+ * The hint is not filtered by whether the client can prove user intent, unlike
+ * xdg-activation: it takes no screen away, it costs the user nothing to ignore,
+ * and an app that abuses it only makes its own number less believable. */
+static void xwl_handle_set_hints(struct wl_listener *listener, void *data) {
+    (void)data;
+    FwmView *view = wl_container_of(listener, view, xwl_set_hints);
+    struct wlr_xwayland_surface *xs = view->xwl_surface;
+    if (!xs || !xs->hints) return;
+    if (!(xs->hints->flags & XCB_ICCCM_WM_HINT_X_URGENCY)) return;
+
+    PhysicsBody *pb = physics_find_body(&view->server->physics, view->id);
+    if (pb) urgent_raise(view->server, pb->desktop_id);
+}
+
 static void xwl_handle_request_move(struct wl_listener *listener, void *data) {
     FwmView *view = wl_container_of(listener, view, request_move);
     server_start_interactive_move(view->server, view, 0);
@@ -679,6 +704,8 @@ FwmView *view_xwl_create(struct wlr_xwayland_surface *xsurface, struct FwmServer
     wl_signal_add(&xsurface->events.request_configure, &view->xwl_request_configure);
     view->xwl_set_override_redirect.notify = xwl_handle_set_override_redirect;
     wl_signal_add(&xsurface->events.set_override_redirect, &view->xwl_set_override_redirect);
+    view->xwl_set_hints.notify = xwl_handle_set_hints;
+    wl_signal_add(&xsurface->events.set_hints, &view->xwl_set_hints);
     view->request_move.notify = xwl_handle_request_move;
     wl_signal_add(&xsurface->events.request_move, &view->request_move);
     view->request_resize.notify = xwl_handle_request_resize;
@@ -749,6 +776,7 @@ void view_destroy(FwmView *view) {
         wl_list_remove(&view->xwl_dissociate.link);
         wl_list_remove(&view->xwl_request_configure.link);
         wl_list_remove(&view->xwl_set_override_redirect.link);
+        wl_list_remove(&view->xwl_set_hints.link);
     }
     wl_list_remove(&view->link);
     

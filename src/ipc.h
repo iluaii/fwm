@@ -55,6 +55,10 @@ void ipc_emit_palette(FwmIpc *ipc);
 /* One of fwm's own panels opened or closed: "launcher", "wallpaper_picker",
  * "radial" or "expo". They are not windows, so no other event covers them. */
 void ipc_emit_ui(FwmIpc *ipc, const char *what, bool open);
+/* A desktop started or stopped asking to be looked at (see src/urgent.h).
+ * Both edges are reported: a bar drawing the strip needs the moment the red
+ * goes out as much as the moment it comes on. */
+void ipc_emit_urgent(FwmIpc *ipc, int desktop, bool urgent);
 /* One runtime option changed; `saved` if it also went into the state overlay
  * (see the settings section of server_config.c). */
 void ipc_emit_setting(FwmIpc *ipc, const char *name, const char *value, bool saved);

@@ -517,6 +517,13 @@ disruptive part is not the focus change but the **camera** leaving the desktop y
 are working on. `same_desktop` (the default) focuses the window only if it is
 already on the visible desktop.
 
+A request that is *refused* is not thrown away: when the window sits on a desktop
+nobody is showing, its number in the tray goes red instead, under both
+`same_desktop` and `never`. The app still gets to say that something is waiting,
+and where — it just does not get the screen. `always` never lights it, because it
+takes you there instead. See
+[Notifications](fwmctl.md#notifications-and-the-red-desktop).
+
 ## idle
 
 ```toml

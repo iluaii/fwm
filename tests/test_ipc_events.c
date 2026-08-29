@@ -62,6 +62,7 @@ int main(void) {
     CHECK_INT(parse_ok("config_reload"), FWM_EV_CONFIG_RELOAD);
     CHECK_INT(parse_ok("setting"), FWM_EV_SETTING);
     CHECK_INT(parse_ok("palette"), FWM_EV_PALETTE);
+    CHECK_INT(parse_ok("urgent"), FWM_EV_URGENT);
 
     CASE("lists, in either separator");
     CHECK_INT(parse_ok("window_open,window_close"),

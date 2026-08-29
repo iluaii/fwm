@@ -145,6 +145,7 @@ set(SOURCES
     src/lock.c
     src/foreign.c
     src/workspace.c
+    src/urgent.c
     src/shortcuts.c
     src/sandbox.c
     src/group.c

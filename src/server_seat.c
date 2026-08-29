@@ -78,6 +78,7 @@
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/util/log.h>
 #include <xkbcommon/xkbcommon.h>
+#include "urgent.h"
 #include "server_internal.h"
 
 static void handle_request_cursor(struct wl_listener *listener, void *data) {
@@ -272,7 +273,6 @@ static void handle_xdg_activation_request_activate(struct wl_listener *listener,
     const struct wlr_xdg_activation_v1_request_activate_event *event = data;
 
     FocusActivatePolicy policy = server->config.focus.on_activate;
-    if (policy == FOCUS_ACTIVATE_NEVER) return;
 
     /* Filters out clients that do not even claim to be acting on user input.
      * NOT real focus-stealing protection: wlroots stores whatever serial the
@@ -291,9 +291,22 @@ static void handle_xdg_activation_request_activate(struct wl_listener *listener,
     if (target_d >= 0 && target_d != visible_d) {
         /* Off-screen window. Panning the camera away from what the user is
          * working on is the disruptive part of activation, so only "always"
-         * may do it; "same_desktop" drops the request instead. */
-        if (policy != FOCUS_ACTIVATE_ALWAYS) return;
+         * may do it; the other two policies turn the request into a red digit
+         * in the tray instead of either obeying it or dropping it on the floor
+         * (src/urgent.h). That is the whole point of refusing: the app still
+         * gets to say something is waiting, and gets to say WHERE, without
+         * taking the screen away from what you are doing. */
+        if (policy != FOCUS_ACTIVATE_ALWAYS) {
+            urgent_raise(server, target_d);
+            return;
+        }
         server_output_show_desktop(server, server_active_output(server), target_d, 0);
+    } else if (policy == FOCUS_ACTIVATE_NEVER) {
+        /* Either in front of the user already, or a view with no body to
+         * place, and `never` means what it says. Nothing to point at either
+         * way: a red digit for a window on this very screen would send the
+         * user somewhere they are standing. */
+        return;
     }
     server_focus_view(server, view);
 }

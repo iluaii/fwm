@@ -467,6 +467,7 @@ void server_request_tray_redraw(FwmServer *server) {
     TrayData data = {0};
     for (int i = 0; i < 10; i++) {
         data.desktop_window_counts[i] = 0;
+        data.desktop_urgent[i] = server->desktop_urgent[i];
     }
     
     // Count windows per desktop

@@ -24,6 +24,7 @@
 #include "lock.h"
 #include "foreign.h"
 #include "workspace.h"
+#include "urgent.h"
 #include "ipc.h"
 #include <signal.h>
 #ifdef __GLIBC__
@@ -1885,6 +1886,12 @@ static int physics_tick_cb(void *data) {
      * window lit by both ends up with the stronger of the two rather than
      * whichever was written last. */
     server_star_sync(server, dt);
+
+    /* Anything on a screen has been seen: the red digit goes out by ARRIVING
+     * at a desktop, whichever way you got there. Here rather than in the
+     * switch itself so the binds, the tray, a swipe, expo and a monitor being
+     * plugged in are all covered by one line (src/urgent.h). */
+    urgent_sweep(server);
 
     /* And which monitor is showing which desktop, for the same reason and by
      * the same rule: only what changed goes out. */

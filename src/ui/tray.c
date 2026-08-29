@@ -40,6 +40,10 @@
  * [decor] color_source. Amber stays hardcoded: a warning must not blend into
  * whatever the wallpaper suggests. */
 static const double COL_WARN[3]  = {0.98, 0.75, 0.27};    /* config-error amber */
+/* Urgent desktop. Hardcoded for the same reason as the amber, and the same red
+ * the toast uses when something did not happen: the one colour in the strip
+ * that has to mean the same thing under every wallpaper. */
+static const double COL_URGENT[3] = {0.93, 0.42, 0.38};
 
 /* The islands' rects are decided DURING the draw — the error pill's width
  * depends on its text, the desktop island's indicator spacing on its own width,
@@ -263,6 +267,13 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
             int count = data->desktop_window_counts[i];
             int active = (i == data->active_desktop);
 
+            /* Urgent outranks both. It cannot land on the active desktop —
+             * a desktop on a screen has been seen, and urgent_sweep clears it
+             * (src/urgent.h) — but the test is written to lose to `active`
+             * anyway, so a frame caught mid-sweep cannot paint the desktop the
+             * user is standing on red. */
+            int urgent = data->desktop_urgent[i] && !active;
+
             if (count > 0) {
                 /* Sized for any int, not for the count we expect: the compiler
                  * cannot know it is bounded by MAX_WINDOWS, and neither can a
@@ -272,14 +283,19 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
                 pango_layout_set_text(layout, buf, -1);
                 int nw;
                 pango_layout_get_pixel_size(layout, &nw, NULL);
-                if (active) cairo_set_source_rgb(cr, thm->text[0], thm->text[1], thm->text[2]);
-                else        cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
+                if (urgent)      cairo_set_source_rgb(cr, COL_URGENT[0], COL_URGENT[1], COL_URGENT[2]);
+                else if (active) cairo_set_source_rgb(cr, thm->text[0], thm->text[1], thm->text[2]);
+                else             cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
                 cairo_move_to(cr, cx - nw / 2.0, text_y);
                 pango_cairo_show_layout(cr, layout);
             } else {
-                double r = active ? 3.5 : 2.0;
-                if (active) cairo_set_source_rgb(cr, thm->text[0], thm->text[1], thm->text[2]);
-                else        cairo_set_source_rgb(cr, thm->dim[0], thm->dim[1], thm->dim[2]);
+                /* An urgent desktop with nothing on it is drawn at the ACTIVE
+                 * dot's size: `fwmctl urgent` can point at an empty one, and a
+                 * 2px dot in red is a smudge rather than a signal. */
+                double r = (active || urgent) ? 3.5 : 2.0;
+                if (urgent)      cairo_set_source_rgb(cr, COL_URGENT[0], COL_URGENT[1], COL_URGENT[2]);
+                else if (active) cairo_set_source_rgb(cr, thm->text[0], thm->text[1], thm->text[2]);
+                else             cairo_set_source_rgb(cr, thm->dim[0], thm->dim[1], thm->dim[2]);
                 cairo_arc(cr, cx, h / 2.0, r, 0, 2 * M_PI);
                 cairo_fill(cr);
             }
@@ -506,6 +522,9 @@ void tray_redraw(struct wlr_scene_buffer *tray_buf, const TrayData *data,
     sig.sig_mass10 = (int)lround(data->mass * 10.0);
     sig.sig_flying = data->flying;
     memcpy(sig.sig_counts, data->desktop_window_counts, sizeof(sig.sig_counts));
+    sig.sig_urgent = 0;
+    for (int i = 0; i < 10; i++)
+        if (data->desktop_urgent[i]) sig.sig_urgent |= 1 << i;
     sig.sig_active_desktop = data->active_desktop;
     sig.sig_pos_mil = (int)lround(data->active_pos * 1000.0);
     /* Zeroed whole, not just up to other_count: the tail is compared along with
