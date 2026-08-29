@@ -77,8 +77,17 @@ bool expo_live_active(struct FwmServer *server);
  * full rate instead of dropping to the idle heartbeat. */
 bool expo_animating(struct FwmServer *server);
 
-/* Input, while the strip owns it. Each returns true when the event was
- * consumed and must not reach a client. Coordinates are output-local pixels. */
+/* Input, while the strip owns it. The pointer entries return true when the
+ * event was consumed and must not reach a client. Coordinates are output-local
+ * pixels.
+ *
+ * The key entry answers a narrower question: true when the strip ACTED on the
+ * key, false when it has no meaning for it. Consumption is not in doubt — the
+ * strip owns the keyboard while it is up and its caller swallows the key
+ * either way — and what the answer is for is the second layout. With a
+ * Cyrillic layout active, `z`, `x`, `o` and `p` arrive as keysyms the switch
+ * has never heard of, and the caller retries the same key as the first layout
+ * spells it, exactly as it already does for the binds. */
 bool expo_handle_key(struct FwmServer *server, xkb_keysym_t sym);
 bool expo_handle_motion(struct FwmServer *server, double lx, double ly);
 bool expo_handle_button(struct FwmServer *server, uint32_t button, bool pressed,

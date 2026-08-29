@@ -225,10 +225,12 @@ bool expo_handle_key(FwmServer *server, xkb_keysym_t sym) {
     default:
         break;
     }
-    /* Everything else is swallowed: the strip owns the keyboard while it is up,
+    /* Not one of ours. Says so rather than claiming the key: the strip swallows
+     * everything either way (server_input.c holds the keyboard while it is up,
      * exactly as the launcher does, so no stray key reaches a client that
-     * cannot be seen. */
-    return true;
+     * cannot be seen) — but the caller needs the answer to know whether to try
+     * the same key again in another layout. */
+    return false;
 }
 
 bool expo_handle_motion(FwmServer *server, double lx, double ly) {

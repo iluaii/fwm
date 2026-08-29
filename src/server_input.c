@@ -670,7 +670,16 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
          * told about a key whose release is about to be swallowed here. */
         if (event->keycode < sizeof(server->key_consumed))
             server->key_consumed[event->keycode] = 1;
-        for (int i = 0; i < num_syms; i++) expo_handle_key(server, syms[i]);
+        bool acted = false;
+        for (int i = 0; i < num_syms; i++)
+            if (expo_handle_key(server, syms[i])) acted = true;
+        /* The same fallback the binds above make, for the same reason: with a
+         * Cyrillic layout active the strip's own keys resolve to Cyrillic
+         * keysyms, and it would swallow every one of them without acting.
+         * Only when the active layout said nothing: Escape is spelled the same
+         * in both, and a second pass would close the strip twice. */
+        if (!acted)
+            for (int i = 0; i < num_syms0; i++) expo_handle_key(server, syms0[i]);
         return;
     }
 
