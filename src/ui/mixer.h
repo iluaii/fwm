@@ -30,8 +30,14 @@ bool mixer_is_open(Mixer *mixer);
 /* Feed a pressed key while the panel is up. Turning the knob walks the list,
  * pressing it takes hold of the row it stopped on — and while a row is held,
  * turning moves ITS volume instead of the selection. Pressing again lets go.
- * Everything else is swallowed, as the launcher and the ring do. Returns true
- * if the key was consumed, which while open is always. */
+ * Everything else is swallowed, as the launcher and the ring do.
+ *
+ * Returns true when the panel ACTED on the key, not whether it was consumed —
+ * consumption is not in doubt, the panel owns the keyboard while it is up and
+ * its caller swallows the key either way. The answer is for the second layout:
+ * `m` is the one letter here, and with a Cyrillic layout active it arrives as
+ * Cyrillic_softsign, so the caller retries the key as the first layout spells
+ * it, exactly as it already does for the binds and the desktop strip. */
 bool mixer_handle_key(Mixer *mixer, xkb_keysym_t sym);
 
 /* Advance the row animations, the eased bars and the poll clock, and redraw

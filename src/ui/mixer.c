@@ -975,7 +975,11 @@ bool mixer_handle_key(Mixer *m, xkb_keysym_t sym) {
         return true;
     }
 
-    return true;   /* swallow everything else while open */
+    /* Not one of ours. Says so rather than claiming the key: the panel swallows
+     * everything either way while it is open, as the launcher and the ring do
+     * — but the caller needs the answer to know whether to try the same key as
+     * another layout spells it. */
+    return false;
 }
 
 /* Row under a panel-local point, or -1. */

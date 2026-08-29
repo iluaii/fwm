@@ -241,6 +241,25 @@ void server_keyboard_enter(FwmServer *server, struct wlr_surface *surface) {
  * on every keyboard that has a knob they are the volume keys, and a config
  * that binds them (nearly every config does) would answer the knob by changing
  * the volume while the user was only steering a menu. */
+/* The same key as the FIRST layout spells it, for the gates that resolve one
+ * keysym rather than the array the binds walk.
+ *
+ * fwm's own panels are keyed by letters, and a letter is exactly what a
+ * non-Latin layout replaces: on a Russian one `m` arrives as Cyrillic_softsign
+ * and the panel it belongs to has never heard of it. Same fallback the binds
+ * make below, same rule about which layout — the first in [input] kbd_layout,
+ * so keep Latin first there.
+ *
+ * XKB_KEY_NoSymbol when there is only one layout, i.e. when there is nothing
+ * to fall back to and the caller has nothing to retry. */
+static xkb_keysym_t first_layout_sym(struct FwmKeyboard *keyboard, uint32_t keycode) {
+    struct xkb_keymap *kmap = keyboard->wlr_keyboard->keymap;
+    if (!kmap || xkb_keymap_num_layouts(kmap) <= 1) return XKB_KEY_NoSymbol;
+    const xkb_keysym_t *syms;
+    int n = xkb_keymap_key_get_syms_by_level(kmap, keycode, 0, 0, &syms);
+    return n > 0 ? syms[0] : XKB_KEY_NoSymbol;
+}
+
 static bool is_knob_key(xkb_keysym_t sym) {
     return sym == XKB_KEY_XF86AudioRaiseVolume
         || sym == XKB_KEY_XF86AudioLowerVolume
@@ -597,7 +616,14 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
             key_repeat_stop(server);
             uint32_t kc = event->keycode + 8;
             xkb_keysym_t sym = xkb_state_key_get_one_sym(keyboard->wlr_keyboard->xkb_state, kc);
-            mixer_handle_key(server->mixer, sym);
+            if (!mixer_handle_key(server->mixer, sym)) {
+                /* Nothing in the active layout. Try the key as the first
+                 * layout spells it, which is what keeps `m` (mute) alive on a
+                 * Cyrillic one; everything else in the panel is arrows, digits
+                 * and the volume keys, which no layout touches. */
+                xkb_keysym_t s0 = first_layout_sym(keyboard, kc);
+                if (s0 != XKB_KEY_NoSymbol) mixer_handle_key(server->mixer, s0);
+            }
             mixer_grab_sync(server, true);   /* Escape may have closed it */
         }
         return;
