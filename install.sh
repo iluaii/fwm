@@ -48,12 +48,20 @@ install_deps() {
             libpango1.0-dev libgdk-pixbuf-2.0-dev \
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
             libpipewire-0.3-dev libpulse-dev xwayland
-        # wlroots: the 0.20 -dev package name varies by release; try in order.
+        # wlroots: only the 0.20 branch will do. Debian carries the branch in
+        # the -dev name, and the older ones are a different ABI, so installing
+        # 0.19 does not get anyone a build — it gets them this script reporting
+        # success and cmake failing afterwards on a package it cannot use.
         local ok=0
-        for p in libwlroots-0.20-dev libwlroots-0.19-dev libwlroots-dev; do
+        for p in libwlroots-0.20-dev libwlroots0.20-dev; do
             if $SUDO apt-get install -y "$p" 2>/dev/null; then ok=1; break; fi
         done
-        [ "$ok" = 1 ] || warn "no wlroots -dev package found; install wlroots 0.20 manually"
+        if [ "$ok" != 1 ]; then
+            warn "no wlroots 0.20 -dev package on this release; fwm needs that"
+            warn "branch specifically and 0.19 or earlier will not build. Build"
+            warn "it from source, then re-run:"
+            warn "  https://gitlab.freedesktop.org/wlroots/wlroots"
+        fi
         # NOTE: libbox2d-dev on Debian is v2.4 — do not install it; v3 is
         # handled by ensure_box2d below.
     elif command -v dnf >/dev/null 2>&1; then
