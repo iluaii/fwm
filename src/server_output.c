@@ -1387,6 +1387,10 @@ void server_focus_output(FwmServer *server, FwmOutput *out) {
         return;   /* already standing there */
     cursor_to_output(server, out);
     server_refocus(server, out->desktop, NULL);
+    /* wlr_cursor_warp raises no motion event, so without this the seat's
+     * pointer focus stays on the monitor the hand just left and the first
+     * click after the bind lands there. */
+    server_pointer_resync(server);
 }
 
 /* Light one monitor or put it out, with nothing standing in the way. Returns 1

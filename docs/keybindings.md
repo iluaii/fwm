@@ -98,7 +98,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `toggle_floating` | floating mode on this desktop |
 | `toggle_floating_all` | ...on every desktop |
 | `toggle_split` | flip the next BSP split |
-| `tile_focus:l|r|u|d` | focus the neighbouring tile |
+| `tile_focus:l|r|u|d` | focus the neighbouring tile — the pointer moves into it, so focus-follows-pointer does not hand the focus straight back |
 | `tile_move:l|r|u|d` | move the window inside the layout |
 | `view:<0-9>` | show that desktop; asking for the one already on screen returns to the one before it (`[camera] back_and_forth`) |
 | `view:back` | that same way back, whatever desktop is on screen now |

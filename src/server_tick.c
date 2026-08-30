@@ -1386,6 +1386,16 @@ void server_camera_settled(FwmServer *server) {
         server_refocus(server, arrived, NULL);
         ipc_emit_desktop(server->ipc, arrived);
     }
+
+    /* The keyboard is re-homed above; the POINTER has to be as well, and it
+     * has no event of its own to do it with. The hand never moved — the world
+     * moved under it — so nothing would tell the window now under the cursor
+     * that it has the cursor, and the window a desktop away would go on
+     * believing it does. Outside the test above on purpose: the camera can
+     * come to rest somewhere the keyboard was already at home (a gesture
+     * released where it started, a monitor arriving at a desktop it had
+     * claimed) and the pointer is no less stale for it. */
+    server_pointer_resync(server);
 }
 
 /* The desktop a window in flight belongs to: the one its DESTINATION sits in.

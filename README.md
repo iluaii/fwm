@@ -1085,7 +1085,7 @@ fit  = "pan"
 | `move_to_view:<0-9>` | send it there and follow, keeping it focused (`next`/`prev` too) |
 | `swap_desktop:<0-9>` | trade the desktop you are on with that one — its windows, its layout tree and its mode change places, while the places themselves do not: the camera stays put and each monitor goes on showing the desktop it was showing, with other windows on it (`next`/`prev` too, which walks a desktop along the strip) |
 | `pan_desktop` | **gestures only:** pan across the strip with your fingers, settling on a desktop when they lift |
-| `tile_focus:l\|r\|u\|d` | focus tile in direction |
+| `tile_focus:l\|r\|u\|d` | focus tile in direction (the pointer follows it there) |
 | `tile_move:l\|r\|u\|d` | swap tile in direction |
 | `toggle_split` | flip split orientation of the focused tile |
 | `toggle_tray` | hide/show the tray — it stops reserving its strip, so windows fill the top |

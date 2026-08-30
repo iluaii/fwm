@@ -254,6 +254,67 @@ static void pointer_update_focus(FwmServer *server, double lx, double ly,
     }
 }
 
+/* What the pointer is over, told again — without a motion event to ask for it.
+ *
+ * The seat's pointer focus is only ever set from a real motion (and from the
+ * release that ends a grab), so anything that moves the WORLD under a
+ * stationary cursor leaves it naming a surface the pointer is no longer on:
+ * the camera crossing to another desktop, a warp to another monitor. Nothing
+ * sent the window being left a leave either, so it went on believing the
+ * cursor was inside it at the last coordinates it was told — and the next
+ * click was delivered THERE, to a window a desktop away, at a point the user
+ * had stopped looking at. Switch desktop, click, and the press landed in the
+ * browser you had just panned away from.
+ *
+ * Refused whenever something else owns the pointer: a button held down is an
+ * implicit grab (pointer_grab_deliver) and moving its focus would break the
+ * drag it is carrying, a compositor gesture owns the motion outright, and
+ * every overlay that takes the pointer has already cleared its focus on
+ * purpose. */
+void server_pointer_resync(FwmServer *server) {
+    if (!server->cursor || !server->seat) return;
+    if (lock_is_active(server)) return;
+    if (server->seat->pointer_state.button_count > 0) return;
+    if (server->interactive.action != FWM_ACTION_NONE || server->star_drag) return;
+    if (expo_active(server) || screenshot_selecting(server) ||
+        launcher_is_open(server->launcher) || radial_is_open(server->radial) ||
+        mixer_is_open(server->mixer)) return;
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    uint32_t msec = (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
+
+    pointer_update_focus(server, server->cursor->x, server->cursor->y, msec);
+}
+
+/* Put the pointer inside a window the keyboard was just handed to.
+ *
+ * Under focus-follows-pointer a focus the pointer disagrees with lasts exactly
+ * until the hand moves: tile_focus: walked the keyboard one tile over and the
+ * first twitch of the mouse walked it straight back, which is no way to steer
+ * a tiling layout. The reasoning is server_focus_output's, one scale down —
+ * "which window am I in" is answered by where the pointer stands, so moving
+ * the focus IS moving the pointer.
+ *
+ * Not when the pointer is already inside the window: a focus that lands where
+ * the hand already is must not shove it to the middle of anything. */
+void server_warp_to_view(FwmServer *server, struct FwmView *view) {
+    if (!server->cursor || !view || !view->scene_tree) return;
+    if (view->width <= 0 || view->height <= 0) return;
+
+    double sx, sy;
+    if (!server_world_to_screen(server, view->x, view->y, view->width, &sx, &sy)) return;
+
+    double cx = server->cursor->x, cy = server->cursor->y;
+    if (cx >= sx && cx < sx + view->width && cy >= sy && cy < sy + view->height) return;
+
+    wlr_cursor_warp(server->cursor, NULL,
+                    sx + view->width / 2.0, sy + view->height / 2.0);
+    /* A warp is not a motion event, so nothing else would tell the window it
+     * now has the cursor. */
+    server_pointer_resync(server);
+}
+
 /* Where a surface's top-left corner sits in layout coordinates.
  *
  * The pointer bookkeeping already holds it exactly, measured from the scene

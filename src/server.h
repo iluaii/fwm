@@ -826,6 +826,15 @@ void server_keyboard_clear(FwmServer *server);
  * for it, else focused_unmanaged if one holds it, else the focused window's.
  * NULL when there is none of the three. */
 struct wlr_surface *server_keyboard_target(FwmServer *server);
+/* Tell the client under the cursor that it has the cursor, with no motion
+ * event to carry the news. Call after anything that moves the world under a
+ * stationary pointer — a camera crossing to another desktop, a warp — or the
+ * next click goes to whatever the pointer was over before. */
+void server_pointer_resync(FwmServer *server);
+/* Move the pointer into a window that was just given the keyboard, so
+ * focus-follows-pointer does not take the focus straight back. A no-op when
+ * the pointer is already inside it. */
+void server_warp_to_view(FwmServer *server, struct FwmView *view);
 /* Take an override-redirect X11 surface as an unmanaged one: a bare scene
  * surface, no body, no borders. Public because a window can stop being a
  * managed one while it is alive (see xwl_handle_set_override_redirect), and

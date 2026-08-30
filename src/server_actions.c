@@ -511,7 +511,16 @@ void server_dispatch_action(FwmServer *server, const char *action) {
             BspNode *n = tile_neighbor(server, d, leaf, action[11]);
             if (n) {
                 FwmView *v = server_find_view(server, n->id);
-                if (v) server_focus_view(server, v);
+                if (v) {
+                    server_focus_view(server, v);
+                    /* And the pointer with it. Focus follows the pointer here,
+                     * so a keyboard focus the hand disagrees with survives
+                     * only until the hand moves — walking one tile left and
+                     * being thrown back by a twitch of the mouse is not
+                     * steering anything. Same rule focus_output: follows, one
+                     * scale down. */
+                    server_warp_to_view(server, v);
+                }
             }
         }
     } else if (strncmp(action, "tile_move:", 10) == 0) {
@@ -605,10 +614,16 @@ void server_dispatch_action(FwmServer *server, const char *action) {
     } else if (strcmp(action, "group_next") == 0) {
         if (server->focused_view && server->focused_view->group) {
             group_cycle(server, server->focused_view->group, 1);
+            /* The tab that came up took the keyboard (activate_member); the
+             * pointer follows it for the same reason tile_focus: makes it
+             * follow. A no-op in the ordinary case, where the stack is under
+             * the hand already and the new tab fills the same rectangle. */
+            server_warp_to_view(server, server->focused_view);
         }
     } else if (strcmp(action, "group_prev") == 0) {
         if (server->focused_view && server->focused_view->group) {
             group_cycle(server, server->focused_view->group, -1);
+            server_warp_to_view(server, server->focused_view);
         }
     } else if (strcmp(action, "group_add") == 0) {
         // Join the focused window into the group of any grouped window it
