@@ -359,10 +359,10 @@ void server_start_interactive_resize(FwmServer *server, struct FwmView *view, ui
  * "The output" is the monitor the window is standing on, not the world: on two
  * monitors a fullscreen video must not straddle the bezel. A desktop is one
  * screen, so fullscreen is that screen — the physical one, not the strip's idea
- * of one. A column is the size of the primary monitor, so on any other monitor
+ * of one. A column is the size of the largest monitor, so on any smaller one
  * "the whole column" is the wrong box: too tall on a shorter screen (the bottom
- * of the video falls off the bottom of the glass) and too short on a taller one
- * (a black band where the desktop ran out). The monitor showing this desktop
+ * of the video falls off the bottom of the glass) and too wide on a narrower
+ * one (the right of the video behind the bezel). The monitor showing this desktop
  * knows its own size; with nobody showing it, the column is all there is. */
 void server_fullscreen_box(FwmServer *server, int desktop, bool real,
                            int *x, int *y, int *w, int *h) {

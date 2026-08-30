@@ -312,12 +312,90 @@ static void test_solid_bars_lower_the_ceiling(void) {
     physics_destroy(&w);
 }
 
+/* The other half of #20: a desktop shown on a monitor NARROWER than the strip
+ * has a band along its right that is part of the column and behind the bezel.
+ * A window left standing there is alive, focusable and nowhere on the glass,
+ * so the band pushes it back out. */
+static void test_narrow_monitor_fences_the_edge(void) {
+    CASE("per-desktop fence");
+    PhysicsWorld w;
+    physics_init(&w);
+    w.gravity_scale = 0.0;
+    w.desktop_w[0] = 1400;            /* a narrow monitor on desktop 0 */
+                                      /* and nothing said about desktop 1 */
+
+    /* Standing across the edge of the glass: 1200..1600, with the band from
+     * 1400 on. Most of it is on the screen, so out is to the left. */
+    PhysicsBody *a = physics_sync_body(&w, 1, 1200, 400, 400, 300, SW);
+    /* And one on the desktop nobody described, which keeps the whole column. */
+    PhysicsBody *b = physics_sync_body(&w, 2, SW + 1200, 400, 400, 300, SW);
+    CHECK_NOT_NULL(a);
+    CHECK_NOT_NULL(b);
+    run(&w, 120);
+
+    a = physics_find_body(&w, 1);
+    b = physics_find_body(&w, 2);
+    CHECK_NOT_NULL(a);
+    CHECK_NOT_NULL(b);
+    CHECK(a->x + 400 <= 1400.0 + 8.0);        /* back on the glass */
+    CHECK(a->x >= -1.0);                      /* and not shoved off the far end */
+    CHECK_DBL(b->x, (double)SW + 1200, 8.0);  /* the wide desktop is untouched */
+    physics_destroy(&w);
+}
+
+/* And the fence is a fence, not a wall: the strip has to stay crossable, so a
+ * window in flight goes straight through it. Throwing one at the next desktop
+ * is the gesture that would have been lost. */
+static void test_a_throw_crosses_the_fence(void) {
+    CASE("fence lets a throw through");
+    PhysicsWorld w;
+    physics_init(&w);
+    w.gravity_scale = 0.0;
+    w.wrap = 0;
+    w.desktop_w[0] = 1400;
+
+    PhysicsBody *b = spawn(&w, 400, 400);
+    CHECK_NOT_NULL(b);
+    physics_throw_body(&w, 1, 6000.0, 0.0);
+    run(&w, 180);
+
+    b = physics_find_body(&w, 1);
+    CHECK_NOT_NULL(b);
+    CHECK_INT(b->desktop_id, 1);              /* it arrived */
+    physics_destroy(&w);
+}
+
+/* A window wider than the glass is exempt for good. It does not fit, so the
+ * fence could only shove it off the LEFT edge of the desktop — the same window
+ * lost at the other end. It pins to the left instead, which is what every other
+ * place that meets one already does. */
+static void test_a_window_wider_than_the_glass_stays_put(void) {
+    CASE("fence spares an oversized window");
+    PhysicsWorld w;
+    physics_init(&w);
+    w.gravity_scale = 0.0;
+    w.desktop_w[0] = 1400;
+
+    PhysicsBody *b = physics_sync_body(&w, 1, 0, 400, 1600, 300, SW);
+    CHECK_NOT_NULL(b);
+    run(&w, 120);
+
+    b = physics_find_body(&w, 1);
+    CHECK_NOT_NULL(b);
+    CHECK_DBL(b->x, 0.0, 8.0);                /* pinned to the left, not pushed */
+    CHECK_INT(b->desktop_id, 0);
+    physics_destroy(&w);
+}
+
 int main(void) {
     test_wall_holds_a_line();
     test_solid_bars_raise_the_floor();
     test_solid_bars_lower_the_ceiling();
     test_short_monitor_raises_the_floor();
     test_escape_net_follows_the_short_floor();
+    test_narrow_monitor_fences_the_edge();
+    test_a_throw_crosses_the_fence();
+    test_a_window_wider_than_the_glass_stays_put();
     test_ring_carries_a_throw_round();
     test_ring_carries_a_throw_the_other_way();
     test_ring_crosses_only_when_clear();

@@ -943,7 +943,7 @@ void view_map(FwmView *view) {
     }
     /* Centred on its desktop — which IS one screen now, so this lands in the
      * middle of whichever monitor is showing it. Centred on that monitor's
-     * size rather than the column's: a column is the primary monitor's shape,
+     * size rather than the column's: a column is the largest monitor's shape,
      * and centring a window in it puts it below the middle of a shorter screen
      * and above the middle of a taller one. Nobody showing this desktop leaves
      * the column as the only size there is. */

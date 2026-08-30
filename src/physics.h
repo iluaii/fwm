@@ -144,6 +144,29 @@ typedef struct {
      * the floor under a window already resting on it. */
     int desktop_h[FWM_DESKTOPS];
 
+    /* And how WIDE that monitor is, same convention: 0 for "nobody is showing
+     * it", which is the same answer as "as wide as the strip's stride".
+     *
+     * A column is one stride wide on every monitor and cannot be anything else:
+     * the stride is what turns a world x into a desktop number. A monitor
+     * narrower than the widest one therefore has a band along its right that is
+     * part of the column and behind the bezel, and a window left standing there
+     * is alive, focusable, and nowhere on the glass.
+     *
+     * So the band gets a wall — the horizontal half of what desktop_h does for
+     * the floor. It cannot be a plain one: a window has to be able to be
+     * CARRIED from desktop d to d+1, and a solid edge would make the desktops
+     * uncrossable. It is a fence instead, and a window in flight is not stopped
+     * by it (CAT_FENCE, physics.c): you can still throw a window to the next
+     * screen, and a drag is kinematic and never met a wall in its life. What
+     * the fence catches is windows at REST — one shoved by a neighbour, or one
+     * that came down in the band and stopped there. Those are pushed back onto
+     * the glass, which is the one place a window is allowed to sit still.
+     *
+     * A window wider than the glass keeps its exemption for good (physics.c):
+     * it does not fit, so a fence could only shove it off the left edge. */
+    int desktop_w[FWM_DESKTOPS];
+
     /* Configurable physics parameters */
     double friction;
     double mass_density;

@@ -450,7 +450,8 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
 /* ── one world, one window onto it per monitor ────────────────────────────
  *
  * The world is a horizontal strip of FWM_DESKTOPS columns, each the size of the
- * primary monitor (screen_width/height). Each monitor shows ONE column, the one
+ * LARGEST monitor (screen_width/height), so that no screen is ever bigger than
+ * its column. Each monitor shows ONE column, the one
  * its `desktop` names, through its own camera. Two monitors are two independent
  * windows onto the same strip: they show different desktops, switch desktops
  * separately, and carry their own wallpaper and status strip.
@@ -734,7 +735,7 @@ void server_cursor_world(FwmServer *server, double *wx, double *wy) {
 /* The screen a panel centres itself in: the monitor the user is at, in layout
  * coordinates.
  *
- * NOT the column. A column is the primary monitor's size, so centring a
+ * NOT the column. A column is the largest monitor's size, so centring a
  * launcher in one and then shifting it onto a 1366-wide screen puts it 277px
  * right of that screen's middle — centred on a screen that is somewhere else.
  * With no monitor at all (the first layout, a headless start) the column is
@@ -927,7 +928,7 @@ void server_views_clip(FwmServer *server) {
 
 /* A desktop just changed which monitor is showing it, so everything that was
  * sized against a screen is now sized against the wrong one. A fullscreen
- * window is the loud case: it was made 1920x1080 on the primary monitor, and
+ * window is the loud case: it was made 1920x1080 on one monitor, and
  * bringing its desktop up on a 1366x768 one left it fullscreen at the old
  * size — a screen's worth of window on a screen that cannot hold it.
  *
@@ -956,9 +957,8 @@ static void desktop_refit_fullscreen(FwmServer *server, int d) {
 /* And the ordinary windows, which are not sized against a screen but do have to
  * BE on one.
  *
- * A column is the primary monitor's size, so on a narrower or shorter screen
- * the right and bottom of every desktop is a strip of world the glass does not
- * reach: a window standing there is still alive, still focusable, still in the
+ * A column is the largest monitor's size, so on any smaller screen the right
+ * and bottom of every desktop is a strip of world the glass does not reach: a window standing there is still alive, still focusable, still in the
  * alt-tab — simply nowhere on the monitor. Windows out there are brought back
  * onto the glass.
  *
@@ -1112,7 +1112,7 @@ void server_views_place(FwmServer *server) {
 
 /* A world whose columns just changed size keeps every window where it was ON
  * ITS DESKTOP: desktops are one screen apart, so without this a hotplug that
- * changes the primary monitor's size would deal the windows out to other
+ * changes the size of the largest monitor would deal the windows out to other
  * desktops. */
 static void world_reflow(FwmServer *server, int old_w, int old_h) {
     if (old_w <= 0) return;
@@ -1246,19 +1246,50 @@ static void server_output_layout_update(FwmServer *server) {
      * would divide by zero in half the compositor. */
     if (!primary || primary->box.width <= 0 || primary->box.height <= 0) return;
 
+    /* THE STRIDE OF THE STRIP IS THE LARGEST MONITOR, not the primary one.
+     *
+     * A column has to be at least as big as every screen that will show one. It
+     * used to be the primary's size, and a monitor bigger than the primary then
+     * had a band of glass along its right and its bottom that was not part of
+     * any desktop: tiling stopped short of it (server_work_area cuts the work
+     * area to the column), a window could not be moved into it, and nothing
+     * could be resting there to be seen. That was the second half of #20.
+     *
+     * Sized off the biggest instead, no screen is ever bigger than its column
+     * and every screen shows a whole desktop. The cost falls the other way and
+     * is much cheaper: a screen SMALLER than the stride keeps a dead band, and
+     * that band already has answers — the floor is its own monitor's
+     * (physics.h, desktop_h), the fence is too (desktop_w), the work area is
+     * the monitor's, and anything left standing out there is brought back in by
+     * desktop_refit_clamp. */
     int first = server->screen_width == 0;
     int old_w = server->screen_width, old_h = server->screen_height;
-    int resized = primary->box.width != old_w || primary->box.height != old_h;
 
-    server->screen_width = primary->box.width;
-    server->screen_height = primary->box.height;
+    int strip_w = 0, strip_h = 0;
+    wl_list_for_each(o, &server->outputs, link) {
+        if (!o->enabled || o->box.width <= 0 || o->box.height <= 0) continue;
+        if (o->box.width  > strip_w) strip_w = o->box.width;
+        if (o->box.height > strip_h) strip_h = o->box.height;
+    }
+    /* Every monitor disabled but the primary still measurable: keep the world
+     * on the one screen we do have rather than collapsing it to nothing. */
+    if (strip_w <= 0 || strip_h <= 0) {
+        strip_w = primary->box.width;
+        strip_h = primary->box.height;
+    }
+
+    int resized = strip_w != old_w || strip_h != old_h;
+
+    server->screen_width = strip_w;
+    server->screen_height = strip_h;
 
     if (first) {
         const ConfigOutput *pc = config_find_output(&server->config,
                                                     primary->wlr_output->name);
         primary->desktop = (pc && pc->desktop >= 0) ? pc->desktop : 0;
-        wlr_log(WLR_INFO, "desktop is %dx%d (from %s)", server->screen_width,
-                server->screen_height, primary->wlr_output->name);
+        wlr_log(WLR_INFO, "desktop is %dx%d (the largest of %d monitor(s))",
+                server->screen_width, server->screen_height,
+                wl_list_length(&server->outputs));
     }
 
     if (resized && !first) {

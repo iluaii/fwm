@@ -43,9 +43,9 @@
 #define FLOOR_SEAM_PX 2.0
 /* A bar can reserve more space than a short monitor has, which would leave the
  * floor above the ceiling and Box2D solving a world with negative room in it.
- * The compositor guards this against the primary monitor's height (see
- * physics_tick_cb) but cannot for a monitor shorter than that one, so the last
- * word is here: whatever else happens, a desktop keeps this much play. */
+ * The compositor guards this against the strip's height (see physics_tick_cb)
+ * but cannot for a monitor shorter than that, so the last word is here:
+ * whatever else happens, a desktop keeps this much play. */
 #define MIN_PLAY_H_PX 64.0
 #define POS_EPS 0.05  /* px: threshold to treat a mirror write as "external" */
 #define VEL_EPS 0.05  /* px/s */
@@ -67,6 +67,7 @@ struct BodySlot {
     int sw, sh;              /* shape size the box was built with (px) */
     b2BodyType type;         /* last applied body type */
     int no_collide;          /* last applied collision-filter state */
+    int fenced;              /* ... and whether the desktop edges apply to it */
     int spin;                /* last applied free-rotation state */
     /* Last applied material, so the per-step resolve below only talks to Box2D
      * when something actually changed (a reload, a drag onto another desktop). */
@@ -78,15 +79,17 @@ struct BodySlot {
 struct Engine {
     b2WorldId world;
     struct BodySlot slots[MAX_WINDOWS];
-    /* 0 left, 1 right, 2 ceiling, then one floor per desktop: the ceiling is
-     * the same line on every screen (an inset from the top is an inset from
-     * the top), but the floor is wherever that desktop's monitor ends. */
-    b2BodyId walls[3 + FWM_DESKTOPS];
+    /* 0 left, 1 right, 2 ceiling, then one floor per desktop, then one fence
+     * per desktop: the ceiling is the same line on every screen (an inset from
+     * the top is an inset from the top), but the floor is wherever that
+     * desktop's monitor ends and the fence is wherever its right edge is. */
+    b2BodyId walls[3 + 2 * FWM_DESKTOPS];
     bool walls_built;
     int wall_w, wall_h;      /* screen dims the walls were built for */
     int wall_wrap;           /* and whether the world was a ring at the time */
     int wall_top, wall_bottom; /* and the insets bars had reserved */
     int wall_desk_h[FWM_DESKTOPS]; /* and how tall each desktop's monitor was */
+    int wall_desk_w[FWM_DESKTOPS]; /* and how wide */
 
     /* Visualiser bars (physics_set_bars). Shapes are built once at a fixed
      * size and then only ever slid vertically, so a bar changing height costs
@@ -292,11 +295,11 @@ void physics_init(PhysicsWorld *world) {
     world->wrap = 0;
     /* And the screen is the whole of it until a bar reserves part of it. */
     world->inset_top = world->inset_bottom = 0;
-    /* And every desktop is as tall as the screen until a monitor says how tall
-     * IT is. Spelled out for the same reason `wrap` is: a caller with a
-     * stack-allocated world would otherwise get garbage heights and floors at
-     * arbitrary depths. */
-    for (int i = 0; i < FWM_DESKTOPS; i++) world->desktop_h[i] = 0;
+    /* And every desktop is as tall and as wide as the screen until a monitor
+     * says what IT measures. Spelled out for the same reason `wrap` is: a
+     * caller with a stack-allocated world would otherwise get garbage heights
+     * and floors at arbitrary depths. */
+    for (int i = 0; i < FWM_DESKTOPS; i++) world->desktop_h[i] = world->desktop_w[i] = 0;
     world->impact_count = 0;
 
     // Set system defaults just in case config doesn't overwrite them.
@@ -611,12 +614,17 @@ static b2Rot body_rot(const PhysicsBody *m) {
  * Walls therefore get their own bit that even a no-collide window keeps. */
 #define CAT_WINDOW 0x0001u
 #define CAT_WALL   0x0002u
+/* The right edge of the glass on a monitor narrower than the strip's stride
+ * (world->desktop_w). A bit of its own because, unlike every other wall, it is
+ * one a window is sometimes allowed through: see fence_applies. */
+#define CAT_FENCE  0x0004u
 
-static b2Filter filter_for(int no_collide) {
+static b2Filter filter_for(int no_collide, int fenced) {
     b2Filter f = b2DefaultFilter();
     f.categoryBits = CAT_WINDOW;
     // Walls always; other windows only when collision is enabled.
     f.maskBits = no_collide ? CAT_WALL : (CAT_WALL | CAT_WINDOW);
+    if (fenced) f.maskBits |= CAT_FENCE;
     return f;
 }
 
@@ -627,10 +635,46 @@ static b2Filter filter_for_wall(void) {
     return f;
 }
 
+static b2Filter filter_for_fence(void) {
+    b2Filter f = b2DefaultFilter();
+    f.categoryBits = CAT_FENCE;
+    f.maskBits = CAT_WINDOW;
+    return f;
+}
+
+/* The world x of the right edge of the GLASS this window's desktop is being
+ * shown on, when there is a fence there; 0 when there is nothing to stop it.
+ *
+ * Nothing to stop it in three cases: nobody is showing that desktop, so the
+ * column is all there is; the monitor is as wide as the stride, so the column
+ * is all glass; or the window is wider than the glass, in which case a fence
+ * could only shove it off the LEFT edge of the desktop instead — the same
+ * window lost at the other end. That one pins to the left, the way world_reflow
+ * and desktop_refit_clamp both already pin one. */
+static double fence_edge(const PhysicsWorld *world, const PhysicsBody *m, int screen_w) {
+    int d = m->desktop_id;
+    if (d < 0 || d >= FWM_DESKTOPS) return 0.0;
+    int gw = world->desktop_w[d];
+    if (gw <= 0 || gw >= screen_w || m->width > gw) return 0.0;
+    return (double)d * (double)screen_w + gw;
+}
+
+/* Whether that fence is solid to THIS window, this step.
+ *
+ * Not while it is flying: the strip has to stay crossable, and a throw at the
+ * next desktop is the gesture that crosses it. (A drag needs no exemption — it
+ * is kinematic, and nothing static has ever stopped one.) What is left is
+ * windows at rest and windows being shoved by their neighbours, which are
+ * exactly the ones the band must not be able to swallow. */
+static int fence_applies(const PhysicsWorld *world, const PhysicsBody *m, int screen_w) {
+    return !m->flying && fence_edge(world, m, screen_w) > 0.0;
+}
+
 /* One static box, centre and half-extents in px. Every wall in the world is
  * this shape with different numbers. */
 static b2BodyId make_wall(struct Engine *eng, PhysicsWorld *world,
-                          double cx, double cy, double hw, double hh) {
+                          double cx, double cy, double hw, double hh,
+                          b2Filter filter) {
     b2BodyDef bd = b2DefaultBodyDef();
     bd.type = b2_staticBody;
     bd.position = (b2Vec2){px2m(cx), px2m(cy)};
@@ -643,7 +687,7 @@ static b2BodyId make_wall(struct Engine *eng, PhysicsWorld *world,
     // (The old "sticking" bug was the pull-back clamp, not this friction.)
     sd.material.friction = 0.35f;
     sd.enableHitEvents = true;           // hitting the floor counts as an impact
-    sd.filter = filter_for_wall();
+    sd.filter = filter;
     b2Polygon box = b2MakeBox(px2m(hw), px2m(hh));
     b2CreatePolygonShape(id, &sd, &box);
     return id;
@@ -666,11 +710,12 @@ static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w,
         && eng->wall_wrap == world->wrap
         && eng->wall_top == top && eng->wall_bottom == bottom;
     for (int i = 0; same && i < FWM_DESKTOPS; i++)
-        same = eng->wall_desk_h[i] == world->desktop_h[i];
+        same = eng->wall_desk_h[i] == world->desktop_h[i]
+            && eng->wall_desk_w[i] == world->desktop_w[i];
     if (same) return;
 
     if (eng->walls_built) {
-        for (int i = 0; i < 3 + FWM_DESKTOPS; i++) {
+        for (int i = 0; i < 3 + 2 * FWM_DESKTOPS; i++) {
             if (B2_IS_NON_NULL(eng->walls[i])) b2DestroyBody(eng->walls[i]);
             eng->walls[i] = b2_nullBodyId;
         }
@@ -697,11 +742,12 @@ static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w,
         eng->walls[0] = eng->walls[1] = b2_nullBodyId;
     } else {
         double cy = (T + deepest) / 2.0, hh = (deepest - T) / 2.0 + t;
-        eng->walls[0] = make_wall(eng, world, -t / 2.0,    cy, t / 2.0, hh);
-        eng->walls[1] = make_wall(eng, world, W + t / 2.0, cy, t / 2.0, hh);
+        eng->walls[0] = make_wall(eng, world, -t / 2.0,    cy, t / 2.0, hh, filter_for_wall());
+        eng->walls[1] = make_wall(eng, world, W + t / 2.0, cy, t / 2.0, hh, filter_for_wall());
     }
 
-    eng->walls[2] = make_wall(eng, world, W / 2.0, T - t / 2.0, W / 2.0 + t, t / 2.0);
+    eng->walls[2] = make_wall(eng, world, W / 2.0, T - t / 2.0, W / 2.0 + t, t / 2.0,
+                              filter_for_wall());
 
     /* One floor per desktop, each at its own monitor's bottom, each overlapping
      * its neighbours so the strip reads as a single surface (FLOOR_SEAM_PX). */
@@ -709,8 +755,31 @@ static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w,
         double y = floor_y_for(world, d, screen_h);
         eng->walls[3 + d] = make_wall(eng, world,
                                       (d + 0.5) * screen_w, y + t / 2.0,
-                                      screen_w / 2.0 + FLOOR_SEAM_PX, t / 2.0);
+                                      screen_w / 2.0 + FLOOR_SEAM_PX, t / 2.0,
+                                      filter_for_wall());
         eng->wall_desk_h[d] = world->desktop_h[d];
+    }
+
+    /* And one fence per desktop whose monitor is narrower than the stride,
+     * standing on the right edge of the glass: a window pushed along the floor
+     * by its neighbours stops where the screen does instead of being pressed on
+     * into the band behind the bezel. Ceiling to floor, because those are the
+     * two things that bound the play area to begin with.
+     *
+     * A window that gets past this while flying is caught on the other side by
+     * the rest clamp in the write-back, which is the half a wall cannot do. */
+    for (int d = 0; d < FWM_DESKTOPS; d++) {
+        int gw = world->desktop_w[d];
+        eng->wall_desk_w[d] = gw;
+        eng->walls[3 + FWM_DESKTOPS + d] = b2_nullBodyId;
+        if (gw <= 0 || gw >= screen_w) continue;   /* the glass covers the column */
+
+        double y0 = T, y1 = floor_y_for(world, d, screen_h);
+        if (y1 - y0 < 1.0) continue;
+        eng->walls[3 + FWM_DESKTOPS + d] =
+            make_wall(eng, world, (double)d * screen_w + gw + t / 2.0,
+                      (y0 + y1) / 2.0, t / 2.0, (y1 - y0) / 2.0,
+                      filter_for_fence());
     }
 
     eng->walls_built = true;
@@ -837,7 +906,7 @@ void physics_set_bars(PhysicsWorld *world, const float *levels, int count,
 }
 
 static void slot_create(struct Engine *eng, PhysicsWorld *world, int i, PhysicsBody *m,
-                        b2BodyType type, int no_collide) {
+                        b2BodyType type, int no_collide, int fenced) {
     struct BodySlot *s = &eng->slots[i];
     struct Material mat = material_for(world, m);
 
@@ -866,7 +935,7 @@ static void slot_create(struct Engine *eng, PhysicsWorld *world, int i, PhysicsB
     sd.material.restitution = mat.restitution;
     sd.material.friction = mat.friction;
     sd.enableHitEvents = true;           // impact effects (squash, shake, dust)
-    sd.filter = filter_for(no_collide);
+    sd.filter = filter_for(no_collide, fenced);
     b2Polygon box = b2MakeBox(px2m(m->width / 2.0), px2m(m->height / 2.0));
     s->shape = b2CreatePolygonShape(s->body, &sd, &box);
 
@@ -880,6 +949,7 @@ static void slot_create(struct Engine *eng, PhysicsWorld *world, int i, PhysicsB
     s->sh = m->height;
     s->type = type;
     s->no_collide = no_collide;
+    s->fenced = fenced;
     s->spin = m->spin;
     s->sx = m->x; s->sy = m->y;
     s->svx = m->vx; s->svy = m->vy;
@@ -932,9 +1002,13 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
         else if (dragged) type = b2_kinematicBody;
 
         int no_collide = m->no_collide || m->floating || (skip_a != 0 && m->id == skip_a);
+        /* Recomputed every step, like the material: a window stops flying, or
+         * is carried onto a desktop shown by a narrower screen, and the edge of
+         * the glass starts applying to it between one step and the next. */
+        int fenced = fence_applies(world, m, screen_width);
 
         if (!s->has) {
-            slot_create(eng, world, i, m, type, no_collide);
+            slot_create(eng, world, i, m, type, no_collide, fenced);
             continue;
         }
 
@@ -955,11 +1029,12 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
             sd.material.restitution = mat.restitution;
             sd.material.friction = mat.friction;
             sd.enableHitEvents = true;
-            sd.filter = filter_for(no_collide);
+            sd.filter = filter_for(no_collide, fenced);
             b2Polygon box = b2MakeBox(px2m(m->width / 2.0), px2m(m->height / 2.0));
             s->shape = b2CreatePolygonShape(s->body, &sd, &box);
             s->sw = m->width; s->sh = m->height;
             s->no_collide = no_collide;
+            s->fenced = fenced;
             // The box was rebuilt around the body's OLD center, but the mirror
             // anchors the top-left corner — the center moves by half the size
             // delta. Re-drive the transform from the mirror or the window
@@ -1009,9 +1084,15 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
                 b2Body_SetAngularVelocity(s->body, (float)m->angvel);
             }
         }
-        if (s->no_collide != no_collide) {
-            b2Shape_SetFilter(s->shape, filter_for(no_collide));
+        if (s->no_collide != no_collide || s->fenced != fenced) {
+            b2Shape_SetFilter(s->shape, filter_for(no_collide, fenced));
+            /* Waking is the whole point of the fence half: a window that came
+             * down in the dead band has just stopped moving, and one asleep
+             * inside a body that only now became solid to it would be left
+             * sitting in it. */
+            if (s->fenced != fenced) b2Body_SetAwake(s->body, true);
             s->no_collide = no_collide;
+            s->fenced = fenced;
         }
 
         /* Spin turned on or off since the last step. Clearing fixedRotation
@@ -1282,6 +1363,28 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
             double speed = hypot(m->vx, m->vy);
             m->flying = (speed > world->stop_speed_threshold) ? 1 : 0;
             if (!m->flying) { m->vx = 0; m->vy = 0; }
+
+            /* And the fence's other half. The wall built above stops a window
+             * being SHOVED into the dead band; nothing stops one flown into it,
+             * because a window in flight goes through — that is what keeps the
+             * strip crossable. So a window that comes to rest out there is put
+             * back on the glass, the way the escape net above puts back one
+             * that left the world: a resting window has no speed left to carry
+             * itself out, and the band is the one place a window may not sit.
+             *
+             * A window that crossed far enough for its middle to be on the next
+             * desktop is not out there at all — it arrived, and this reads the
+             * fence of the desktop it arrived on. A pixel of tolerance because
+             * a window resting AGAINST the wall penetrates it slightly, and
+             * writing a transform every step for that would keep the whole
+             * compositor awake. */
+            double edge = m->flying ? 0.0 : fence_edge(world, m, screen_width);
+            if (edge > 0.0 && m->x + m->width > edge + 1.0) {
+                m->x = edge - m->width;
+                m->vx = 0; m->vy = 0;
+                b2Body_SetTransform(s->body, body_center_m(m), body_rot(m));
+                b2Body_SetLinearVelocity(s->body, (b2Vec2){0.0f, 0.0f});
+            }
         } else {
             // Anchor / dragged bodies keep the mirror the outside world set.
             if (s->type == b2_staticBody) { m->vx = 0; m->vy = 0; m->flying = 0; }

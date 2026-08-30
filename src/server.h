@@ -69,7 +69,7 @@ struct FwmServer;
 
 /* One monitor.
  *
- * The world is a strip of FWM_DESKTOPS columns, each the size of the primary
+ * The world is a strip of FWM_DESKTOPS columns, each the size of the LARGEST
  * monitor. A monitor is a WINDOW ONTO that strip: it shows one column, the one
  * its `desktop` names, and `camera_x` is where its left edge sits in world
  * coordinates. Two monitors are two independent windows onto the same strip —
@@ -711,8 +711,9 @@ typedef struct FwmServer {
     int focus_desktop;  /* desktop server_refocus last homed the keyboard on */
     int tick_idle;      /* physics timer is on the slow heartbeat */
 
-    /* The size of ONE desktop, taken from the primary monitor. The world is a
-     * strip of FWM_DESKTOPS columns this wide, and each monitor shows one of
+    /* The size of ONE desktop, taken from the largest monitor — so that no
+     * screen is ever bigger than the column it shows, and every screen shows a
+     * whole desktop. The world is a strip of FWM_DESKTOPS columns this wide, and each monitor shows one of
      * them through its own camera — see FwmOutput and server_output.c.
      *
      * This is the strip's shape, not any particular screen's. Anything that

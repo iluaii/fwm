@@ -1774,14 +1774,20 @@ static int physics_tick_cb(void *data) {
     server->physics.wrap = server->config.camera.wrap;
 
     /* And so does the space bars have reserved, when [physics] solid_bars asks
-     * for it. The primary monitor's, because the world is a strip of columns
-     * the size of that monitor and the floor is one line across all ten — a
-     * bar on the second screen has no column of its own to stand in. */
+     * for it. The primary monitor's, because the floor is one line across all
+     * ten desktops — a bar on the second screen has no column of its own to
+     * stand in. */
     server->physics.inset_top = server->physics.inset_bottom = 0;
     if (server->config.physics.solid_bars) {
         struct wlr_box u = server->usable_area;
+        /* Measured against the primary MONITOR, not the strip: the strip is as
+         * tall as the largest screen, and taking the bottom inset off that on a
+         * shorter primary would reserve the difference between the two as a bar
+         * nobody put there. */
+        FwmOutput *pri = server_primary_output(server);
+        int pri_h = pri && pri->box.height > 0 ? pri->box.height : server->screen_height;
         if (u.width > 0 && u.height > 0) {
-            int top = u.y, bottom = server->screen_height - (u.y + u.height);
+            int top = u.y, bottom = pri_h - (u.y + u.height);
             /* A bar taller than the screen would leave the floor above the
              * ceiling and Box2D solving an impossible world. */
             if (top >= 0 && bottom >= 0 && top + bottom < server->screen_height) {
@@ -1791,20 +1797,20 @@ static int physics_tick_cb(void *data) {
         }
     }
 
-    /* And so does the height of the glass each desktop is being shown on. The
-     * floor belongs to the monitor, not to the strip: on a 1080p screen beside
-     * a 1440p one, a floor at the strip's height is 360px below the bottom of
-     * the smaller screen and windows settle out of sight. Read every tick, so a
-     * hotplug or a mode change moves the floor under whatever is resting on it.
+    /* And so does the size of the glass each desktop is being shown on. The
+     * floor and the right edge belong to the monitor, not to the strip: on a
+     * 1080p screen beside a 1440p one, a floor at the strip's height is 360px
+     * below the bottom of the smaller screen and windows settle out of sight,
+     * and the last 640px of the column are behind the bezel. Read every tick,
+     * so a hotplug or a mode change moves both under whatever is resting there.
      *
-     * Only the height. A desktop's WIDTH is the strip's stride and cannot vary
-     * per monitor: a window has to be able to be carried from desktop d to
-     * d+1, so there is nothing solid to put at the edge of a column. A monitor
-     * narrower than the stride still has dead space along its right — that half
-     * of #20 needs the strip itself to change shape, not another wall. */
+     * The two are not the same kind of wall. The floor is solid; the right edge
+     * is a fence a window in flight goes straight through, because the strip
+     * has to stay crossable — see physics.h, desktop_w. */
     for (int d = 0; d < FWM_DESKTOPS; d++) {
         FwmOutput *mon = server_output_showing(server, d);
         server->physics.desktop_h[d] = (mon && mon->box.height > 0) ? mon->box.height : 0;
+        server->physics.desktop_w[d] = (mon && mon->box.width  > 0) ? mon->box.width  : 0;
     }
 
     if (expo_active(server)) steps = 0;

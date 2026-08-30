@@ -40,8 +40,16 @@ void layer_arrange(FwmServer *server) {
     if (server->screen_width <= 0 || server->screen_height <= 0) return;
 
     /* One usable area is kept, the primary's: it is what fake fullscreen and
-     * the tiling layout read, and our own chrome lives there. */
-    struct wlr_box primary_usable = { 0, 0, server->screen_width, server->screen_height };
+     * the tiling layout read, and our own chrome lives there.
+     *
+     * The primary MONITOR's box until a bar cuts into it, not the strip's — a
+     * desktop is the size of the largest screen, so on any other one the strip
+     * is the wrong shape and whoever measures an inset off this would find one
+     * where no bar stands. */
+    FwmOutput *pri = server_primary_output(server);
+    struct wlr_box primary_usable = pri && pri->box.width > 0
+        ? pri->box
+        : (struct wlr_box){ 0, 0, server->screen_width, server->screen_height };
 
     struct wlr_output_layout_output *lo;
     wl_list_for_each(lo, &server->output_layout->outputs, link) {

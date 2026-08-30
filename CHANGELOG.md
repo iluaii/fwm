@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Monitors of different sizes
+
+- **A desktop is the size of the largest monitor, not the primary one.** A
+  screen bigger than the primary used to have a band of glass along its right
+  and its bottom that was not part of any desktop: tiling stopped short of it,
+  a window could not be put there, and nothing could rest there to be seen.
+  Sized off the biggest, every screen shows a whole desktop.
+- **The right edge of a smaller screen is a fence.** A window pushed along by
+  its neighbours stops where the glass does instead of being pressed on into
+  the part of the desktop behind the bezel, and one that comes down out there is
+  put back. A window in flight goes straight through it — that is how a window
+  crosses to the next desktop, and it stays crossable.
+- Together with the per-desktop floor, this closes #20.
+
 ## 0.5.0
 
 The first release since the Wayland port settled. 277 commits since 0.3.0.

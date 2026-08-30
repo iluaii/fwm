@@ -30,7 +30,8 @@ SCENARIOS="bare clients churn tiling groups desktops overlays radial physics rel
 # backend is the only place we can be sure of getting one.
 outputs_env="WLR_HEADLESS_OUTPUTS=2"
 # `monitors` needs two as well, of different sizes, and things to fall: fwm
-# boots in zero-g, and a window that never falls never finds a floor.
+# boots in zero-g, and a window that never falls never finds a floor. Its HOME
+# is set further down, once there is a directory to point it at.
 monitors_env="WLR_HEADLESS_OUTPUTS=2 FWM_TEST_GRAVITY=1"
 
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
@@ -123,6 +124,21 @@ action = "toggle_split"
 TOML
 radial_env="HOME=$RADHOME"
 
+# And `monitors` gets a HOME of its own — an EMPTY config, which is the point.
+# A state directory of its own for the same reason: a saved overlay restores
+# output modes and physics settings, and the developer's own is not a fixture.
+# It is the one scenario that reconfigures screens while it measures, and on the
+# developer's own config it was doing that with their [startup] programs running
+# inside it: a keyboard daemon holding an `fwmctl subscribe` open, a gamma
+# setter walking the outputs. Anything left over from the scenario before it
+# then found the next compositor on the same socket path. The scenario answered
+# one request and never another, skipped itself on the empty read, and every
+# full run reported it clean without measuring a single floor.
+MONHOME="$LOGDIR/home-monitors"
+mkdir -p "$MONHOME/.config/fwm"
+: > "$MONHOME/.config/fwm/config.toml"
+monitors_env="HOME=$MONHOME XDG_STATE_HOME=$LOGDIR/state-monitors $monitors_env"
+
 # `settings` WRITES a state file — the overlay `fwmctl save` keeps — so it gets
 # a state directory of its own under the logs. The developer's own
 # ~/.local/state/fwm is never read and never written by the suite.
@@ -202,11 +218,17 @@ client() {
 # depends on how far it has to fall, which depends on the screen it is falling
 # down — so this polls for two identical readings rather than sleeping a
 # guessed amount, which on the tall screen guessed wrong.
+#
+# BOTH axes. A window sent to another desktop crosses the strip sideways at a
+# constant height, so watching y alone called the world settled while a window
+# was still in the air over another screen — and the claim that followed
+# measured it mid-flight. Reliably enough to look like a real fault, rarely
+# enough to look like a flaky one.
 settle() {
     _prev=""
     i=0
     while [ $i -lt 40 ]; do
-        _now="$(timeout 5 "$FWMCTL" windows 2>/dev/null | grep -o '"y":-\?[0-9]*' || true)"
+        _now="$(timeout 5 "$FWMCTL" windows 2>/dev/null | grep -o '"[xy]":-\?[0-9]*' || true)"
         [ -n "$_now" ] && [ "$_now" = "$_prev" ] && return 0
         _prev="$_now"
         i=$((i + 1))
@@ -555,22 +577,55 @@ sc_monitors() {
     # Which of the two is the primary is deliberately not decided here: the
     # rule under test holds either way round, and the headless backend is free
     # to hand them over in whatever order it likes.
-    ctl output "$tall_mon"  mode=1280x1024
-    ctl output "$short_mon" mode=1280x600
-    sleep 1
-
     # Read the arrangement back rather than assuming it: a mode can be refused,
     # and a scenario that then measured against the size it ASKED for would
     # report a failure of the floor when what failed was the mode set.
-    outs="$("$FWMCTL" outputs 2>/dev/null | tr '{' '\n')"
+    outs=""
     desk_of()   { echo "$outs" | grep "\"name\":\"$1\"" | grep -o '"desktop":-\?[0-9]*' | cut -d: -f2; }
     height_of() { echo "$outs" | grep "\"name\":\"$1\"" | grep -o '"height":[0-9]*'     | cut -d: -f2; }
+    width_of()  { echo "$outs" | grep "\"name\":\"$1\"" | grep -o '"width":[0-9]*'      | cut -d: -f2; }
 
-    tall_d="$(desk_of "$tall_mon")";   tall_h="$(height_of "$tall_mon")"
-    short_d="$(desk_of "$short_mon")"; short_h="$(height_of "$short_mon")"
-    [ "$tall_h" != "$short_h" ] || {
+    # Different in BOTH axes: the floor is the height half of #20 and the fence
+    # along the right edge is the width half, and one scenario proves both.
+    #
+    # Asked for until it takes, rather than once. A mode change rebuilds a
+    # wallpaper, a grass strip and a status strip per screen, and a compositor
+    # in the middle of that answers slower than the five seconds `ctl` gives one
+    # fwmctl — so the request went nowhere and the read that followed came back
+    # empty, which looked exactly like a backend refusing the mode. Every full
+    # run skipped this scenario on that and reported it clean without ever
+    # measuring a floor; only running it on its own, on an idle machine, ever
+    # tested anything.
+    i=0
+    while [ $i -lt 12 ]; do
+        ctl output "$tall_mon"  mode=1280x1024
+        ctl output "$short_mon" mode=1024x600
+        outs="$("$FWMCTL" outputs 2>/dev/null | tr '{' '\n')"
+        [ "$(height_of "$tall_mon")" = "1024" ] && [ "$(width_of "$short_mon")" = "1024" ] && break
+        i=$((i + 1))
+        sleep 1
+    done
+
+    tall_d="$(desk_of "$tall_mon")";   tall_h="$(height_of "$tall_mon")";   tall_w="$(width_of "$tall_mon")"
+    short_d="$(desk_of "$short_mon")"; short_h="$(height_of "$short_mon")"; short_w="$(width_of "$short_mon")"
+    # One axis is enough to have something to measure. Both is what the modes
+    # above ask for, but a backend is free to refuse a mode and a scenario that
+    # then insisted would report a failure of the floor when what failed was the
+    # mode set.
+    [ "$tall_h" != "$short_h" ] || [ "$tall_w" != "$short_w" ] || {
         echo "  (both screens the same size — mode set refused, skipped)"; return 0
     }
+
+    # A column has to be at least as big as every screen that shows one, or the
+    # bigger screen has glass no desktop reaches. So the strip is sized off the
+    # LARGEST monitor, in each axis independently.
+    stride_w="$tall_w";  [ "$short_w" -gt "$stride_w" ] && stride_w="$short_w"
+    stride_h="$tall_h";  [ "$short_h" -gt "$stride_h" ] && stride_h="$short_h"
+    st="$("$FWMCTL" state 2>/dev/null)"
+    claim "the strip's stride, across" \
+        "$(echo "$st" | grep -o '"screen_width":[0-9]*'  | cut -d: -f2)" "$stride_w" 0
+    claim "the strip's stride, down" \
+        "$(echo "$st" | grep -o '"screen_height":[0-9]*' | cut -d: -f2)" "$stride_h" 0
 
     # One window per screen, and never two on one at once: a window that lands
     # on top of another and stops there would be measured against a floor it
@@ -582,12 +637,14 @@ sc_monitors() {
     # window twice — which leaves both of them on one screen and every claim
     # below measuring the same floor.
     ids_now() { "$FWMCTL" windows 2>/dev/null | grep -o '"id":[0-9]*' | cut -d: -f2 | sort; }
+    placed=""
     for d in "$tall_d" "$short_d"; do
         before="$(ids_now)"
         client 35
         id="$(ids_now | grep -vxF "${before:-!}" | head -1)"
         [ -n "$id" ] || { echo "  (client never mapped — skipped)"; return 0; }
         ctl window "$id" "desktop=$d"
+        placed="$placed $d:$id"
     done
     settle
 
@@ -609,6 +666,37 @@ sc_monitors() {
         [ -n "$wd" ] && [ -n "$wy" ] && [ -n "$wh" ] || continue
         if [ "$wd" = "$short_d" ]; then glass="$short_h"; else glass="$tall_h"; fi
         claim "bottom of the window on desktop $wd" "$((wy + wh))" "$glass" 4
+    done
+
+    # And the width half. The dead band is the part of a column a screen
+    # narrower than the stride does not reach, and nothing may come to REST in
+    # it: put each window out there by hand and it has to be back on the glass
+    # by the time the world settles. The window on the screen that IS the stride
+    # has no band to be pushed out of and must not move.
+    for pair in $placed; do
+        d="${pair%%:*}"; id="${pair#*:}"
+        if [ "$d" = "$short_d" ]; then glass="$short_w"; else glass="$tall_w"; fi
+        w="$("$FWMCTL" windows 2>/dev/null | tr '{' '\n' | grep "\"id\":$id,")"
+        ww="$(echo "$w" | grep -o '"width":[0-9]*' | cut -d: -f2)"
+        [ -n "$ww" ] || continue
+        # Hard against the right edge of the COLUMN, which on the small screen
+        # is entirely behind the bezel.
+        ctl window "$id" "x=$((d * stride_w + stride_w - ww))"
+    done
+    settle
+
+    for pair in $placed; do
+        d="${pair%%:*}"; id="${pair#*:}"
+        if [ "$d" = "$short_d" ]; then glass="$short_w"; else glass="$tall_w"; fi
+        w="$("$FWMCTL" windows 2>/dev/null | tr '{' '\n' | grep "\"id\":$id,")"
+        wx="$(echo "$w" | grep -o '"x":-\?[0-9]*'   | cut -d: -f2)"
+        ww="$(echo "$w" | grep -o '"width":[0-9]*'  | cut -d: -f2)"
+        [ -n "$wx" ] && [ -n "$ww" ] || continue
+        # Against its own screen's right edge, wherever that is — not the
+        # column's. A couple of pixels either way: where a window ends up is the
+        # solver's answer, not arithmetic.
+        claim "right edge of the window on desktop $d" \
+              "$((wx - d * stride_w + ww))" "$glass" 4
     done
 }
 
