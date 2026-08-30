@@ -6,6 +6,10 @@
 #   ./install.sh update config  merge new options into your config.toml
 #   ./install.sh uninstall      remove installed files (config is kept)
 #
+# The package manager is only run when something is actually missing, so a
+# rebuild does not wait on a repository sync. FWM_SKIP_DEPS=1 skips the check
+# as well.
+#
 # Supported package managers: pacman (Arch), apt (Debian/Ubuntu),
 # dnf (Fedora), xbps (Void). Box2D v3 is built from source when the
 # distro does not ship it (Debian's libbox2d-dev is 2.4 — too old).
@@ -66,6 +70,10 @@ install_deps() {
         # handled by ensure_box2d below.
     elif command -v dnf >/dev/null 2>&1; then
         msg "Installing dependencies (dnf)"
+        # wlroots-devel is the only name Fedora has — there is no
+        # wlroots0.20-devel — and which branch it holds depends on the
+        # release: 0.20 on 44 and newer, 0.19 on 43 and older. The check
+        # after install_deps is what catches the second case.
         $SUDO dnf install -y \
             gcc make cmake pkgconf-pkg-config git \
             wayland-devel wlroots-devel libxkbcommon-devel \
@@ -96,20 +104,82 @@ install_deps() {
     else
         warn "unknown package manager — install deps manually:"
         warn "  wayland, wlroots-0.20, xkbcommon, cairo, pango, gdk-pixbuf, box2d v3, ffmpeg (libav*), xwayland"
-    warn "  optional: pipewire and/or pulseaudio (headers) — the [cava] visualiser"
-    warn "  picks whichever sound server is actually running; with neither it is left out"
+        warn "  optional: pipewire and/or pulseaudio (headers) — the [cava] visualiser"
+        warn "  picks whichever sound server is actually running; with neither it is left out"
     fi
+}
+
+# ── what the build needs ───────────────────────────────────────────────
+# Every module CMakeLists.txt asks pkg-config for, spelled the way it spells
+# them. wlroots-0.20 is the branch in the module name, so its presence is the
+# version check as well. Box2D is not here: ensure_box2d handles it.
+PC_REQUIRED="wayland-server wlroots-0.20 xkbcommon cairo pango pangocairo
+gdk-pixbuf-2.0 glib-2.0 pixman-1 libinput egl glesv2 libdrm
+libavformat libavcodec libavutil libswscale"
+
+# Prints what is missing, empty when nothing is. Asking pkg-config costs
+# milliseconds; asking the package manager costs a repository sync, which is
+# most of the wait when all anyone wanted was a new binary.
+missing_deps() {
+    local miss="" p
+    command -v pkg-config >/dev/null 2>&1 || { printf 'pkg-config'; return; }
+    for p in $PC_REQUIRED; do
+        pkg-config --exists "$p" 2>/dev/null || miss="$miss $p"
+    done
+    command -v cc >/dev/null 2>&1 || command -v gcc >/dev/null 2>&1 || miss="$miss a C compiler"
+    for p in cmake git; do
+        command -v "$p" >/dev/null 2>&1 || miss="$miss $p"
+    done
+    printf '%s' "${miss# }"
+}
+
+# Runs the package manager only for a machine that needs it, and says plainly
+# when it did not fix things — an unmet dependency named here is worth more
+# than the same one found by cmake a minute later.
+ensure_deps() {
+    local miss
+    if [ "${FWM_SKIP_DEPS:-0}" = 1 ]; then
+        msg "FWM_SKIP_DEPS=1 — not checking or installing dependencies"
+        return 0
+    fi
+    miss="$(missing_deps)"
+    if [ -z "$miss" ]; then
+        msg "Dependencies already present — skipping the package manager"
+        return 0
+    fi
+    msg "Missing: $miss"
+    install_deps
+    miss="$(missing_deps)"
+    [ -n "$miss" ] || return 0
+    warn "still missing after the package manager ran: $miss"
+    case " $miss " in
+    *" wlroots-0.20 "*)
+        warn "this release packages a different wlroots branch — Fedora 43 and"
+        warn "older ship 0.19, and Debian names the branch in the package. fwm"
+        warn "needs 0.20 and will not build against 0.19:"
+        warn "  https://gitlab.freedesktop.org/wlroots/wlroots"
+        ;;
+    esac
+    return 1
 }
 
 # ── Box2D v3 (cmake package `box2d`) ───────────────────────────────────
 have_box2d3() {
     # box2d v3 installs a cmake config; v2.4 packages don't provide box2dConfig
     # with the b2WorldId C API, so also reject anything without box2d/box2d.h.
-    local cfg
-    cfg=$(find /usr/lib /usr/lib64 /usr/local/lib /usr/local/lib64 \
-               -name 'box2dConfig.cmake' -path '*cmake*' 2>/dev/null | head -1)
-    [ -n "$cfg" ] || return 1
-    [ -e /usr/include/box2d/box2d.h ] || [ -e /usr/local/include/box2d/box2d.h ]
+    # Named paths rather than a find over all of /usr/lib: this runs on every
+    # rebuild, and the one directory cmake will look in is known.
+    local d c
+    [ -e /usr/include/box2d/box2d.h ] || [ -e /usr/local/include/box2d/box2d.h ] || return 1
+    for d in /usr/lib /usr/lib64 /usr/local/lib /usr/local/lib64; do
+        [ -d "$d" ] || continue
+        # The second glob is Debian's multiarch (/usr/lib/x86_64-linux-gnu).
+        for c in "$d"/cmake/box2d/box2dConfig.cmake \
+                 "$d"/*/cmake/box2d/box2dConfig.cmake; do
+            [ -e "$c" ] && return 0
+        done
+    done
+    return 1
 }
 
 ensure_box2d() {
@@ -286,7 +356,7 @@ merge_config() {
 # ── commands ───────────────────────────────────────────────────────────
 case "${1:-install}" in
 install)
-    install_deps
+    ensure_deps || exit 1
     ensure_box2d
     build
     install_files
@@ -296,6 +366,7 @@ update)
     "")
         msg "Updating from git"
         git -C "$REPO_DIR" pull --ff-only
+        ensure_deps || exit 1
         ensure_box2d
         build
         install_files
