@@ -221,13 +221,13 @@ typedef struct {
      * happened, so letting go is a plain click (see TILE_TEAR_PX). */
     int tile_grab;
 
-    /* Where the camera of the monitor under the hand stood when the dragged
-     * window was last placed, and which monitor that was. The drag anchors the
-     * window with a screen delta, so anything that moves the world underneath it
-     * — edge auto-scroll, above all — has to be added back in
-     * (server_drag_follow_camera). */
+    /* Which monitor the hand was last over, so a drag notices when it crosses
+     * to another screen (drag_cross_screens). The camera reading itself lives
+     * in cam_offset below: the drag anchors its window with a screen delta, so
+     * anything that moves the world underneath it — edge auto-scroll, above
+     * all — has to be added back in, and that is done in one place, by the
+     * placement that reads it (drag_place). */
     FwmOutput *cam_output;
-    int cam_ref;
     int cam_have;
     /* Where the world sits under the screen the hand was last on: camera_x
      * minus box.x, which is what turns a layout coordinate into a world one.

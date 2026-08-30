@@ -297,18 +297,17 @@ static void drag_place(FwmServer *server, double lx, double ly) {
      * tick is up to a frame of the window drawn against the old screen's
      * offset and then snapped back — which on two monitors of different height
      * is a visible jerk, the width of the gap between their top edges. The
-     * caller places the window once, afterwards, with the corrected anchor.
-     *
-     * Returns 1 if the anchor moved. */
-static int drag_cross_screens(FwmServer *server, double lx, double ly) {
+     * caller places the window once, afterwards, with the corrected anchor —
+     * every time, whether this moved the anchor or not, which is why it has
+     * nothing to report back. */
+static void drag_cross_screens(FwmServer *server, double lx, double ly) {
     FwmOutput *o = server_output_at(server, lx, ly);
-    if (!o) return 0;
+    if (!o) return;
 
     int offset   = o->camera_x - o->box.x;
     int offset_y = -o->box.y;
     if (!server->interactive.cam_have) {
         server->interactive.cam_output = o;
-        server->interactive.cam_ref = o->camera_x;
         /* The anchor is expressed in the frame of the screen DRAWING the
          * window, which is not always the one under the hand — a window can be
          * picked up while it straddles a join. drag_place owns these two from
@@ -318,11 +317,10 @@ static int drag_cross_screens(FwmServer *server, double lx, double ly) {
         server->interactive.cam_offset   = frame->camera_x - frame->box.x;
         server->interactive.cam_offset_y = -frame->box.y;
         server->interactive.cam_have = 1;
-        return 0;
+        return;
     }
-    if (server->interactive.cam_output == o) return 0;
+    if (server->interactive.cam_output == o) return;
     server->interactive.cam_output = o;
-    server->interactive.cam_ref = o->camera_x;
 
     /* ONLY ACROSS A BREAK IN THE WORLD.
      *
@@ -339,7 +337,7 @@ static int drag_cross_screens(FwmServer *server, double lx, double ly) {
      * disappears out from under the cursor carrying it. That one is handed
      * over the moment the hand is, because there is no other moment. */
     int carry = offset - server->interactive.cam_offset;
-    if (!carry) return 0;
+    if (!carry) return;
 
     int carry_y = offset_y - server->interactive.cam_offset_y;
     server->interactive.cam_offset   = offset;
@@ -350,35 +348,33 @@ static int drag_cross_screens(FwmServer *server, double lx, double ly) {
      * hands it a whole screen of travel in one tick. */
     if (server->interactive.view)
         view_jelly_carry(server->interactive.view, carry, carry_y);
-    return 1;
 }
 
 /* The camera moved under a drag (edge auto-scroll, above all): bring the window
  * along. The crossing above is settled here too, for a hand that leaves one
  * monitor without a motion event to say so — a screen unplugged, a camera
- * sliding out from under a cursor standing still. */
+ * sliding out from under a cursor standing still.
+ *
+ * THE CARRYING ITSELF IS drag_place'S, ALL OF IT, AND ONLY ITS.
+ *
+ * This used to add a correction of its own as well: the camera's travel since
+ * the last tick, measured against a reference of its own, added to the anchor.
+ * That was right when drag_place knew only about the hand. It stopped being
+ * right when drag_place learned to re-frame the anchor against the screen
+ * DRAWING the window, because a camera sliding under a stationary hand moves
+ * that frame by exactly the same amount — so the two were one correction
+ * applied twice, and the window ran away from the hand at precisely the
+ * camera's speed. Push a window into the screen edge and by the end of the
+ * slide it was a full screen width past the cursor, off the edge you were
+ * pushing towards, sitting in the desktop AFTER the one you had arrived on —
+ * which is where it landed if you let go.
+ *
+ * One movement of the world, one correction, in the placement that reads it. */
 void server_drag_follow_camera(FwmServer *server) {
     if (server->interactive.action != FWM_ACTION_MOVE || !server->interactive.view) return;
     if (!server->cursor) return;
 
-    if (drag_cross_screens(server, server->cursor->x, server->cursor->y)) {
-        drag_place(server, server->cursor->x, server->cursor->y);
-        return;
-    }
-
-    FwmOutput *o = server_output_at(server, server->cursor->x, server->cursor->y);
-    if (!o) return;
-
-    int delta = o->camera_x - server->interactive.cam_ref;
-    if (delta) {
-        server->interactive.cam_ref = o->camera_x;
-        server->interactive.view_start_x += delta;
-        /* The window did not move — the world did, and the hand is still
-         * holding it exactly where it was on screen. Telling the wobble
-         * otherwise hands it a whole desktop of travel in one tick, which is
-         * what made a window carried across with super+N jerk in the hand. */
-        view_jelly_carry(server->interactive.view, delta, 0);
-    }
+    drag_cross_screens(server, server->cursor->x, server->cursor->y);
 
     /* Placed every tick, not only when the camera moved. The frame the anchor
      * is read in (drag_place) can change with the hand perfectly still — the
