@@ -871,10 +871,13 @@ FwmOutput *server_output_at(FwmServer *server, double lx, double ly);
 FwmOutput *server_active_output(FwmServer *server);
 /* The monitor showing desktop `d`, or NULL when none is. */
 FwmOutput *server_output_showing(FwmServer *server, int d);
-/* The monitor that will draw a window of `span` with its left edge at `wx`,
- * `prefer` being the one that drew it last. See server_output.c. */
-FwmOutput *server_output_drawing(FwmServer *server, double wx, double span,
-                                 FwmOutput *prefer);
+/* The monitor that draws window `v`, whose left edge is at `wx` and which is
+ * `span` wide, and how far that monitor's own animations shift it (either
+ * pointer may be NULL). Everything that draws, cuts or measures a window asks
+ * THIS — a window in the hand is deliberately not on the screen a plain
+ * "who shows this column" lookup would name. See server_output.c. */
+FwmOutput *server_view_frame(FwmServer *server, struct FwmView *v, double wx,
+                             double span, double *shift_x, double *shift_y);
 /* Trade two desktops: what stood on `a` stands on `b` and the other way round,
  * windows, layout tree and mode together. The places themselves do not move —
  * the camera stays where it is and each monitor goes on showing the desktop it

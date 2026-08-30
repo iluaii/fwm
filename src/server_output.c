@@ -647,19 +647,59 @@ static FwmOutput *world_output(FwmServer *server, double wx, double span) {
     return world_output_near(server, wx, span, NULL);
 }
 
-/* Which monitor WILL draw a window of `span` whose left edge lands at `wx`,
- * given the screen that drew it last. The same answer server_place_view is
- * about to reach, asked one step early.
+/* WHICH SCREEN DRAWS THIS WINDOW, and by how much that screen's own animations
+ * shift it. The single answer everything that draws, cuts or measures a window
+ * has to agree on: the placement (server_place_view), the crop that keeps it
+ * inside its monitor (server_views_clip), and the drag, which needs it one step
+ * early — a window is drawn by one screen and cut to it, so crossing a join
+ * swaps the frame its position is read in, and on two monitors that are not
+ * aligned along their top edges the two frames differ by the gap between them.
+ * The drag cancels that by shifting the window through the world by the same
+ * amount, which only works if both happen in ONE placement: half of it a frame
+ * early is exactly the jerk it exists to prevent. See drag_place.
  *
- * The drag needs it early. A window is drawn by one screen and cut to it, so
- * crossing a join swaps the frame its position is read in — and on two monitors
- * that are not aligned along their top edges the two frames differ by the gap
- * between them. The drag cancels that by shifting the window through the world
- * by the same amount, which only works if both happen in ONE placement: half of
- * it a frame early is exactly the jerk it exists to prevent. See drag_place. */
-FwmOutput *server_output_drawing(FwmServer *server, double wx, double span,
-                                 FwmOutput *prefer) {
-    return world_output_near(server, wx, span, prefer);
+ * Ordinarily the screen showing the column the window's left edge stands in.
+ *
+ * A WINDOW IN THE HAND IS THE EXCEPTION: it is drawn by the screen the hand is
+ * on, whatever became of the column underneath it.
+ *
+ * Because a column can change screens with the window standing still. Two
+ * monitors trade desktops the moment one is asked for a desktop the other is
+ * already showing — and a held window's column then belongs to the OTHER
+ * screen while the hand is still here. Following the column meant the anchor
+ * was re-framed against a camera on a different monitor sliding the other way:
+ * a window held on the left screen and sent one desktop along was shoved two
+ * columns forward in a single frame, into a column no screen shows, where it
+ * stayed — gone from under the hand, still held, and beyond rescue, because a
+ * window nothing draws gets no further corrections.
+ *
+ * Staying with the hand costs nothing and needs no arithmetic of its own: the
+ * arriving camera carries the window into the new column by itself, exactly as
+ * it does on one monitor. What it does change is WHEN the picture crosses a
+ * bezel — when the hand crosses it, rather than when the window's left edge
+ * reaches the next column. Which is the better of the two anyway: what you are
+ * holding is on the screen you are holding it over. */
+FwmOutput *server_view_frame(FwmServer *server, FwmView *v, double wx, double span,
+                             double *shift_x, double *shift_y) {
+    FwmOutput *o = NULL;
+    bool held = server->interactive.action == FWM_ACTION_MOVE
+             && server->interactive.view == v
+             && server->interactive.cam_output != NULL;
+    if (held) {
+        o = server->interactive.cam_output;
+        if (!o->enabled || o->hide_world || o->box.width <= 0) { o = NULL; held = false; }
+    }
+    if (!o) o = world_output_near(server, wx, span, v ? v->drawn_on : NULL);
+    if (!o) return NULL;
+
+    /* The swap offset carries a DESKTOP across the gap between two screens. A
+     * window in the hand is not going with it — it stays where the hand is — so
+     * it is not offset by it either. Without this the trade above would fling
+     * the held window a screen sideways and ease it back, which is the same
+     * flight by another road. */
+    if (shift_x) *shift_x = o->render_dx + (held ? 0.0 : o->swap_dx);
+    if (shift_y) *shift_y = o->render_dy + (held ? 0.0 : o->swap_dy);
+    return o;
 }
 
 bool server_world_to_screen(FwmServer *server, double wx, double wy,
@@ -728,15 +768,16 @@ void server_panel_to_active_output(FwmServer *server, struct wlr_scene_buffer *p
  * override-redirect surfaces use the plain node version below. */
 void server_place_view(FwmServer *server, FwmView *v, double wx, double wy) {
     if (!v || !v->scene_tree) return;
-    FwmOutput *o = world_output_near(server, wx, v->width, v->drawn_on);
+    double shift_x, shift_y;
+    FwmOutput *o = server_view_frame(server, v, wx, v->width, &shift_x, &shift_y);
     v->drawn_on = o;
     if (!o) {
         wlr_scene_node_set_position(&v->scene_tree->node, PARKED_X, (int)lround(wy));
         return;
     }
     wlr_scene_node_set_position(&v->scene_tree->node,
-        (int)lround(wx - o->camera_x + o->box.x + o->render_dx + o->swap_dx),
-        (int)lround(wy + o->box.y + o->render_dy + o->swap_dy));
+        (int)lround(wx - o->camera_x + o->box.x + shift_x),
+        (int)lround(wy + o->box.y + shift_y));
 }
 
 void server_place_node(FwmServer *server, struct wlr_scene_node *node,
@@ -830,12 +871,19 @@ void server_views_clip(FwmServer *server) {
             continue;
         }
 
-        double sx, sy;
-        FwmOutput *o = world_output_near(server, v->x, v->width, v->drawn_on);
-        if (!o || !server_world_to_screen(server, v->x, v->y, v->width, &sx, &sy)) {
+        double shift_x, shift_y;
+        FwmOutput *o = server_view_frame(server, v, v->x, v->width, &shift_x, &shift_y);
+        if (!o) {
             view_uncut(server, v);   /* parked: nothing is drawn to cut */
             continue;
         }
+        /* The arithmetic server_place_view just used, against the screen it
+         * used it against. Asking server_world_to_screen instead would look
+         * the screen up a second time and get a different one for a window in
+         * the hand — and then the window would be cut to a monitor it is not
+         * being drawn on, which is a window cut away to nothing. */
+        double sx = v->x - o->camera_x + o->box.x + shift_x;
+        double sy = v->y + o->box.y + shift_y;
 
         int x = (int)lround(sx), y = (int)lround(sy);
         if (!rect_reaches_other_output(server, o, x, y, v->width, v->height)) {

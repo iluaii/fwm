@@ -177,9 +177,9 @@ static void drag_place(FwmServer *server, double lx, double ly) {
      * move on the glass at all. The join stops being a place where anything
      * happens. */
     if (server->interactive.cam_have) {
-        FwmOutput *frame = server_output_drawing(server, target_world_x,
-                                                 server->interactive.view_start_width,
-                                                 view->drawn_on);
+        FwmOutput *frame = server_view_frame(server, view, target_world_x,
+                                             server->interactive.view_start_width,
+                                             NULL, NULL);
         if (frame) {
             int off  = frame->camera_x - frame->box.x;
             int offy = -frame->box.y;
