@@ -23,7 +23,7 @@ BUILD="$REPO/build-asan"
 KEEP=0
 LIST=0
 
-SCENARIOS="bare clients churn tiling groups desktops overlays radial physics reload ipc settings outputs monitors xwayland threads kill"
+SCENARIOS="bare clients churn tiling groups desktops overlays radial physics reload ipc settings outputs monitors clipboard xwayland threads kill"
 
 # A scenario whose compositor has to be started differently says so here, in a
 # variable named after it. `outputs` needs a second monitor, and the headless
@@ -138,6 +138,14 @@ MONHOME="$LOGDIR/home-monitors"
 mkdir -p "$MONHOME/.config/fwm"
 : > "$MONHOME/.config/fwm/config.toml"
 monitors_env="HOME=$MONHOME XDG_STATE_HOME=$LOGDIR/state-monitors $monitors_env"
+
+# `clipboard` gets an empty config of its own for the same reason `monitors`
+# does: it kills clients on purpose and would otherwise be doing that inside the
+# developer's [startup] programs.
+CLIPHOME="$LOGDIR/home-clipboard"
+mkdir -p "$CLIPHOME/.config/fwm"
+: > "$CLIPHOME/.config/fwm/config.toml"
+clipboard_env="HOME=$CLIPHOME XDG_STATE_HOME=$LOGDIR/state-clipboard"
 
 # `settings` WRITES a state file — the overlay `fwmctl save` keeps — so it gets
 # a state directory of its own under the logs. The developer's own
@@ -258,6 +266,17 @@ claim() {   # claim <what> <got> <want> [tolerance]
         echo "CLAIM ok: $1 = $2" >>"$claims"
     else
         echo "CLAIM FAILED: $1 = $2, expected $3 (+/- $_tol)" >>"$claims"
+    fi
+}
+
+# The same, for an answer that is text rather than a measurement. Empty is a
+# real answer here — "the clipboard came back empty" is what half of these
+# expect — so it is compared like any other string rather than refused.
+claim_str() {   # claim_str <what> <got> <want>
+    if [ "$2" = "$3" ]; then
+        echo "CLAIM ok: $1 = '$2'" >>"$claims"
+    else
+        echo "CLAIM FAILED: $1 = '$2', expected '$3'" >>"$claims"
     fi
 }
 
@@ -700,6 +719,95 @@ sc_monitors() {
     done
 }
 
+# What the compositor keeps of a copy after the window that made it is gone.
+#
+# The one feature here whose whole point is a client being DEAD, which no static
+# test can stand in for: the text has to have been read out of a live client,
+# held, and offered again in its place. And the read is now deferred (clipboard.c,
+# "the wait before asking"), so there is a timer, a source-destroy listener and
+# five ways to cancel both — the shape a use-after-free comes in, and the reason
+# this is a sanitizer scenario rather than a unit test.
+#
+# wl-copy is the client: it stays alive holding the selection, exactly as the
+# window you copied out of does, so killing it is the event under test.
+sc_clipboard() {
+    command -v wl-copy >/dev/null 2>&1 && command -v wl-paste >/dev/null 2>&1 || {
+        echo "  (no wl-clipboard — skipped)"; return 0
+    }
+
+    # --foreground, or wl-copy forks and $! is a shell that has already exited:
+    # the pid to kill has to be the one holding the promise.
+    copy() {   # copy <text>
+        wl-copy --foreground "$1" >/dev/null 2>&1 &
+        CP_PID=$!
+        KIDS="$KIDS $CP_PID"
+        sleep "${2:-1}"
+    }
+    paste() { timeout 5 wl-paste --no-newline 2>/dev/null || true; }
+
+    # The whole feature in four lines: copy, close the window, paste anyway.
+    copy "a command out of a terminal"
+    kill "$CP_PID" 2>/dev/null || true
+    sleep 1
+    claim_str "text kept after the window that copied is gone" \
+              "$(paste)" "a command out of a terminal"
+
+    # A second copy replaces the first — what is kept is the last thing copied,
+    # not a history.
+    copy "the one after it"
+    kill "$CP_PID" 2>/dev/null || true
+    sleep 1
+    claim_str "the copy that is kept is the last one" \
+              "$(paste)" "the one after it"
+
+    # Switched off, the next copy is not kept. What is on the clipboard RIGHT
+    # NOW is not touched by the switch and must not be: it is a live selection
+    # like any other, and fwm pulling it out from under a paste would be a
+    # worse bug than the one persistence exists to fix.
+    ctl set clipboard.persist=0
+    claim_str "the live selection survives persistence going off" \
+              "$(paste)" "the one after it"
+    copy "not to be kept"
+    kill "$CP_PID" 2>/dev/null || true
+    sleep 1
+    claim_str "nothing kept while persistence is off" "$(paste)" ""
+    ctl set clipboard.persist=1
+
+    # And back on again, live.
+    copy "kept again"
+    kill "$CP_PID" 2>/dev/null || true
+    sleep 1
+    claim_str "persistence back on keeps the next copy" "$(paste)" "kept again"
+
+    # Now the paths that have no answer to claim, only a way to crash: a wait
+    # cancelled by every route out of it. Killed before the read is even asked
+    # for; replaced by another copy mid-wait; the setting turned off mid-wait;
+    # and one left holding the selection at the end, so teardown runs with a
+    # copy still owned rather than on an empty seat.
+    i=0
+    while [ $i -lt 6 ]; do
+        copy "gone before the question" 0.05
+        kill "$CP_PID" 2>/dev/null || true
+        i=$((i + 1))
+    done
+    sleep 1
+
+    copy "first" 0.05
+    _first=$CP_PID
+    copy "second" 0.05
+    copy "third" 1
+    kill "$_first" 2>/dev/null || true
+    kill "$CP_PID" 2>/dev/null || true
+    sleep 1
+
+    copy "off mid-wait" 0.05
+    ctl set clipboard.persist=0
+    kill "$CP_PID" 2>/dev/null || true
+    ctl set clipboard.persist=1
+    sleep 1
+
+    copy "still holding it" 1
+}
 # The threaded half of the compositor, which every other scenario leaves
 # switched off. A video wallpaper decodes on its own thread and hands frames
 # over; the cava row captures and runs its FFT on another and hands over bar

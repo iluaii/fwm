@@ -16,6 +16,15 @@
   crosses to the next desktop, and it stays crossable.
 - Together with the per-desktop floor, this closes #20.
 
+### Clipboard
+
+- **The kept copy is read a moment after the copy, not during it.** A copy is
+  several flavours at once, and asking a Chromium-based client for one of them
+  while it is still arranging the others wedged that client's own clipboard
+  until it was restarted. fwm now waits for the selection to stand still first.
+  The cost is a copy made in the last fraction of a second of a window's life,
+  which is not kept.
+
 ## 0.5.0
 
 The first release since the Wayland port settled. 277 commits since 0.3.0.

@@ -81,6 +81,13 @@ struct FwmClipboard {
      * makes the first one pointless before it finishes. */
     struct ClipRead *read;
 
+    /* A read that has not been asked for yet: every source waits out
+     * READ_DELAY_MS before fwm touches it. See "the wait before asking". */
+    struct wl_event_source *pending_timer;
+    struct wlr_data_source *pending_source;
+    const char             *pending_mime;   /* into TEXT_MIMES; never freed */
+    struct wl_listener      pending_source_destroy;
+
     ClipSource *ours;   /* the source we put on the seat, while it is there */
 };
 
@@ -301,6 +308,106 @@ static void read_start(FwmClipboard *cb, struct wlr_data_source *source,
     cb->read = r;
 }
 
+/* ── the wait before asking ──────────────────────────────────────────── */
+
+/* Asking a client for its bytes the instant it copies is asking too early.
+ *
+ * A copy is not one flavour but several — a line out of a chat window arrives
+ * as text/plain AND text/html — and a Chromium-based client (Discord, anything
+ * Electron, a browser) is still arranging the rest when the set_selection that
+ * announced the first one lands here. Answering a read in the middle of that
+ * occupies the one clipboard slot such a client has, and it never comes back:
+ * every later paste in THAT application hands back whatever it cached, while
+ * every other window on the seat sees the clipboard change normally. Only
+ * killing the application clears it — which is a bad afternoon for whoever has
+ * to work out that the compositor did it.
+ *
+ * The same trap the image case fell into (see source_is_a_picture), reached
+ * this time by a copy with no image anywhere in it. Not asking at all is no
+ * longer the fix, because plain text is exactly what this module is for.
+ * Asking LATER is.
+ *
+ * A fifth of a second is nothing against the lifetime of the window whose text
+ * we are keeping, and the wait is abandoned the moment the selection moves on
+ * or the source dies — by then whatever it was about to hand over describes a
+ * clipboard nobody can reach any more. Every new set_selection restarts it, so
+ * what is actually waited for is the selection standing STILL for that long,
+ * not a fixed delay after the first announcement.
+ *
+ * It narrows the race; it does not end it. Nothing in the protocol says when a
+ * client has finished offering flavours, so there is no moment that can be
+ * waited for exactly — a machine loaded enough to push a client's own work past
+ * 200ms puts the question back inside it. This is a number that fits observed
+ * behaviour, not a proof.
+ *
+ * The cost is a gap of that length where NOTHING is kept: the copy made in the
+ * last 200ms of a window's life is lost, and so is the one kept before it,
+ * because a new client taking the clipboard drops what was held at the moment
+ * it takes it. Holding the old text across the wait instead would mean a window
+ * that died in those 200ms handing back the text of a window that died before
+ * it — the stale paste this module exists to not serve. The gap is the honest
+ * end of that trade. */
+#define READ_DELAY_MS 200
+
+/* Forget the source that is waiting, whether it was asked yet or not. */
+static void pending_clear(FwmClipboard *cb) {
+    if (cb->pending_source) {
+        wl_list_remove(&cb->pending_source_destroy.link);
+        cb->pending_source = NULL;
+    }
+    cb->pending_mime = NULL;
+    if (cb->pending_timer) {
+        /* Safe from inside the timer's own callback: libwayland frees a
+         * removed source after the dispatch, not during it. */
+        wl_event_source_remove(cb->pending_timer);
+        cb->pending_timer = NULL;
+    }
+}
+
+/* The client died while we were waiting. There is nothing left to ask.
+ *
+ * Belt and braces, and deliberately so: a source that goes away while it owns
+ * the selection takes the selection with it, and the set_selection(NULL) that
+ * follows clears the wait through the ordinary path. This catches the one that
+ * does not — a source destroyed without the seat hearing about it — and it is
+ * the guard that does not depend on the seat getting the order right. Removing
+ * either alone shows no symptom, which is exactly why both are written down. */
+static void handle_pending_source_destroy(struct wl_listener *listener, void *data) {
+    FwmClipboard *cb = wl_container_of(listener, cb, pending_source_destroy);
+    (void)data;
+    pending_clear(cb);
+}
+
+static int pending_fire(void *data) {
+    FwmClipboard *cb = data;
+    struct wlr_data_source *source = cb->pending_source;
+    const char *mime = cb->pending_mime;
+
+    pending_clear(cb);   /* one-shot: the timer and the listener go together */
+    if (source && mime) read_start(cb, source, mime);
+    return 0;
+}
+
+/* Ask `source` for `mime` — in a moment, not now. */
+static void pending_schedule(FwmClipboard *cb, struct wlr_data_source *source,
+                             const char *mime) {
+    pending_clear(cb);
+
+    struct wl_event_source *timer =
+        wl_event_loop_add_timer(cb->loop, pending_fire, cb);
+    if (!timer) return;
+    if (wl_event_source_timer_update(timer, READ_DELAY_MS) < 0) {
+        wl_event_source_remove(timer);
+        return;
+    }
+
+    cb->pending_timer  = timer;
+    cb->pending_source = source;
+    cb->pending_mime   = mime;
+    cb->pending_source_destroy.notify = handle_pending_source_destroy;
+    wl_signal_add(&source->events.destroy, &cb->pending_source_destroy);
+}
+
 /* Does this source offer `mime`? */
 static bool source_offers(struct wlr_data_source *source, const char *mime) {
     char **m;
@@ -350,7 +457,10 @@ static void handle_set_selection(struct wl_listener *listener, void *data) {
     /* Ours: either the screenshot's PNG or the text we just put back. Reading
      * our own bytes back out through a pipe would be pointless, and restoring
      * on top of a restore is how you write an infinite loop. */
-    if (source && source->impl == &clip_source_impl) return;
+    if (source && source->impl == &clip_source_impl) {
+        pending_clear(cb);   /* a wait belonging to the owner before us */
+        return;
+    }
 
     if (!cb->persist) return;
 
@@ -358,13 +468,14 @@ static void handle_set_selection(struct wl_listener *listener, void *data) {
         /* A new client owns the clipboard. Whatever was kept describes a
          * selection nobody can reach any more, so it goes now rather than
          * lingering as a stale paste waiting for the new owner to die. */
+        pending_clear(cb);
         read_cancel(cb);
         saved_drop(cb);
 
         if (!source_is_a_picture(source)) {
             for (int i = 0; i < TEXT_MIME_COUNT; i++) {
                 if (!source_offers(source, TEXT_MIMES[i])) continue;
-                read_start(cb, source, TEXT_MIMES[i]);
+                pending_schedule(cb, source, TEXT_MIMES[i]);
                 break;
             }
         }
@@ -375,6 +486,7 @@ static void handle_set_selection(struct wl_listener *listener, void *data) {
 
     /* The selection went empty, which on Wayland means one thing: the client
      * that owned it is gone. This is the moment the whole module exists for. */
+    pending_clear(cb);
     read_cancel(cb);
     if (cb->saved_len == 0) return;
     wlr_log(WLR_DEBUG, "clipboard: the window that copied is gone — offering its %zu bytes",
@@ -406,6 +518,7 @@ void clipboard_configure(FwmClipboard *cb, bool persist, size_t max_bytes) {
     if (cb->persist == persist) return;
     cb->persist = persist;
     if (!persist) {
+        pending_clear(cb);
         read_cancel(cb);
         saved_drop(cb);
     }
@@ -414,6 +527,7 @@ void clipboard_configure(FwmClipboard *cb, bool persist, size_t max_bytes) {
 void clipboard_destroy(FwmClipboard *cb) {
     if (!cb) return;
     wl_list_remove(&cb->set_selection.link);
+    pending_clear(cb);
     read_cancel(cb);
     saved_drop(cb);
     /* The source is the seat's to destroy, and it may outlive us by a moment

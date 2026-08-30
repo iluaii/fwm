@@ -38,8 +38,13 @@
  *    event-loop writer and its own copy of the bytes.
  *
  *  - KEEPING what a client copied. When a client takes the selection its text
- *    is read once, into memory here; when that client dies and the selection
- *    would go empty, fwm offers the copy in its place. TEXT ONLY, deliberately:
+ *    is read once, into memory here — once the selection has been still for a
+ *    moment, never in the same breath as the copy, because a client asked for
+ *    one flavour while it is still arranging the others can be wedged by the
+ *    question. That wait narrows the window rather than closing it: nothing in
+ *    the protocol says when a client has finished offering (clipboard.c, "the
+ *    wait before asking"). When that client dies and the selection would go
+ *    empty, fwm offers the copy in its place. TEXT ONLY, deliberately:
  *    the point is the command you copied out of a terminal you have since
  *    closed, and quietly holding on to megabytes of image data that a paste may
  *    never come for is a memory leak with a feature's name on it.

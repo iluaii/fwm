@@ -328,6 +328,12 @@ silent cache of every screenshot), selections over `max_kb` (dropped whole
 rather than pasted half), and the primary selection — middle-click paste belongs
 to a text cursor that closed with the window.
 
+Nor is a copy made in the last fraction of a second before the window closed.
+fwm waits for the selection to stand still before it asks for the bytes, because
+asking a client mid-copy can wedge that client's own clipboard
+([`[clipboard]`](configuration.md#clipboard)); close the window that fast and
+there was nothing read yet to keep.
+
 `fwmctl set clipboard.persist=0` turns it off live, and doing so drops whatever
 is being held. A clipboard *history* is a different feature and an external one:
 `cliphist` and friends speak `data-control`, which fwm serves.

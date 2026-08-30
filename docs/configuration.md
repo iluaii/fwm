@@ -614,7 +614,13 @@ daemon (`wl-clip-persist`, `cliphist`, `clipman`); fwm answers it here, because
 the compositor is already the one holding the promise.
 
 `persist` is fwm reading the text once, while the window is alive, and offering
-it again the moment the selection would go empty. **Text only**, deliberately:
+it again the moment the selection would go empty. The read waits until the
+selection has been still for a fifth of a second rather than happening in the
+same breath as the copy: a copy is often several flavours (a line out of a chat
+window arrives as plain text *and* as HTML), and asking a client for one of them
+while it is still arranging the rest can wedge that client's own clipboard until
+it is restarted. The visible cost is a copy made in the last fraction of a second
+of a window's life, which is not kept. **Text only**, deliberately:
 what this is for is the command copied out of a terminal since closed, not a
 silent cache of every image anybody ever put on the clipboard. An image or a
 file drag is left exactly as it always was, and a selection over `max_kb` is
