@@ -11,14 +11,16 @@
 # as well.
 #
 # Supported package managers: pacman (Arch), apt (Debian/Ubuntu),
-# dnf (Fedora), xbps (Void). Box2D v3 is built from source when the
-# distro does not ship it (Debian's libbox2d-dev is 2.4 — too old).
+# dnf (Fedora), xbps (Void). Box2D v3 and wlroots 0.20 are built from
+# source when the distro does not ship them — Debian's libbox2d-dev is
+# 2.4, and only some releases carry the 0.20 branch of wlroots.
 
 set -eu
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 PREFIX="${PREFIX:-/usr/local}"
 BOX2D_VERSION="v3.1.1"
+WLROOTS_VERSION="0.20.2"
 
 # ── privilege helper (Void users often have doas instead of sudo) ──────
 if [ "$(id -u)" -eq 0 ]; then
@@ -47,7 +49,7 @@ install_deps() {
         msg "Installing dependencies (apt)"
         $SUDO apt-get update
         $SUDO apt-get install -y \
-            gcc make cmake pkg-config git \
+            gcc make cmake pkg-config git meson ninja-build \
             libwayland-dev libxkbcommon-dev libcairo2-dev \
             libpango1.0-dev libgdk-pixbuf-2.0-dev \
             libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
@@ -75,7 +77,7 @@ install_deps() {
         # release: 0.20 on 44 and newer, 0.19 on 43 and older. The check
         # after install_deps is what catches the second case.
         $SUDO dnf install -y \
-            gcc make cmake pkgconf-pkg-config git \
+            gcc make cmake pkgconf-pkg-config git meson ninja-build \
             wayland-devel wlroots-devel libxkbcommon-devel \
             cairo-devel pango-devel gdk-pixbuf2-devel ffmpeg-free-devel \
             pipewire-devel pulseaudio-libs-devel xorg-x11-server-Xwayland
@@ -104,6 +106,7 @@ install_deps() {
     else
         warn "unknown package manager — install deps manually:"
         warn "  wayland, wlroots-0.20, xkbcommon, cairo, pango, gdk-pixbuf, box2d v3, ffmpeg (libav*), xwayland"
+        warn "  wlroots 0.20 and Box2D v3 are built from source if meson/ninja and cmake are here"
         warn "  optional: pipewire and/or pulseaudio (headers) — the [cava] visualiser"
         warn "  picks whichever sound server is actually running; with neither it is left out"
     fi
@@ -149,18 +152,88 @@ ensure_deps() {
     fi
     msg "Missing: $miss"
     install_deps
-    miss="$(missing_deps)"
-    [ -n "$miss" ] || return 0
-    warn "still missing after the package manager ran: $miss"
-    case " $miss " in
-    *" wlroots-0.20 "*)
-        warn "this release packages a different wlroots branch — Fedora 43 and"
-        warn "older ship 0.19, and Debian names the branch in the package. fwm"
-        warn "needs 0.20 and will not build against 0.19:"
-        warn "  https://gitlab.freedesktop.org/wlroots/wlroots"
-        ;;
+    # The package manager cannot always finish this one: a release that
+    # packages 0.19 has nothing to offer, so the source build is the answer
+    # rather than a message telling the reader to go and do it themselves.
+    case " $(missing_deps) " in
+    *" wlroots-0.20 "*) ensure_wlroots || return 1 ;;
     esac
-    return 1
+    miss="$(missing_deps)"
+    [ -z "$miss" ] || { warn "still missing after the package manager ran: $miss"; return 1; }
+}
+
+# Fetch a URL to stdout. curl on most systems, wget where it is not.
+fetch() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "$1"
+    else
+        warn "neither curl nor wget is installed"
+        return 1
+    fi
+}
+
+# ── wlroots 0.20 ───────────────────────────────────────────────────────
+# CMakeLists pins the 0.20 branch, and whether a distribution has it is a
+# matter of when the release was cut: Arch and Void package it beside the
+# older branches, Fedora 43 and Debian stable do not have it at all. The
+# tarball is the release the distributions build from, from the project's own
+# GitLab — wlroots is not developed on GitHub, and the mirror there is stale.
+ensure_wlroots() {
+    pkg-config --exists wlroots-0.20 2>/dev/null && return 0
+
+    if ! command -v meson >/dev/null 2>&1 || ! command -v ninja >/dev/null 2>&1; then
+        warn "wlroots 0.20 is missing and meson/ninja are not here to build it."
+        warn "Install them and re-run, or install wlroots 0.20 yourself."
+        return 1
+    fi
+
+    msg "wlroots 0.20 not found — building $WLROOTS_VERSION from source"
+    local tmp src
+    tmp=$(mktemp -d)
+    src="$tmp/wlroots-$WLROOTS_VERSION"
+    if ! fetch "https://gitlab.freedesktop.org/wlroots/wlroots/-/archive/$WLROOTS_VERSION/wlroots-$WLROOTS_VERSION.tar.gz" \
+         | tar -xz -C "$tmp"; then
+        warn "could not download wlroots $WLROOTS_VERSION"
+        rm -rf "$tmp"
+        return 1
+    fi
+
+    # Nothing is left on "auto". A dependency missing under auto is not an
+    # error there — meson drops the piece that needed it and builds a wlroots
+    # that cannot open a display, or has no seat, or no X11, and the failure
+    # then arrives at the first login with nothing pointing back here.
+    # Everything named is something fwm cannot run without: cmake refuses a
+    # wlroots built without Xwayland, and a session-less one cannot take DRM
+    # from a TTY.
+    #
+    # /usr/local, not /usr: a distribution's own wlroots stays where it is,
+    # and the two branches carry different pkg-config names anyway.
+    if ! meson setup "$src/build" "$src" \
+            --prefix=/usr/local --libdir=lib --buildtype=release \
+            -Dexamples=false -Dxwayland=enabled -Dsession=enabled \
+            -Dbackends=drm,libinput,x11 -Drenderers=gles2 -Dallocators=gbm; then
+        warn "meson could not configure wlroots. The lines above name what it"
+        warn "is missing — those are wlroots' own build dependencies (wayland-"
+        warn "protocols, libseat, gbm/mesa, libinput, hwdata, libdisplay-info,"
+        warn "xcb), not fwm's. Install them and re-run."
+        rm -rf "$tmp"
+        return 1
+    fi
+    ninja -C "$src/build"
+    $SUDO ninja -C "$src/build" install
+    # Installed outside the default library path on some distributions, and a
+    # binary that links against it will not start until the cache knows.
+    if command -v ldconfig >/dev/null 2>&1; then $SUDO ldconfig || true; fi
+    rm -rf "$tmp"
+
+    if ! pkg-config --exists wlroots-0.20 2>/dev/null; then
+        warn "wlroots built and installed, but pkg-config still does not see"
+        warn "wlroots-0.20. Add it to the search path and re-run:"
+        warn "  export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:\$PKG_CONFIG_PATH"
+        return 1
+    fi
 }
 
 # ── Box2D v3 (cmake package `box2d`) ───────────────────────────────────
