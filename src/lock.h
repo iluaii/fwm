@@ -18,6 +18,7 @@
 #include <stdbool.h>
 
 struct FwmServer;
+struct wlr_surface;
 
 /* ext-session-lock-v1 (swaylock and friends).
  *
@@ -35,6 +36,10 @@ void lock_init(struct FwmServer *server);
 
 /* True while the session is locked, including after the lock client died. */
 bool lock_is_active(struct FwmServer *server);
+
+/* True if `surface` belongs to the lock client. While the session is locked
+ * the keyboard may go here and nowhere else (server_keyboard_enter). */
+bool lock_owns_surface(struct FwmServer *server, struct wlr_surface *surface);
 
 /* Re-place and re-size every lock surface against its monitor's layout box.
  * Called from the output layout update, alongside layer_arrange: a monitor

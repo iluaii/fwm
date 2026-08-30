@@ -52,6 +52,24 @@ bool lock_is_active(FwmServer *server) {
     return server->locked;
 }
 
+/* Is this one of the locker's own surfaces?
+ *
+ * Asked by server_keyboard_enter before it hands the keys anywhere, because
+ * the seat is what actually decides where a key lands and everything else in
+ * the compositor goes on running behind the lock screen: a window mapping
+ * (view_map focuses whatever opens), a panel click arriving over
+ * foreign-toplevel, an xdg-activation request. Any one of those used to move
+ * the keyboard off the password field, and nothing ever moved it back — the
+ * password was then typed into a window that the lock had already hidden. */
+bool lock_owns_surface(FwmServer *server, struct wlr_surface *surface) {
+    if (!surface) return false;
+    FwmLockSurface *ls;
+    wl_list_for_each(ls, &server->lock_surfaces, link) {
+        if (ls->surface->surface == surface) return true;
+    }
+    return false;
+}
+
 /* Put one lock surface on its own monitor, at that monitor's size.
  *
  * Both halves have to come from the layout box, for the same reason
@@ -138,13 +156,15 @@ static void handle_lock_unlock(struct wl_listener *listener, void *data) {
     set_normal_content_enabled(server, true);
     wlr_scene_node_set_enabled(&server->layer_lock->node, false);
 
-    /* Give the keyboard back to whatever was focused before the lock. */
-    if (server->focused_view) {
-        struct wlr_surface *surface = view_surface(server->focused_view);
-        if (surface) lock_focus_surface(server, surface);
-    } else {
-        wlr_seat_keyboard_notify_clear_focus(server->seat);
-    }
+    /* Give the keyboard back to whoever should have it — through
+     * server_keyboard_target, not straight to the focused window: a layer
+     * surface may have asked for it, and an override-redirect surface may be
+     * holding it (a Wine game's own fullscreen window), in which case the
+     * window behind it is the wrong place for the keys. Both calls are safe
+     * now that `locked` is already 0 above. */
+    struct wlr_surface *back = server_keyboard_target(server);
+    if (back) server_keyboard_enter(server, back);
+    else      server_keyboard_clear(server);
     wlr_log(WLR_INFO, "session unlocked");
 }
 

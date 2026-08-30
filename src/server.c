@@ -23,6 +23,7 @@
 #include "physics.h"
 #include "bsp.h"
 #include "theme.h"
+#include "layer.h"
 #include "lock.h"
 #include "foreign.h"
 #include "ipc.h"
@@ -148,10 +149,16 @@ FwmView *server_find_view(FwmServer *server, uint32_t id) {
 
 
 /* Where the keyboard belongs at this moment. Usually the focused window, but
- * an override-redirect surface that took the keys outranks it for as long as
- * it has them — anything handing the keyboard back (the launcher closing) has
- * to return it to whoever was actually holding it, not to the window behind. */
+ * two things outrank it for as long as they hold the keys — anything handing
+ * the keyboard back (the launcher closing) has to return it to whoever was
+ * actually holding it, not to the window behind.
+ *
+ * A layer surface first: it is either demanding the keyboard (a menu, a
+ * session dialog) or was clicked into, and both outlive an overlay opening and
+ * closing over them. Then an override-redirect surface. Then the window. */
 struct wlr_surface *server_keyboard_target(FwmServer *server) {
+    if (server->focused_layer)
+        return server->focused_layer->layer_surface->surface;
     if (server->focused_unmanaged) return server->focused_unmanaged->surface;
     return server->focused_view ? view_surface(server->focused_view) : NULL;
 }
@@ -218,12 +225,18 @@ void server_restack_fullscreen(FwmServer *server) {
 }
 
 void server_focus_view(FwmServer *server, struct FwmView *view) {
-    /* Not a plain no-op when an unmanaged surface holds the keyboard: the
-     * window may already be focused_view and still not have the keys, because
-     * an override-redirect surface took them (server_shell.c). Clicking back
-     * on the window has to bring them back, and clicking back on the window is
-     * exactly the call that lands here with view == focused_view. */
-    if (server->focused_view == view && !server->focused_unmanaged) return;
+    /* An on-demand layer surface that was clicked into holds the keyboard
+     * until the user works somewhere else, and a window is somewhere else. An
+     * exclusive one keeps them, and the enter below is refused for it. */
+    bool from_layer = layer_keyboard_release(server);
+
+    /* Not a plain no-op when something else holds the keyboard: the window may
+     * already be focused_view and still not have the keys, because an
+     * override-redirect surface took them (server_shell.c) or a bar was
+     * clicked into. Coming back to the window has to bring them back, and
+     * coming back to the window is exactly the call that lands here with
+     * view == focused_view. */
+    if (server->focused_view == view && !server->focused_unmanaged && !from_layer) return;
     server->focused_unmanaged = NULL;
 
     struct FwmView *prev_focus = server->focused_view;
@@ -246,7 +259,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
         }
         view_set_border_color(view, theme_get()->border_active);
     } else {
-        wlr_seat_keyboard_clear_focus(server->seat);
+        server_keyboard_clear(server);
     }
     ipc_emit_window(server->ipc, FWM_EV_WINDOW_FOCUS, view);
 

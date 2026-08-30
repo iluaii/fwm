@@ -818,8 +818,13 @@ void server_focus_view(FwmServer *server, struct FwmView *view);
  * wlr_seat_keyboard_notify_enter: it leaves out the keys a bind has swallowed,
  * whose release the new client will never be told about. */
 void server_keyboard_enter(FwmServer *server, struct wlr_surface *surface);
-/* The surface the keyboard belongs to right now — focused_unmanaged if one
- * holds it, otherwise the focused window's. NULL when there is neither. */
+/* Take the keyboard away with nothing to give it to. The other half of
+ * server_keyboard_enter, and guarded like it: a locked session and a layer
+ * surface holding the keyboard exclusively are not to be taken from. */
+void server_keyboard_clear(FwmServer *server);
+/* The surface the keyboard belongs to right now — a layer surface that asked
+ * for it, else focused_unmanaged if one holds it, else the focused window's.
+ * NULL when there is none of the three. */
 struct wlr_surface *server_keyboard_target(FwmServer *server);
 /* Take an override-redirect X11 surface as an unmanaged one: a bare scene
  * surface, no body, no borders. Public because a window can stop being a

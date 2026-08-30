@@ -88,32 +88,122 @@ void layer_arrange(FwmServer *server) {
     server->usable_area = primary_usable;
 }
 
-/* Topmost surface asking for the keyboard wins; EXCLUSIVE outranks ON_DEMAND
- * so a lock/menu cannot be stolen from by a bar underneath it. */
+/* Topmost surface DEMANDING the keyboard, i.e. asking for it exclusively: a
+ * menu, a session dialog, a locker-alike. Those are the only ones taken
+ * without being asked twice.
+ *
+ * On-demand is deliberately not a candidate. The protocol reads it as "give me
+ * the keyboard when the user interacts with me", and granting it on map
+ * instead meant a bar with a search field took the keys the moment it appeared
+ * and a click on that same field did nothing. It gets them from
+ * layer_keyboard_click and keeps them until the user works somewhere else. */
 static FwmLayerSurface *layer_keyboard_candidate(FwmServer *server) {
     FwmLayerSurface *best = NULL;
-    int best_rank = -1;
+    int best_layer = -1;
 
     FwmLayerSurface *ls;
     wl_list_for_each(ls, &server->layer_surfaces, link) {
         struct wlr_layer_surface_v1 *s = ls->layer_surface;
         if (!s->surface->mapped) continue;
-        if (s->current.keyboard_interactive == ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE)
-            continue;
+        if (s->current.keyboard_interactive !=
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) continue;
 
-        int rank = (int)s->current.layer * 2;
-        if (s->current.keyboard_interactive ==
-            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) rank++;
-        if (rank > best_rank) {
-            best_rank = rank;
+        if ((int)s->current.layer > best_layer) {
+            best_layer = (int)s->current.layer;
             best = ls;
         }
     }
     return best;
 }
 
+struct wlr_surface *layer_keyboard_exclusive(FwmServer *server) {
+    FwmLayerSurface *ls = server->focused_layer;
+    if (!ls || ls->layer_surface->current.keyboard_interactive !=
+               ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) return NULL;
+    return ls->layer_surface->surface;
+}
+
+/* Is an on-demand surface holding the keyboard because it was clicked into?
+ * Asked of what the surface is asking for NOW: a client that drops back to
+ * `none` (which is how several menus announce they are done with the keyboard,
+ * a commit or two before they unmap) has stopped holding it, and leaving it
+ * named as the holder kept the keys off every window until it went away. */
+static bool layer_keyboard_on_demand(FwmServer *server) {
+    FwmLayerSurface *ls = server->focused_layer;
+    return ls && ls->layer_surface->current.keyboard_interactive ==
+                 ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND;
+}
+
+bool layer_keyboard_release(FwmServer *server) {
+    if (!server->focused_layer || layer_keyboard_exclusive(server)) return false;
+    server->focused_layer = NULL;
+    return true;
+}
+
+/* The layer surface under the pointer, if any. The same scene walk view_at
+ * does, and confirmed against the list for the same reason: node.data cannot
+ * say what type it holds, so an answer taken from it has to be checked against
+ * the surfaces that actually exist. */
+static FwmLayerSurface *layer_at(FwmServer *server, double lx, double ly) {
+    double sx, sy;
+    struct wlr_scene_node *node =
+        wlr_scene_node_at(&server->scene->tree.node, lx, ly, &sx, &sy);
+    if (!node) return NULL;
+
+    struct wlr_scene_tree *tree = node->parent;
+    while (tree != NULL && tree->node.data == NULL) tree = tree->node.parent;
+    if (tree == NULL) return NULL;
+
+    FwmLayerSurface *found = tree->node.data, *ls;
+    wl_list_for_each(ls, &server->layer_surfaces, link) {
+        if (ls == found) return ls;
+    }
+    return NULL;
+}
+
+bool layer_keyboard_click(FwmServer *server, double lx, double ly) {
+    /* An exclusive surface is up: it holds the keyboard against this too. */
+    if (layer_keyboard_exclusive(server)) return false;
+
+    FwmLayerSurface *ls = layer_at(server, lx, ly);
+    if (!ls || ls == server->focused_layer) return false;
+    if (ls->layer_surface->current.keyboard_interactive !=
+        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND) return false;
+
+    server->focused_layer = ls;
+    server_keyboard_enter(server, ls->layer_surface->surface);
+    return true;
+}
+
+/* The keyboard back to whoever should have it now that no layer surface does.
+ * Through server_keyboard_target rather than straight to the focused window:
+ * an override-redirect surface can be holding the keys (a Wine game's own
+ * fullscreen window), and handing them to the window behind it would leave the
+ * thing on screen unable to be typed into. */
+static void layer_hand_back(FwmServer *server) {
+    struct wlr_surface *back = server_keyboard_target(server);
+    if (back) server_keyboard_enter(server, back);
+    else      server_keyboard_clear(server);
+}
+
+/* This surface is going away, or has stopped being shown. If it was holding
+ * the keyboard the keys go back HERE, before anything else looks at them:
+ * clearing focused_layer and leaving the rest to layer_update_keyboard_focus
+ * left that function comparing NULL against NULL, taking its early return, and
+ * the keyboard nowhere at all. */
+static void layer_drop_keyboard(FwmServer *server, FwmLayerSurface *ls) {
+    if (server->focused_layer != ls) return;
+    server->focused_layer = NULL;
+    layer_hand_back(server);
+}
+
 void layer_update_keyboard_focus(FwmServer *server) {
     FwmLayerSurface *want = layer_keyboard_candidate(server);
+
+    /* Nothing is demanding the keyboard and an on-demand surface is holding
+     * it: this is not the path that takes it away. A click on a window is
+     * (server_focus_view), which is the same rule an ordinary window follows. */
+    if (!want && layer_keyboard_on_demand(server)) return;
 
     if (want == server->focused_layer) return;
     server->focused_layer = want;
@@ -122,14 +212,7 @@ void layer_update_keyboard_focus(FwmServer *server) {
         server_keyboard_enter(server, want->layer_surface->surface);
         return;
     }
-
-    /* Nothing wants it any more — give the keyboard back to the focused
-     * window, the same way closing the built-in launcher does. */
-    if (server->focused_view) {
-        server_keyboard_enter(server, view_surface(server->focused_view));
-    } else {
-        wlr_seat_keyboard_notify_clear_focus(server->seat);
-    }
+    layer_hand_back(server);
 }
 
 /* ── per-surface events ──────────────────────────────────────────────── */
@@ -145,7 +228,7 @@ static void layer_handle_map(struct wl_listener *listener, void *data) {
 static void layer_handle_unmap(struct wl_listener *listener, void *data) {
     FwmLayerSurface *ls = wl_container_of(listener, ls, unmap);
     (void)data;
-    if (ls->server->focused_layer == ls) ls->server->focused_layer = NULL;
+    layer_drop_keyboard(ls->server, ls);
     layer_arrange(ls->server);
     layer_update_keyboard_focus(ls->server);
 }
@@ -198,7 +281,7 @@ static void layer_handle_destroy(struct wl_listener *listener, void *data) {
     FwmLayerSurface *ls = wl_container_of(listener, ls, destroy);
     (void)data;
 
-    if (ls->server->focused_layer == ls) ls->server->focused_layer = NULL;
+    layer_drop_keyboard(ls->server, ls);
 
     wl_list_remove(&ls->map.link);
     wl_list_remove(&ls->unmap.link);

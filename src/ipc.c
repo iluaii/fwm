@@ -21,6 +21,7 @@
 #include "theme.h"
 #include "view.h"
 #include "physics.h"
+#include "group.h"
 #include "urgent.h"
 /* For the settings overlay and the window verbs: acting on one window by id is
  * the same work a keybind does, and it goes through the same functions. */
@@ -870,6 +871,15 @@ static void cmd_window(FwmServer *server, const char *arg, struct Buf *b) {
         return;
     }
 
+    /* A view outlives the unmap of its surface and stays on the list until the
+     * client is gone, so `windows` lists windows with nothing on screen — and
+     * focusing one handed the keyboard to a window nobody could see or get
+     * back out of. Refusing says so. */
+    if (want_focus && !view->scene_tree) {
+        reply_error(b, "this window has no surface on screen to focus");
+        return;
+    }
+
     if (want_desktop >= 0)
         server_move_view_to_desktop(server, view, want_desktop, 0);
     if (body && want_pin >= 0) {
@@ -903,7 +913,22 @@ static void cmd_window(FwmServer *server, const char *arg, struct Buf *b) {
         if (view->scene_tree)
             server_place_view(server, view, view->x, view->y);
     }
-    if (want_focus) server_focus_view(server, view);
+    if (want_focus) {
+        /* A window hidden inside a tab-stack comes up first. Its scene node is
+         * disabled and its physics body belongs to whichever tab is in front,
+         * so focusing it where it stands would put the keyboard in a window
+         * that is not drawn — `focus` on a tab means the same thing clicking
+         * that tab means. */
+        if (view->group) {
+            for (int i = 0; i < view->group->count; i++) {
+                if (view->group->members[i] == view) {
+                    group_set_active(server, view->group, i);
+                    break;
+                }
+            }
+        }
+        server_focus_view(server, view);
+    }
     if (want_close) {
         view_send_close(view);
         /* The window is being ASKED to close and may decline, so it is still

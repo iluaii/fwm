@@ -15,6 +15,7 @@
 #ifndef FWM_LAYER_H
 #define FWM_LAYER_H
 
+#include <stdbool.h>
 #include <wayland-server-core.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_scene.h>
@@ -51,8 +52,31 @@ void layer_arrange(struct FwmServer *server);
  * leave that pointer dangling. Call before the output is freed. */
 void layer_output_gone(struct FwmServer *server, struct wlr_output *output);
 
-/* Hand the keyboard to the topmost layer surface that wants it, or back to the
- * focused window when none does. */
+/* Hand the keyboard to the topmost layer surface DEMANDING it (exclusive
+ * keyboard-interactivity), or back to whoever should have it when none does.
+ * An on-demand surface is not taken into account here — see
+ * layer_keyboard_click. */
 void layer_update_keyboard_focus(struct FwmServer *server);
+
+/* The surface of a layer surface holding the keyboard against everything else,
+ * i.e. one with exclusive keyboard-interactivity; NULL when none is.
+ *
+ * This is what makes such a surface usable at all under focus-follows-pointer:
+ * without it the first twitch of the mouse over a window took the keyboard
+ * away from a menu or a session dialog, and — since focused_layer still named
+ * it — nothing ever gave the keys back. server_keyboard_enter asks this before
+ * handing the keyboard anywhere. */
+struct wlr_surface *layer_keyboard_exclusive(struct FwmServer *server);
+
+/* An on-demand layer surface lets go of the keyboard because the user is
+ * working somewhere else. Returns true if one was holding it and has now let
+ * go, i.e. if the caller must go on and take the keys. An exclusive surface
+ * keeps them and this returns false. */
+bool layer_keyboard_release(struct FwmServer *server);
+
+/* A press at this point: an on-demand layer surface under it takes the
+ * keyboard, which is the interaction "on demand" means. Returns true if one
+ * did. */
+bool layer_keyboard_click(struct FwmServer *server, double lx, double ly);
 
 #endif /* FWM_LAYER_H */

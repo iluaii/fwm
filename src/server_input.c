@@ -220,6 +220,24 @@ int server_knob_step(FwmServer *server, int dir) {
  * for that reason. */
 void server_keyboard_enter(FwmServer *server, struct wlr_surface *surface) {
     if (!surface) return;
+
+    /* Two things outrank whoever is asking, and both are asked here rather
+     * than at the call sites because the call sites are everything that can
+     * move the focus — a window mapping, a panel click, an activation
+     * request, the pointer crossing a window — and every one of them used to
+     * be able to walk off with the keyboard.
+     *
+     * A locked session: the keys belong to the password field. Everything
+     * behind the lock screen goes on running, and a window that opened while
+     * the session was locked took the keyboard and never gave it back — the
+     * password was typed into a window the lock had already hidden. */
+    if (lock_is_active(server) && !lock_owns_surface(server, surface)) return;
+
+    /* And a layer surface holding the keyboard exclusively: a menu, a session
+     * dialog. It is the one thing focus-follows-pointer may not take from. */
+    struct wlr_surface *owner = layer_keyboard_exclusive(server);
+    if (owner && surface != owner) return;
+
     struct wlr_keyboard *kbd = wlr_seat_get_keyboard(server->seat);
     if (!kbd) {
         wlr_seat_keyboard_notify_enter(server->seat, surface, NULL, 0, NULL);
@@ -234,6 +252,17 @@ void server_keyboard_enter(FwmServer *server, struct wlr_surface *surface) {
         keys[n++] = kc;
     }
     wlr_seat_keyboard_notify_enter(server->seat, surface, keys, n, &kbd->modifiers);
+}
+
+void server_keyboard_clear(FwmServer *server) {
+    /* Guarded the same way the enter above is, and for the same reason: a
+     * clear takes the keys off the password field just as surely as an enter
+     * somewhere else does. The locker's own teardown does not come through
+     * here — see handle_lock_destroy, which clears deliberately while the
+     * session stays locked. */
+    if (lock_is_active(server)) return;
+    if (layer_keyboard_exclusive(server)) return;
+    wlr_seat_keyboard_notify_clear_focus(server->seat);
 }
 
 /* The three keys a keyboard knob sends: turning it either way, and pressing

@@ -169,11 +169,13 @@ struct FwmXwlUnmanaged {
 static void xwl_or_drop_focus(FwmServer *server, struct wlr_xwayland_surface *xs) {
     if (server->focused_unmanaged != xs) return;
     server->focused_unmanaged = NULL;
-    if (server->focused_view) {
-        server_keyboard_enter(server, view_surface(server->focused_view));
-    } else {
-        wlr_seat_keyboard_clear_focus(server->seat);
-    }
+    /* Through server_keyboard_target, so a layer surface that asked for the
+     * keyboard while this one had it is not skipped over. Both calls are
+     * guarded against a locked session: a menu closing behind the lock screen
+     * must not take the keys off the password field. */
+    struct wlr_surface *back = server_keyboard_target(server);
+    if (back) server_keyboard_enter(server, back);
+    else      server_keyboard_clear(server);
 }
 
 /* Read the position the client just gave us — screen coordinates — and keep it

@@ -700,6 +700,15 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
         return;
     }
 
+    /* A press on a layer surface that asked for the keyboard on demand is what
+     * gives it the keyboard — that is what "on demand" means, and it is the
+     * only way to type into a bar's own search field. The click goes on to the
+     * surface as well: this decides where the KEYS go, not where the button
+     * does. Working in a window afterwards takes them back
+     * (server_focus_view). */
+    if (event->state == WL_POINTER_BUTTON_STATE_PRESSED)
+        layer_keyboard_click(server, server->cursor->x, server->cursor->y);
+
     // Clicks that belong to a compositor gesture stay in the compositor: any
     // button event while a drag/resize/swap is running, and any press with
     // the drag modifier (Super) held. Forwarding them made clients count
