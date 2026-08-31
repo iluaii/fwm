@@ -192,8 +192,33 @@ static bool view_is_single_surface(FwmView *view) {
     return true;
 }
 
+/* Is that one surface the WINDOW, all of it and nothing else?
+ *
+ * A client-decorated xdg toplevel paints its shadow margins and its resize
+ * handles into the same surface, and calls a sub-rectangle of it the window.
+ * The scene knows: wlr_scene_xdg_surface_create places the surface by that
+ * geometry, so every composited picture is of the window alone. A texture
+ * handed straight to an effect carries no such thing — the mesh spans it
+ * corner to corner and the margins are squeezed into the window's box along
+ * with the picture, by the ratio between the two. A drag on such a window
+ * looked as if it were being flattened, and the flattening never let go,
+ * because the margins never do.
+ *
+ * So the live path is for a client whose buffer already IS its window, and
+ * everything else is composited. Exactly the test view_rubber_source has made
+ * of the same buffer since the rubber was written; shared, now that a second
+ * effect needs it. */
+static bool view_buffer_is_the_window(FwmView *view) {
+    struct wlr_surface *s = view_surface(view);
+    if (!s) return false;
+    int gw, gh;
+    view_committed_size(view, &gw, &gh);
+    return s->current.width == gw && s->current.height == gh;
+}
+
 static struct wlr_texture *view_live_texture(FwmView *view) {
     if (!view_is_single_surface(view)) return NULL;
+    if (!view_buffer_is_the_window(view)) return NULL;
     return wlr_surface_get_texture(view_surface(view));
 }
 
@@ -218,6 +243,7 @@ static void view_log_effect_path(FwmView *view, const char *what, bool live) {
         else if (view->type == FWM_VIEW_XDG && view->xdg_toplevel &&
                  !wl_list_empty(&view->xdg_toplevel->base->popups)) why = " (open popup)";
         else if (view->server->config.effects.live <= 0.0) why = " (effects.live = 0)";
+        else if (!view_buffer_is_the_window(view)) why = " (decoration margins)";
         else why = " (no texture yet)";
     }
     wlr_log(WLR_INFO, "%s on \"%s\": %s path%s", what,
@@ -300,15 +326,10 @@ static struct wlr_buffer *view_rubber_source(FwmView *view, int *live) {
      * Anything with a subsurface or an open menu has to be composited, and that
      * picture is taken once, here. */
     if (view_is_single_surface(view) && view->last_buffer) {
-        /* ... and only when that buffer IS the window. A client-decorated xdg
-         * window paints its own shadow margins into the same surface and calls
-         * a sub-rectangle of it the window; stretching the whole buffer into
-         * that rectangle's box would squeeze the margins in with it. Those go
-         * the composited way, where the picture is of the window alone. */
-        struct wlr_surface *s = view_surface(view);
-        int gw, gh;
-        view_committed_size(view, &gw, &gh);
-        if (s && s->current.width == gw && s->current.height == gh) {
+        /* ... and only when that buffer IS the window, for the reason
+         * view_buffer_is_the_window gives: the margins of a decorated client
+         * would be squeezed into the window's box along with the picture. */
+        if (view_buffer_is_the_window(view)) {
             *live = 1;
             return view->last_buffer;
         }
@@ -1181,11 +1202,12 @@ void view_jelly_tick(FwmView *view, double strength, double dt) {
     if (view->jelly_live) {
 
         /* Nothing to retake — view_jelly_draw reads the client's texture as it
-         * goes. Only a window that has STOPPED being a single surface (a menu
-         * opened under the hand) needs rebuilding onto the snapshot path; a
+         * goes. Only a window that has stopped being a single surface the size
+         * of its own geometry (a menu opened under the hand) needs rebuilding
+         * onto the snapshot path; a
          * missing texture for one frame is not that, and view_jelly_draw simply
          * keeps the frame already on screen. */
-        if (!view_is_single_surface(view)) {
+        if (!view_is_single_surface(view) || !view_buffer_is_the_window(view)) {
             if (!view_jelly_setup(view)) { view_jelly_stop(view); return; }
             wobble_resize(&view->jelly_wob, view->jelly_w, view->jelly_h);
         }
@@ -1446,8 +1468,9 @@ void view_spin_tick(FwmView *view, double angle, double dt) {
     if (view->server->config.effects.live > 0.0) view_send_frame_done(view);
 
     if (view->spin_live) {
-        if (!view_is_single_surface(view)) {
-            /* A menu opened, or the client grew a subsurface, mid-spin. The
+        if (!view_is_single_surface(view) || !view_buffer_is_the_window(view)) {
+            /* A menu opened, the client grew a subsurface, or its buffer
+             * stopped being the window, mid-spin. The
              * live path cannot show that, so rebuild onto the snapshot one —
              * setup re-decides and lands on the snapshot for the same reason
              * we are here. */
