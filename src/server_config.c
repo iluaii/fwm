@@ -658,6 +658,29 @@ void server_apply_physics_config(FwmServer *server) {
     }
 }
 
+/* Which monitor the un-tied palette should be taken from: the one the user is
+ * on. Empty with a single screen (there is nothing to choose, and the un-named
+ * [[wallpaper]] set is what a lone monitor shows) or while no monitor is up
+ * yet — then the first layer answers, as it always did. */
+static const char *palette_target(FwmServer *server) {
+    FwmOutput *active = server_active_output(server);
+    return active && wl_list_length(&server->outputs) > 1
+               ? active->wlr_output->name : "";
+}
+
+void server_palette_sync(FwmServer *server) {
+    const char *name = palette_target(server);
+    if (strcmp(server->config.palette_output, name) == 0) return;
+    snprintf(server->config.palette_output, sizeof(server->config.palette_output),
+             "%s", name);
+    /* The per-monitor palettes are already built, so this is a lookup. Two
+     * screens whose images derive the same colours change nothing on screen,
+     * and then nothing is repainted and nobody is told. */
+    if (!theme_set_active_output(name)) return;
+    ipc_emit_palette(server->ipc);
+    server_request_tray_redraw(server);
+}
+
 /* Push the current FwmConfig onto the live compositor.
  *
  * Split out of server_reload_config so that a single `fwmctl set` can reuse
@@ -670,12 +693,9 @@ void server_apply_physics_config(FwmServer *server) {
 void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
     /* A reload re-reads the file, which knows nothing about which screen the
      * palette came from; point it back at the active one before the colours
-     * are computed. Empty while no monitor is up yet — then the first layer
-     * answers for the palette, as it always did. */
-    FwmOutput *active = server_active_output(server);
+     * are computed. */
     snprintf(server->config.palette_output, sizeof(server->config.palette_output),
-             "%s", active && wl_list_length(&server->outputs) > 1
-                       ? active->wlr_output->name : "");
+             "%s", palette_target(server));
 
     /* Before anything reads colours: a new wallpaper or color_source repaints
      * the whole system. */
@@ -700,9 +720,7 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
     FwmView *view;
     wl_list_for_each(view, &server->views, link) {
         view_update_border_geometry(view);
-        view_set_border_color(view, view == server->focused_view
-                                    ? theme_get()->border_active
-                                    : theme_get()->border_inactive);
+        view_refresh_border_color(view);
     }
 
     /* The sun: a new [sun] may have turned the shadows on, off, or moved them,

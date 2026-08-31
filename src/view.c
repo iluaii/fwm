@@ -374,6 +374,28 @@ void view_set_border_color(FwmView *view, const float color[4]) {
     }
 }
 
+/* The palette this window's frame belongs to: the screen it is being drawn on.
+ * A window with no screen at all — its desktop is off every monitor — keeps
+ * whatever it had; there is nothing to look at and nothing to derive from. */
+void view_refresh_border_color(FwmView *view) {
+    if (!view->border[0] || !view->server) return;
+
+    double shift_x, shift_y;
+    FwmOutput *o = server_view_frame(view->server, view, view->x, view->width,
+                                     &shift_x, &shift_y);
+    const FwmTheme *thm = o ? theme_get_output(o->wlr_output->name) : theme_get();
+    int focused = view == view->server->focused_view;
+    unsigned gen = theme_generation();
+
+    if (view->border_palette == thm && view->border_palette_gen == gen &&
+        view->border_palette_focused == focused) return;
+    view->border_palette = thm;
+    view->border_palette_gen = gen;
+    view->border_palette_focused = focused;
+
+    view_set_border_color(view, focused ? thm->border_active : thm->border_inactive);
+}
+
 void view_set_border_enabled(FwmView *view, int enabled) {
     if (!view->border[0]) return;
     /* A fullscreen window has no frame, whoever is asking for one.

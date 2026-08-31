@@ -1048,6 +1048,13 @@ void server_reload_config(FwmServer *server);
  * file. Used by server_reload_config (rebuild_wallpaper = 1) and by
  * `fwmctl set`, which must not pay for an image decode per keystroke (0). */
 void server_apply_config(FwmServer *server, int rebuild_wallpaper);
+/* Point the un-tied palette at the monitor the user is on. Everything that
+ * lives on a screen — the tray, a window's frame — is drawn from that screen's
+ * own wallpaper (theme_get_output); everything that opens where the hand is —
+ * the launcher, the ring, the OSD — is drawn from this one. Called whenever
+ * the cursor may have crossed the join; nothing is repainted unless the two
+ * monitors' images actually derive different colours. */
+void server_palette_sync(FwmServer *server);
 /* Copy the config's physics onto the live world: the scalars, and the
  * per-desktop profiles built out of them. Split out because startup and reload
  * both need exactly this and nothing else. */

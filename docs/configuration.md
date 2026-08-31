@@ -297,7 +297,8 @@ on its own. See [the interface](interface.md#the-tray).
 
 `color_source = "wallpaper"` derives the whole UI palette — island fill, accent,
 text — from the current wallpaper image, so the tray belongs to the desktop
-behind it. `tint_strength` is how far the fill moves toward the wallpaper's hue.
+behind it. With a wallpaper per monitor each screen gets its own palette (see
+[wallpaper](#wallpaper)). `tint_strength` is how far the fill moves toward the wallpaper's hue.
 Colours are premultiplied internally; write them as plain hex.
 
 That palette is readable from outside: `fwmctl theme` prints it in hex, and
@@ -1034,9 +1035,12 @@ A layer naming a monitor that is not plugged in is simply not built, and comes
 back with the screen. Panning is per monitor as well: each screen walks its own
 image with its own camera.
 
-With two different images the UI palette (`color_source = "wallpaper"`) can only
-come from one of them — it follows the monitor you are on, which is the one the
-picker was last used on.
+The UI palette (`color_source = "wallpaper"`) is per monitor too: each screen's
+tray, window frames and panels are derived from the image that screen is
+actually showing, so an accent lifted from a bright picture never lands on the
+dark one next door. What is not tied to a screen — the launcher, the ring, the
+OSD, and what `fwmctl theme` prints — opens where the hand is and takes the
+palette of the monitor the pointer is on.
 
 ## wallpaper_picker
 

@@ -28,8 +28,16 @@
   and a dark screen still gets its own back. Only the monitors that actually
   show the changed image are rebuilt, so a pick no longer re-decodes a wallpaper
   the other screen was already showing.
-- With `color_source = "wallpaper"` the palette follows the monitor you are on —
-  two images cannot both be the one the tray is tinted from.
+- **With `color_source = "wallpaper"`, each monitor is drawn in the colours of
+  its own image.** One palette for the session meant a red accent lifted from a
+  bright picture standing on top of the dark screen next door, and it never even
+  moved: the palette was picked before any monitor was up — so it came from
+  whichever `[[wallpaper]]` block happened to be written first — and only a
+  reload or the picker changed it again. A palette is now derived per monitor,
+  and each screen's tray, window frames and panels are drawn from the image that
+  screen is showing. What is not tied to a screen — the launcher, the ring, the
+  OSD, `fwmctl theme` and the `palette` event — follows the monitor the pointer
+  is on, which is where those open.
 
 ### Shadows
 

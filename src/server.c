@@ -257,7 +257,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
         if (pb) {
             pb->corner_mode = CORNER_ROUND;
         }
-        view_set_border_color(view, theme_get()->border_active);
+        view_refresh_border_color(view);
     } else {
         server_keyboard_clear(server);
     }
@@ -275,7 +275,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
             int d = pb->desktop_id;
             pb->corner_mode = (server->desktop_mode[d] == DESKTOP_MODE_PHYSICS) ? CORNER_CHAMFER : CORNER_SHARP;
         }
-        view_set_border_color(prev_focus, theme_get()->border_inactive);
+        view_refresh_border_color(prev_focus);
     }
 
     /* The raise above may have buried a fullscreen window sharing this
@@ -603,6 +603,11 @@ void server_request_tray_redraw(FwmServer *server) {
             }
         }
 
+        /* In THIS monitor's colours: with a wallpaper each, the strip on a
+         * dark screen must not be painted from the accent of the bright one
+         * next door. The scope is cleared before the loop moves on. */
+        theme_use_output(out->wlr_output->name);
         tray_redraw(out->tray_buffer, &d2, &out->tray_strip);
+        theme_use_output(NULL);
     }
 }

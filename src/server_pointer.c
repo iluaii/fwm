@@ -400,6 +400,11 @@ static void process_cursor_motion(FwmServer *server, uint32_t time_msec) {
     if (lock_is_active(server)) return; /* nothing under the lock may be reached */
     drag_icon_update_position(server);
 
+    /* The pointer may have crossed onto the other screen, and the panels that
+     * open where the hand is are drawn from the palette of the screen they
+     * open on. A lookup and a strcmp on a motion that changed nothing. */
+    server_palette_sync(server);
+
     /* The region selector is aiming, not pointing: it owns every motion and
      * no client hears about any of them. First, because it sits over
      * everything else that could claim one. */

@@ -861,6 +861,10 @@ static bool rect_reaches_other_output(FwmServer *server, FwmOutput *o,
 void server_views_clip(FwmServer *server) {
     FwmView *v;
     wl_list_for_each(v, &server->views, link) {
+        /* Every frame, before the cut: the frame's colours come from the screen
+         * the window is standing on, and a window in the hand crosses the join
+         * mid-drag. It costs a lookup unless the screen or the focus changed. */
+        view_refresh_border_color(v);
         if (!v->scene_tree || v->width <= 0 || v->height <= 0) continue;
         /* A crop is applied to the surfaces under the tree, and wlroots
          * ASSERTS that it found at least one — an assert takes the compositor
@@ -1361,6 +1365,12 @@ static void server_output_layout_update(FwmServer *server) {
      * screen to size them against. */
     if (first) server_output_first_layout(server);
 
+    /* And the palette. The theme was built before any monitor existed — with
+     * nothing to be the active screen, it answered from the first [[wallpaper]]
+     * layer, which is the OTHER monitor's image as often as not. This is the
+     * moment there is a screen to ask. */
+    server_palette_sync(server);
+
     server_reclaim_memory();
 }
 
@@ -1471,6 +1481,9 @@ void server_focus_output(FwmServer *server, FwmOutput *out) {
      * pointer focus stays on the monitor the hand just left and the first
      * click after the bind lands there. */
     server_pointer_resync(server);
+    /* And the same for the palette the un-tied panels use: the warp moved the
+     * hand to another screen without a motion event to notice it. */
+    server_palette_sync(server);
 }
 
 /* Light one monitor or put it out, with nothing standing in the way. Returns 1

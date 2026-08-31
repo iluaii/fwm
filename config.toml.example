@@ -207,12 +207,13 @@ launcher_opacity = 0.92
 icon_theme = ""
 # Where the UI palette comes from.
 #   "config"    — the colours above plus the built-in dark scheme (default)
-#   "wallpaper" — derive it from the first [[wallpaper]] image: the tray,
-#                 panels, launcher and tab bars are tinted toward its dominant
-#                 hue, and the focus border / desktop marker / tab underline
-#                 take its most vivid colour. Islands are always kept dark, so
-#                 text stays readable no matter the image. A greyscale
-#                 wallpaper falls back to the colours above.
+#   "wallpaper" — derive it from the [[wallpaper]] image: the tray, panels,
+#                 launcher and tab bars are tinted toward its dominant hue, and
+#                 the focus border / desktop marker / tab underline take its
+#                 most vivid colour. Islands are always kept dark, so text stays
+#                 readable no matter the image. A greyscale wallpaper falls back
+#                 to the colours above. With a wallpaper per monitor each screen
+#                 is drawn from its own image.
 color_source     = "config"
 # 0..1: how far the islands move toward the wallpaper hue. 0 = untinted
 # (accent only), 1 = as far as the palette allows.

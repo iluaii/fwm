@@ -423,6 +423,24 @@ if(FWM_TESTS)
     target_link_libraries(test_stats PRIVATE ${WLROOTS_LIBRARIES} m)
     target_link_directories(test_stats PRIVATE ${WLROOTS_LIBRARY_DIRS})
 
+    # The wallpaper-derived palette. theme.c decodes real images, so the suite
+    # writes its own — a flat colour has one hue and one right answer — and it
+    # reaches ffmpeg and wlroots only because a video wallpaper is sampled the
+    # same way a picture is; nothing here needs a display.
+    add_executable(test_theme tests/test_theme.c
+        src/theme.c src/video.c src/ui/cairo_overlay.c
+        src/config.c src/config_binds.c src/config_set.c src/toml.c)
+    target_include_directories(test_theme PRIVATE src tests
+        ${GDK_PIXBUF_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS} ${CAIRO_INCLUDE_DIRS}
+        ${PANGO_INCLUDE_DIRS} ${PANGOCAIRO_INCLUDE_DIRS}
+        ${LIBAV_INCLUDE_DIRS} ${WLROOTS_INCLUDE_DIRS} ${WAYLAND_SERVER_INCLUDE_DIRS}
+        ${PIXMAN_INCLUDE_DIRS} ${XKBCOMMON_INCLUDE_DIRS})
+    target_compile_definitions(test_theme PRIVATE WLR_USE_UNSTABLE)
+    target_link_directories(test_theme PRIVATE ${WLROOTS_LIBRARY_DIRS})
+    target_link_libraries(test_theme PRIVATE ${GDK_PIXBUF_LIBRARIES} ${GLIB_LIBRARIES}
+        ${CAIRO_LIBRARIES} ${PANGOCAIRO_LIBRARIES} ${LIBAV_LIBRARIES} ${WLROOTS_LIBRARIES}
+        ${WAYLAND_SERVER_LIBRARIES} ${PIXMAN_LIBRARIES} ${XKBCOMMON_LIBRARIES} m)
+
     # What the launcher does with what you type: which rows a query matches,
     # which of them comes first, and what the launch history is worth a week
     # later. All of it is text and arithmetic — the panel it feeds is not — so
@@ -448,4 +466,5 @@ if(FWM_TESTS)
     add_test(NAME wav        COMMAND test_wav)
     add_test(NAME stats      COMMAND test_stats)
     add_test(NAME launcher   COMMAND test_launcher)
+    add_test(NAME theme      COMMAND test_theme)
 endif()

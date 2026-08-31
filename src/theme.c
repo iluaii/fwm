@@ -48,7 +48,10 @@ static const FwmTheme theme_base = {
     .accent = {0.478, 0.635, 0.969}, /* #7aa2f7, the default focus blue */
 };
 
-static FwmTheme theme_current = {
+/* The palette a monitor with nothing of its own is drawn with, and what the
+ * whole system uses when the colours come from the config rather than an
+ * image. Also the built-in scheme before theme_build() has ever run. */
+static FwmTheme theme_fallback = {
     .pill   = {0.075, 0.082, 0.098},
     .sel    = {0.145, 0.155, 0.195},
     .text   = {0.91, 0.92, 0.94},
@@ -59,10 +62,63 @@ static FwmTheme theme_current = {
     .border_inactive = {0.231, 0.259, 0.380, 1.0},
 };
 
+/* One palette per monitor, derived from the wallpaper that monitor actually
+ * shows. The slot named "" is the un-named [[wallpaper]] set — every screen
+ * that did not name itself is drawn from it, which is exactly how
+ * config_wallpaper_on_output resolves the layers themselves. */
+#define THEME_MAX_SLOTS 8
+struct ThemeSlot {
+    char     output[64];
+    FwmTheme theme;
+};
+static struct ThemeSlot theme_slots[THEME_MAX_SLOTS];
+static int theme_slot_count;
+
+/* The palette in force: the monitor the user is on (theme_set_active_output),
+ * or — while a per-monitor overlay is being painted — the monitor being drawn
+ * (theme_use_output). Every panel that is not tied to a screen, the launcher
+ * and the ring among them, opens on the active one and reads the first. */
+static const FwmTheme *theme_live  = &theme_fallback;
+static const FwmTheme *theme_scope = NULL;
+
 static unsigned theme_gen = 1;
 
+static const FwmTheme *theme_for_output(const char *output) {
+    if (theme_slot_count <= 0) return &theme_fallback;
+    if (output && output[0]) {
+        for (int i = 0; i < theme_slot_count; i++)
+            if (strcmp(theme_slots[i].output, output) == 0) return &theme_slots[i].theme;
+    }
+    for (int i = 0; i < theme_slot_count; i++)
+        if (theme_slots[i].output[0] == '\0') return &theme_slots[i].theme;
+    /* Nothing names this monitor and there is no un-named set: the first layer,
+     * the same answer config_wallpaper_first gives to the same question. */
+    return &theme_slots[0].theme;
+}
+
 const FwmTheme *theme_get(void) {
-    return &theme_current;
+    return theme_scope ? theme_scope : theme_live;
+}
+
+const FwmTheme *theme_get_output(const char *output) {
+    return theme_for_output(output);
+}
+
+void theme_use_output(const char *output) {
+    theme_scope = output ? theme_for_output(output) : NULL;
+}
+
+int theme_set_active_output(const char *output) {
+    if (!output) output = "";
+    const FwmTheme *next = theme_for_output(output);
+    if (next == theme_live) return 0;
+    /* Two monitors showing two pictures of the same forest derive the same
+     * palette; nothing on screen would change, so nothing is repainted. */
+    int same = memcmp(next, theme_live, sizeof(*next)) == 0;
+    theme_live = next;
+    if (same) return 0;
+    theme_gen++;
+    return 1;
 }
 
 unsigned theme_generation(void) {
@@ -305,45 +361,19 @@ static int sample_wallpaper(const char *path, struct Sampled *out) {
 
 /* ── build ───────────────────────────────────────────────────────────── */
 
-void theme_build(FwmConfig *cfg) {
-    FwmTheme t = theme_base;
-
-    /* Configured border colours are the baseline in both modes. */
-    memcpy(t.border_active, cfg->decor.col_active, sizeof(t.border_active));
-    memcpy(t.border_inactive, cfg->decor.col_inactive, sizeof(t.border_inactive));
-
-    if (cfg->decor.color_source != COLOR_SOURCE_WALLPAPER) {
-        theme_current = t;
-        theme_gen++;
-        return;
-    }
-
-    if (cfg->wallpaper_count <= 0) {
-        config_report_error(cfg, "[decor] color_source = \"wallpaper\" but no "
-                                 "[[wallpaper]] is configured — keeping config colours");
-        theme_current = t;
-        theme_gen++;
-        return;
-    }
-
-    /* With two monitors showing two images the palette can only come from one
-     * of them: the screen the user is on (see FwmConfig.palette_output), which
-     * is the one the picker was last used on. */
-    const WallpaperLayer *pal = config_wallpaper_first(cfg, cfg->palette_output);
-    if (!pal) {
-        theme_current = t;
-        theme_gen++;
-        return;
-    }
+/* One wallpaper's palette: `base` tinted by what the image is made of. Falls
+ * back to `base` untouched — and says so through the config diagnostics —
+ * when there is no colour in the file to derive from. */
+static void theme_derive(FwmConfig *cfg, const FwmTheme *base, const char *path,
+                         FwmTheme *out) {
+    *out = *base;
 
     struct Sampled s = {0};
-    if (!sample_wallpaper(pal->path, &s)) {
+    if (!sample_wallpaper(path, &s)) {
         config_report_error(cfg, "[decor] color_source = \"wallpaper\": \"%s\" has no "
                                  "colour to derive from (unreadable or greyscale) — "
                                  "keeping config colours",
-                            pal->path);
-        theme_current = t;
-        theme_gen++;
+                            path);
         return;
     }
 
@@ -356,27 +386,74 @@ void theme_build(FwmConfig *cfg) {
     double tint_pill[3], tint_sel[3];
     hsv_to_rgb(s.mean_h, tint_s, 0.13, tint_pill);
     hsv_to_rgb(s.mean_h, tint_s, 0.22, tint_sel);
-    lerp3(theme_base.pill, tint_pill, strength, t.pill);
-    lerp3(theme_base.sel,  tint_sel,  strength, t.sel);
+    lerp3(theme_base.pill, tint_pill, strength, out->pill);
+    lerp3(theme_base.sel,  tint_sel,  strength, out->sel);
 
     /* Secondary text picks up a little of the hue; primary text stays neutral
      * so titles keep maximum contrast. */
     double tint_muted[3];
     hsv_to_rgb(s.mean_h, tint_s * 0.5, 0.60, tint_muted);
-    lerp3(theme_base.muted, tint_muted, strength * 0.5, t.muted);
+    lerp3(theme_base.muted, tint_muted, strength * 0.5, out->muted);
 
     if (s.have_accent) {
-        memcpy(t.accent, s.accent, sizeof(t.accent));
-        to_premul_rgba(t.accent, t.border_active);
+        memcpy(out->accent, s.accent, sizeof(out->accent));
+        to_premul_rgba(out->accent, out->border_active);
 
         /* Inactive border: same hue, drained and darkened — related to the
          * accent without competing with it. */
         double ah, as, av, inactive[3];
-        rgb_to_hsv(t.accent, &ah, &as, &av);
+        rgb_to_hsv(out->accent, &ah, &as, &av);
         hsv_to_rgb(ah, as * 0.45, av * 0.38, inactive);
-        to_premul_rgba(inactive, t.border_inactive);
+        to_premul_rgba(inactive, out->border_inactive);
+    }
+}
+
+void theme_build(FwmConfig *cfg) {
+    FwmTheme t = theme_base;
+
+    /* Configured border colours are the baseline in both modes. */
+    memcpy(t.border_active, cfg->decor.col_active, sizeof(t.border_active));
+    memcpy(t.border_inactive, cfg->decor.col_inactive, sizeof(t.border_inactive));
+
+    theme_fallback = t;
+    theme_slot_count = 0;
+    theme_scope = NULL;
+
+    if (cfg->decor.color_source != COLOR_SOURCE_WALLPAPER) {
+        theme_live = &theme_fallback;
+        theme_gen++;
+        return;
     }
 
-    theme_current = t;
+    if (cfg->wallpaper_count <= 0) {
+        config_report_error(cfg, "[decor] color_source = \"wallpaper\" but no "
+                                 "[[wallpaper]] is configured — keeping config colours");
+        theme_live = &theme_fallback;
+        theme_gen++;
+        return;
+    }
+
+    /* A palette per monitor rather than one for the session: with two screens
+     * showing two pictures, a single accent lifted from one of them is a colour
+     * that has nothing to do with what the OTHER screen is showing. Each
+     * monitor's tray, borders and panels are drawn from the image it is
+     * actually displaying (theme_get_output); the layer that is first for a
+     * given screen is the one it is derived from, as config_wallpaper_first
+     * resolves it. */
+    for (int i = 0; i < cfg->wallpaper_count && theme_slot_count < THEME_MAX_SLOTS; i++) {
+        const char *name = cfg->wallpapers[i].output;
+        int seen = 0;
+        for (int j = 0; j < theme_slot_count; j++)
+            if (strcmp(theme_slots[j].output, name) == 0) { seen = 1; break; }
+        if (seen) continue;   /* a set stacked on one screen: its first layer answered */
+
+        struct ThemeSlot *slot = &theme_slots[theme_slot_count++];
+        snprintf(slot->output, sizeof(slot->output), "%s", name);
+        theme_derive(cfg, &t, cfg->wallpapers[i].path, &slot->theme);
+    }
+
+    /* And the one in force until a monitor asks for its own: the screen the
+     * user is on (see FwmConfig.palette_output). */
+    theme_live = theme_for_output(cfg->palette_output);
     theme_gen++;
 }

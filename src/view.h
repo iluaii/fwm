@@ -124,6 +124,15 @@ typedef struct FwmView {
      * so they move with the window for free. NULL when borders are disabled. */
     struct wlr_scene_rect *border[4];
 
+    /* What the border was last painted from: the palette of the screen the
+     * window was standing on, whether it had the focus, and the generation
+     * that palette was built in. view_refresh_border_color runs every frame —
+     * a window dragged across the join has to change colour as it lands — and
+     * these are what keep it from touching the rects when nothing moved. */
+    const void *border_palette;   /* const FwmTheme *, kept opaque here */
+    unsigned border_palette_gen;
+    int border_palette_focused;
+
     /* The shadow this window casts from wherever the sun is, as nodes at the
      * bottom of the same tree and for the same reason. NULL when [sun] is off
      * at map time, or when the nodes could not be created. */
@@ -555,6 +564,12 @@ void view_stop_spin(FwmView *view);
 /* Is this window currently showing a rotated snapshot? */
 bool view_is_spinning(FwmView *view);
 void view_set_border_color(FwmView *view, const float color[4]);
+/* Paint the frame in the colours of the monitor the window is standing on —
+ * with a wallpaper per screen the accent is per screen too, so a window
+ * carried across the join takes the far side's colours as it arrives. Focus
+ * changes go through this as well; it costs nothing when neither the screen
+ * nor the focus has moved. */
+void view_refresh_border_color(FwmView *view);
 void view_set_border_enabled(FwmView *view, int enabled);
 
 /* ── the unfocused dim ────────────────────────────────────────────────────
