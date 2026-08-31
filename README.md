@@ -14,6 +14,8 @@
 
 # fwm — a Wayland compositor
 
+The name is *physics window manager*, with the `ph` spelled the short way. It has outgrown the second half of that — fwm is a compositor now, and not only a physics one — and kept the first.
+
 A compositor written in C (wlroots) with its own built-in shell, ten desktops laid out on one continuous strip, and windows that are physical objects — **mass, momentum, inertia and velocity**, simulated by a real rigid-body engine ([Box2D](https://box2d.org/) v3). Drag a window and throw it: it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
 
 Physics is the first thing you see, not the whole of it. The strip is scrolled across rather than switched between, and each desktop on it chooses for itself whether it is a physics desktop, a BSP tiling one, or plain floating. The launcher, the desktop strip, screenshots, the wallpaper picker, the sound panel and the spectrum visualiser are built in, so there is no `rofi`, `grim`, `slurp` or `cava` to install alongside. Multiple monitors, layer-shell and session lock work the way you already expect, and so does XWayland apart from [one open bug](#a-known-xwayland-bug-an-invisible-window-that-takes-clicks). `fwmctl` reads the state, changes any setting live without touching your config file, and streams events a script can react to — and where a keybind belongs to an external shell rather than to fwm, it can have it.
