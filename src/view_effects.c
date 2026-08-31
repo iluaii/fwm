@@ -863,11 +863,9 @@ void view_jelly_stop(FwmView *view) {
     view_jelly_free(view);
     view_set_content_enabled(view, true);
     if (border) view_set_border_enabled(view, 1);
+    /* The window is itself again and casts again: view->jelly was what kept
+     * the shadow out, and the geometry pass puts it back. */
     view_update_border_geometry(view);
-    /* The window is itself again and casts again — and this is the only place
-     * that says so on the live path, since view->jelly is what was keeping the
-     * shadow out. */
-    view_shadow_update(view);
 }
 
 /* Build (or rebuild) the snapshot, the two warp targets and the scene node.

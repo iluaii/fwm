@@ -462,6 +462,9 @@ void view_sync_position(FwmView *view);
 void view_committed_size(FwmView *view, int *w, int *h);
 void view_min_size(FwmView *view, int *w, int *h);
 
+/* Redraw everything that outlines the window at its current box: the four
+ * border rects and the shadow under them. Both follow view_border_box, so
+ * during a drag they follow the hand rather than the client's last answer. */
 void view_update_border_geometry(FwmView *view);
 
 /* Impact squash & stretch (see the squash_* fields above).

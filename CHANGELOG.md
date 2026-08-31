@@ -12,6 +12,16 @@
   or in a gap between tiles still splits the focused window, and
   `[tiling] spawn_cursor = false` turns the whole thing off.
 
+### Shadows
+
+- **A shadow follows the hand during a resize, not the client's last answer.**
+  The shadow was only re-cast when the client committed a new size, so dragging
+  an edge faster than the window redraws left it the size of a frame or two ago:
+  it slid out from under the window and back on every answer. It is now moved by
+  the same pass that moves the frame, which was given the asked-for box for
+  exactly this reason. Applies to a floating resize and to a tiling divider
+  alike.
+
 ### Monitors of different sizes
 
 - **A desktop is the size of the largest monitor, not the primary one.** A

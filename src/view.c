@@ -70,8 +70,8 @@ static void handle_commit(struct wl_listener *listener, void *data) {
     if (view->open_hold > 0) view->open_hold--;
 
     // Track the actual committed surface size so borders hug the real window.
+    // (And the shadow, which is cast on that same box.)
     view_update_border_geometry(view);
-    view_shadow_update(view);
     /* A client that has just added a subsurface handed us a scene buffer at
      * full strength; bring it down to whatever the rest of the window is at. */
     view_dim_apply(view);
@@ -349,11 +349,19 @@ void view_min_size(FwmView *view, int *w, int *h) {
 }
 
 void view_update_border_geometry(FwmView *view) {
-    if (!view->border[0]) return;
     if (view->squash_buf) return; /* the squash owns the border box meanwhile */
     int w, h;
     view_border_box(view, &w, &h);
-    view_place_borders(view, 0, 0, w, h);
+    if (view->border[0]) view_place_borders(view, 0, 0, w, h);
+    /* The shadow is cast by the same box the frame is drawn on, so it is moved
+     * by the same call. It used to wait for the client to commit instead, and
+     * a hand moving faster than the client redraws left the shadow the size of
+     * an answer two frames old: during a quick resize it slid about under the
+     * window, out one side and back, exactly as the frame did before it was
+     * given the asked-for box (view_border_box). A window with no frame at all
+     * ([decor] border_width = 0) still casts one, which is why the borders are
+     * the conditional part here rather than the whole function. */
+    view_shadow_update(view);
 }
 
 void view_set_border_color(FwmView *view, const float color[4]) {
