@@ -144,7 +144,8 @@ static void drag_place(FwmServer *server, double lx, double ly) {
     // (static) boundary walls and, on release, either get stuck outside them
     // or be shot out at 90 degrees as Box2D resolves the wall penetration.
     int min_world_x = 0;
-    int max_world_x = 10 * server->screen_width - server->interactive.view_start_width;
+    int max_world_x = (int)PHYSICS_WORLD_W(server->screen_width)
+                    - server->interactive.view_start_width;
     int min_y = 0;
     if (max_world_x < min_world_x) max_world_x = min_world_x;
 
