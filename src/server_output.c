@@ -694,12 +694,24 @@ static FwmOutput *world_output(FwmServer *server, double wx, double span) {
 FwmOutput *server_view_frame(FwmServer *server, FwmView *v, double wx, double span,
                              double *shift_x, double *shift_y) {
     FwmOutput *o = NULL;
-    bool held = server->interactive.action == FWM_ACTION_MOVE
-             && server->interactive.view == v
-             && server->interactive.cam_output != NULL;
+    bool carried = server->interactive.action == FWM_ACTION_MOVE
+                && server->interactive.view == v
+                && server->interactive.cam_output != NULL;
+    /* A window being RESIZED is held too, and pinned to the screen it was
+     * grabbed on for the length of it. Growing a window moves its middle, and
+     * the middle is what decides its column — so a window straddling a join
+     * changed monitors halfway through a drag of its own edge, to whichever
+     * screen shows the column next door, which need not be the screen next to
+     * it. Nothing about a resize says the window has gone anywhere. */
+    bool held = carried
+             || (server->interactive.action == FWM_ACTION_RESIZE
+                 && server->interactive.view == v
+                 && server->interactive.cam_output != NULL);
     if (held) {
         o = server->interactive.cam_output;
-        if (!o->enabled || o->hide_world || o->box.width <= 0) { o = NULL; held = false; }
+        if (!o->enabled || o->hide_world || o->box.width <= 0) {
+            o = NULL; held = carried = false;
+        }
     }
     if (!o) o = world_output_near(server, wx, span, v ? v->drawn_on : NULL);
     if (!o) return NULL;
@@ -709,8 +721,8 @@ FwmOutput *server_view_frame(FwmServer *server, FwmView *v, double wx, double sp
      * it is not offset by it either. Without this the trade above would fling
      * the held window a screen sideways and ease it back, which is the same
      * flight by another road. */
-    if (shift_x) *shift_x = o->render_dx + (held ? 0.0 : o->swap_dx);
-    if (shift_y) *shift_y = o->render_dy + (held ? 0.0 : o->swap_dy);
+    if (shift_x) *shift_x = o->render_dx + (carried ? 0.0 : o->swap_dx);
+    if (shift_y) *shift_y = o->render_dy + (carried ? 0.0 : o->swap_dy);
     return o;
 }
 

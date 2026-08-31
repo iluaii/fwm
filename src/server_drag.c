@@ -1106,6 +1106,10 @@ bool server_drag_press(FwmServer *server, uint32_t button, double lx, double ly,
                             wx < view->x + view->width  / 2.0;
                         server->interactive.resize_top =
                             wy < view->y + view->height / 2.0;
+                        /* Pinned to the screen it is being resized ON, so
+                         * that growing it across a join does not hand it to
+                         * another monitor mid-drag (server_view_frame). */
+                        server->interactive.cam_output = view->drawn_on;
                         server->interactive.sent_w = view->width;
                         server->interactive.sent_h = view->height;
                         /* The window is drawn at the size the hand asks for

@@ -344,6 +344,9 @@ void server_start_interactive_resize(FwmServer *server, struct FwmView *view, ui
     server->interactive.resize_top  = (edges & WLR_EDGE_TOP)  != 0;
     server->interactive.sent_w = view->width;
     server->interactive.sent_h = view->height;
+    /* Pinned to the screen it is being resized ON, so that growing it across a
+     * join does not hand it to another monitor mid-drag (server_view_frame). */
+    server->interactive.cam_output = view->drawn_on;
     /* Drawn at the hand's size for the length of the drag, as with the mouse
      * bind: a client resizing itself through its own frame is the same gesture
      * and has the same lag behind it. */
