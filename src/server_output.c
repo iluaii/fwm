@@ -637,7 +637,18 @@ static FwmOutput *output_passing_over(FwmServer *server, double wx, double span)
  * leaves by the screen it was on rather than hopping to the other one. */
 static FwmOutput *world_output_near(FwmServer *server, double wx, double span,
                                     FwmOutput *prefer) {
-    FwmOutput *o = server_output_showing(server, server_desktop_at_x(server, wx));
+    /* By the BODY's middle, which is the same question the physics asks when it
+     * files a window under a desktop (physics_sync_body) and the resize asks
+     * when it measures the room left in a column. Asked of the left EDGE, as it
+     * used to be, the three disagreed for every window standing across a join:
+     * a floating window nudged a few pixels past the boundary was still on this
+     * desktop as far as everything else was concerned, and was suddenly drawn
+     * by whichever monitor happened to be showing the NEXT one — which need not
+     * be the screen next door, and generally is not. The window, its frame and
+     * its shadow jumped to the other monitor while the hand stayed here, and a
+     * resize measured against a column the window was not in. */
+    FwmOutput *o = server_output_showing(server,
+                       server_desktop_at_x(server, wx + span / 2.0));
     if (o) return o->hide_world ? NULL : o;
     if (prefer && prefer->enabled && !prefer->hide_world && prefer->box.width > 0
         && span > 0.0 && output_sees(prefer, wx, span) > 0.0) return prefer;
@@ -659,7 +670,7 @@ static FwmOutput *world_output(FwmServer *server, double wx, double span) {
  * amount, which only works if both happen in ONE placement: half of it a frame
  * early is exactly the jerk it exists to prevent. See drag_place.
  *
- * Ordinarily the screen showing the column the window's left edge stands in.
+ * Ordinarily the screen showing the column the window's middle stands in.
  *
  * A WINDOW IN THE HAND IS THE EXCEPTION: it is drawn by the screen the hand is
  * on, whatever became of the column underneath it.
