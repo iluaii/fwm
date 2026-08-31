@@ -12,11 +12,11 @@
   <b><a href="https://fwm-website.vercel.app">fwm-website.vercel.app</a></b>
 </p>
 
-# fwm — Physics Window Manager (Wayland)
+# fwm — a Wayland compositor
 
-A Wayland compositor written in C (wlroots) where windows behave as physical objects with **mass, momentum, inertia, and velocity** — simulated by a real rigid-body engine ([Box2D](https://box2d.org/) v3). Drag a window and throw it — it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
+A compositor written in C (wlroots) with its own built-in shell, ten desktops laid out on one continuous strip, and windows that are physical objects — **mass, momentum, inertia and velocity**, simulated by a real rigid-body engine ([Box2D](https://box2d.org/) v3). Drag a window and throw it: it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
 
-Physics is the first thing you see, not the whole of it. Ten desktops sit on one continuous strip you scroll across, and each of them chooses for itself whether it is a physics desktop, a BSP tiling one, or plain floating. The launcher, the desktop strip, screenshots, the wallpaper picker, the sound panel and the spectrum visualiser are built in, so there is no `rofi`, `grim`, `slurp` or `cava` to install alongside. Multiple monitors, layer-shell and session lock work the way you already expect, and so does XWayland apart from [one open bug](#a-known-xwayland-bug-an-invisible-window-that-takes-clicks). `fwmctl` reads the state, changes any setting live without touching your config file, and streams events a script can react to — and where a keybind belongs to an external shell rather than to fwm, it can have it.
+Physics is the first thing you see, not the whole of it. The strip is scrolled across rather than switched between, and each desktop on it chooses for itself whether it is a physics desktop, a BSP tiling one, or plain floating. The launcher, the desktop strip, screenshots, the wallpaper picker, the sound panel and the spectrum visualiser are built in, so there is no `rofi`, `grim`, `slurp` or `cava` to install alongside. Multiple monitors, layer-shell and session lock work the way you already expect, and so does XWayland apart from [one open bug](#a-known-xwayland-bug-an-invisible-window-that-takes-clicks). `fwmctl` reads the state, changes any setting live without touching your config file, and streams events a script can react to — and where a keybind belongs to an external shell rather than to fwm, it can have it.
 
 This is the primary, actively developed version. The legacy X11 version lives on the [`x11`](https://github.com/iluaii/fwm/tree/x11) branch and is no longer supported.
 
@@ -485,6 +485,18 @@ git clone https://github.com/iluaii/fwm.git
 cd fwm
 ./install.sh
 ```
+
+**Arch Linux** — `fwm-git` is in the AUR, packaged and maintained there by
+[DodoGTA](https://aur.archlinux.org/packages/fwm-git) independently of this
+repository:
+
+```sh
+yay -S fwm-git    # or: paru -S fwm-git
+```
+
+It builds the current `main`, so fwm updates along with the rest of the system
+and `pacman` owns the files. `install.sh` above remains the way to run a working
+copy you also build on.
 
 Updating later:
 

@@ -8,6 +8,12 @@ cd fwm
 ./install.sh
 ```
 
+On Arch, `fwm-git` is in the AUR instead — `yay -S fwm-git` — packaged and
+maintained there by [DodoGTA](https://aur.archlinux.org/packages/fwm-git)
+independently of this repository. It builds the current `main` and leaves the
+files to `pacman`; the rest of this page applies either way, minus the
+`install.sh` commands.
+
 `install.sh` installs the dependencies for pacman, apt, dnf or xbps, builds
 Box2D v3 from source where the distribution ships something older (Debian's
 `libbox2d-dev` is 2.4, which is a different library), builds fwm and installs it
