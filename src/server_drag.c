@@ -245,6 +245,7 @@ static void drag_place(FwmServer *server, double lx, double ly) {
             server_place_view(server, view, view->x, view->y);
     }
 
+    view_sync_position(view);
     physics_sync_body(&server->physics, view->id, view->x, view->y,
                       view->width, view->height, server->screen_width);
 }

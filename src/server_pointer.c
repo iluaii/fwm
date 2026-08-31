@@ -81,6 +81,7 @@
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/util/log.h>
+#include <wlr/util/region.h>
 #include <xkbcommon/xkbcommon.h>
 #include "server_internal.h"
 
@@ -205,6 +206,11 @@ static void pointer_note_surface(FwmServer *server, struct wlr_surface *surface,
  * carry on with the ordinary "what is under the cursor" path. */
 static bool pointer_grab_deliver(FwmServer *server, double lx, double ly,
                                  uint32_t time_msec) {
+    if (server->active_constraint &&
+        server->active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED) {
+        return true;
+    }
+
     if (server->seat->pointer_state.button_count == 0) return false;
     if (!server->ptr_surface ||
         server->ptr_surface != server->seat->pointer_state.focused_surface) {
@@ -454,9 +460,7 @@ static void process_cursor_motion(FwmServer *server, uint32_t time_msec) {
      * mean "what is under me". */
     if (server_drag_motion(server, lx, ly, &now)) return;
 
-    /* A drag the CLIENT is doing: the pointer is spoken for, and neither the
-     * focus nor the surface under the cursor may change until the button is
-     * let go. */
+    /* A drag the CLIENT is doing, or a locked pointer: the pointer is spoken for. */
     if (pointer_grab_deliver(server, lx, ly, time_msec)) return;
 
     // Focus follows pointer
@@ -513,10 +517,23 @@ static void handle_cursor_motion(struct wl_listener *listener, void *data) {
             return;
         }
         /* Confined: allow the move only while it stays inside the region. */
-        if (!constraint_allows_at(server, server->cursor->x + event->delta_x,
-                                  server->cursor->y + event->delta_y)) {
-            server_notify_activity(server);
-            return;
+        double ox, oy;
+        if (pointer_surface_origin(server, server->active_constraint->surface, &ox, &oy)) {
+            double sx1 = server->cursor->x - ox;
+            double sy1 = server->cursor->y - oy;
+            double sx2 = server->cursor->x + event->delta_x - ox;
+            double sy2 = server->cursor->y + event->delta_y - oy;
+            double sx2_out, sy2_out;
+
+            if (wlr_region_confine(&server->active_constraint->region,
+                                   sx1, sy1, sx2, sy2, &sx2_out, &sy2_out)) {
+                event->delta_x = sx2_out - sx1;
+                event->delta_y = sy2_out - sy1;
+            } else {
+                /* The old position was outside the region entirely. Drop it to prevent escape. */
+                server_notify_activity(server);
+                return;
+            }
         }
     }
 
@@ -786,7 +803,12 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
      * leak a stray click into the window being grabbed, bound chord or not. */
     bool claimed = config_match_mouse(&server->config, button_to_fwm(event->button),
                                       fwd_mods) != NULL;
-    if (server->interactive.action == FWM_ACTION_NONE && !(fwd_mods & FWM_MOD_LOGO) && !claimed) {
+    bool should_forward = (server->interactive.action == FWM_ACTION_NONE && !(fwd_mods & FWM_MOD_LOGO) && !claimed);
+    
+    /* If we sent a press to the client (e.g. they clicked the titlebar), we MUST
+     * send the release so the grab completes, even if the compositor took over
+     * the drag in the meantime. Otherwise wlr_seat's button_count stays stuck > 0. */
+    if (should_forward || (event->state == WL_POINTER_BUTTON_STATE_RELEASED && server->seat->pointer_state.button_count > 0)) {
         wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
     }
     

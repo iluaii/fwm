@@ -1348,6 +1348,7 @@ void server_drag_swing_place(FwmServer *server) {
     view->y = (int)lround(ny);
     if (view->scene_tree)
         server_place_view(server, view, nx, ny);
+    view_sync_position(view);
 }
 
 /* The camera has come to rest. Called from the tick when a slide or a pan
@@ -1882,9 +1883,21 @@ static int physics_tick_cb(void *data) {
                 double jump = body->x - view->x;
                 if (fabs(jump) > 5.0 * server->screen_width)
                     view_jelly_carry(view, jump, 0.0);
+                int dx = body->x - view->x;
+                int dy = body->y - view->y;
                 view->x = body->x;
                 view->y = body->y;
                 server_place_view(server, view, body->x, body->y);
+                view_sync_position(view);
+
+                if ((dx != 0 || dy != 0) && server->active_constraint &&
+                    server->active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED &&
+                    view_from_surface(server, server->active_constraint->surface) == view) {
+                    /* dx/dy are world deltas passed to wlr_cursor_move(), which takes layout
+                     * coordinates. They agree only while the camera is standing still, which
+                     * is not true during a slide. */
+                    wlr_cursor_move(server->cursor, NULL, dx, dy);
+                }
             }
             if (body && view->tile_anim == TILE_ANIM_FLIGHT)
                 body->desktop_id = flight_desktop(server, view);

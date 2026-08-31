@@ -220,9 +220,25 @@ void view_set_size(FwmView *view, int width, int height) {
          * resyncs every view once the camera stops, so it is corrected the
          * moment the window can be seen again. */
         double sx = view->xwl_surface->x, sy = view->xwl_surface->y;
-        server_world_to_screen(view->server, view->x, view->y, view->width, &sx, &sy);
+        bool on_screen = server_world_to_screen(view->server, view->x, view->y, view->width, &sx, &sy);
+        int isx = (int)lround(sx);
+        int isy = (int)lround(sy);
+
+        // Only configure if something actually changed since last sync
+        if (view->last_sync_onscreen == on_screen &&
+            view->last_sync_x == isx && view->last_sync_y == isy &&
+            view->last_sync_w == width && view->last_sync_h == height) {
+            return;
+        }
+
+        view->last_sync_onscreen = on_screen;
+        view->last_sync_x = isx;
+        view->last_sync_y = isy;
+        view->last_sync_w = width;
+        view->last_sync_h = height;
+
         wlr_xwayland_surface_configure(view->xwl_surface,
-            (int16_t)lround(sx), (int16_t)lround(sy),
+            (int16_t)isx, (int16_t)isy,
             (uint16_t)width, (uint16_t)height);
     }
 }
@@ -758,6 +774,11 @@ FwmView *view_xwl_create(struct wlr_xwayland_surface *xsurface, struct FwmServer
     view->type = FWM_VIEW_XWAYLAND;
     view->xwl_surface = xsurface;
     view->server = server;
+    view->last_sync_onscreen = false;
+    view->last_sync_x = 0;
+    view->last_sync_y = 0;
+    view->last_sync_w = -1;
+    view->last_sync_h = -1;
 
     // map/unmap/commit attach on associate (no wlr_surface yet); init the
     // links so removal in view_destroy is safe even if it never associates.
