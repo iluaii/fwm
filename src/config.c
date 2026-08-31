@@ -1484,6 +1484,16 @@ static void load_wallpaper(toml_table_t *root, FwmConfig *cfg) {
         strncpy(cfg->wallpapers[idx].path, path.u.s, sizeof(cfg->wallpapers[idx].path) - 1);
         free(path.u.s);
 
+        /* The monitor this layer is for. Not validated against anything: the
+         * screen it names may be unplugged right now, and a config that only
+         * works with both monitors attached would be the wrong trade. */
+        toml_datum_t out = toml_string_in(tbl, "output");
+        if (out.ok) {
+            strncpy(cfg->wallpapers[idx].output, out.u.s,
+                    sizeof(cfg->wallpapers[idx].output) - 1);
+            free(out.u.s);
+        }
+
         toml_datum_t fit = toml_string_in(tbl, "fit");
         int mode = WALLPAPER_FIT_COVER;
         if (fit.ok) {
@@ -1512,6 +1522,58 @@ static void load_wallpaper(toml_table_t *root, FwmConfig *cfg) {
         idx++;
     }
     cfg->wallpaper_count = idx;
+}
+
+bool config_wallpaper_on_output(const FwmConfig *cfg, const WallpaperLayer *layer,
+                                const char *output) {
+    if (!cfg || !layer) return false;
+    if (!output) output = "";
+
+    /* A monitor named anywhere in the array has said what it wants, and the
+     * general layers are not also stacked underneath it. */
+    if (output[0]) {
+        for (int i = 0; i < cfg->wallpaper_count; i++)
+            if (strcmp(cfg->wallpapers[i].output, output) == 0)
+                return strcmp(layer->output, output) == 0;
+    }
+    return layer->output[0] == '\0';
+}
+
+const WallpaperLayer *config_wallpaper_first(const FwmConfig *cfg, const char *output) {
+    if (!cfg) return NULL;
+    for (int i = 0; i < cfg->wallpaper_count; i++)
+        if (config_wallpaper_on_output(cfg, &cfg->wallpapers[i], output))
+            return &cfg->wallpapers[i];
+    /* Nothing for that monitor (or none named): the first layer is still the
+     * best answer to "what is the wallpaper", which is what the palette and
+     * `fwmctl theme` are asking. */
+    return cfg->wallpaper_count > 0 ? &cfg->wallpapers[0] : NULL;
+}
+
+WallpaperLayer *config_wallpaper_set_path(FwmConfig *cfg, const char *output,
+                                          const char *path) {
+    if (!cfg || !path || !path[0]) return NULL;
+    if (!output) output = "";
+
+    for (int i = 0; i < cfg->wallpaper_count; i++) {
+        if (strcmp(cfg->wallpapers[i].output, output) != 0) continue;
+        snprintf(cfg->wallpapers[i].path, sizeof(cfg->wallpapers[i].path), "%s", path);
+        return &cfg->wallpapers[i];
+    }
+
+    /* This monitor had nothing of its own. A new layer keeps "cover": a lone
+     * layer with pan semantics would scroll an image nobody asked to walk
+     * across. */
+    WallpaperLayer *grown = realloc(cfg->wallpapers,
+                                    (size_t)(cfg->wallpaper_count + 1) * sizeof(*grown));
+    if (!grown) return NULL;
+    cfg->wallpapers = grown;
+    WallpaperLayer *w = &grown[cfg->wallpaper_count++];
+    memset(w, 0, sizeof(*w));
+    w->fit = WALLPAPER_FIT_COVER;
+    snprintf(w->output, sizeof(w->output), "%s", output);
+    snprintf(w->path, sizeof(w->path), "%s", path);
+    return w;
 }
 
 /* ── window rules ────────────────────────────────────────────────────── */
@@ -1880,6 +1942,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     cfg->mode_count      = 0;
     cfg->wallpapers      = NULL;
     cfg->wallpaper_count = 0;
+    cfg->palette_output[0] = '\0';  /* the compositor points this at a monitor */
     cfg->rules           = NULL;
     cfg->rule_count      = 0;
     cfg->error_count     = 0;

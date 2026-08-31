@@ -12,6 +12,25 @@
   or in a gap between tiles still splits the focused window, and
   `[tiling] spawn_cursor = false` turns the whole thing off.
 
+### Wallpaper
+
+- **Each monitor can carry its own wallpaper.** A `[[wallpaper]]` layer takes an
+  `output = "HDMI-A-1"`, and a monitor named anywhere in the array shows only
+  the layers naming it; every other monitor shows only the layers that name
+  none. That is what makes the usual shape — one wallpaper everywhere and one
+  screen that differs — two blocks, without the general image sitting underneath
+  the special one. A layer naming an unplugged screen is simply not built and
+  comes back with it, and each monitor pans its own image with its own camera.
+- **The picker sets the screen you are on.** With one monitor nothing changes:
+  the pick is the desktop's, remembered in `~/.local/state/fwm/wallpaper`. With
+  two, it lands on the active monitor and is remembered per monitor in
+  `~/.local/state/fwm/wallpaper.<OUTPUT>`, so the other screen keeps its image
+  and a dark screen still gets its own back. Only the monitors that actually
+  show the changed image are rebuilt, so a pick no longer re-decodes a wallpaper
+  the other screen was already showing.
+- With `color_source = "wallpaper"` the palette follows the monitor you are on —
+  two images cannot both be the one the tray is tinted from.
+
 ### Shadows
 
 - **A shadow follows the hand during a resize, not the client's last answer.**

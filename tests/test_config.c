@@ -1257,6 +1257,69 @@ static void test_outputs(void) {
     drop_config();
 }
 
+/* Per-monitor wallpapers. The rule the compositor leans on is not "match or
+ * fall back per layer" but "a named monitor shows only what names it" — the
+ * general wallpaper must not sit underneath the special one. */
+static void test_wallpaper_outputs(void) {
+    CASE("[[wallpaper]] output picks which monitor a layer is for");
+
+    char a[256], b[256];
+    snprintf(a, sizeof a, "/tmp/fwm-test-wall-a-%d.png", (int)getpid());
+    snprintf(b, sizeof b, "/tmp/fwm-test-wall-b-%d.png", (int)getpid());
+    for (const char *f = a;; f = b) {
+        FILE *fp = fopen(f, "w");
+        if (fp) { fputs("x", fp); fclose(fp); }
+        if (f == b) break;
+    }
+
+    char body[1024];
+    snprintf(body, sizeof body,
+             "[binds]\n\"super+q\" = \"killclient\"\n"
+             "[[wallpaper]]\npath = \"%s\"\n"
+             "[[wallpaper]]\npath = \"%s\"\noutput = \"HDMI-A-1\"\nfit = \"contain\"\n",
+             a, b);
+    const char *p = write_config(body);
+    FwmConfig cfg;
+    config_load(&cfg, p);
+
+    CHECK_INT(cfg.wallpaper_count, 2);
+    CHECK_STR(cfg.wallpapers[0].output, "");
+    CHECK_STR(cfg.wallpapers[1].output, "HDMI-A-1");
+    CHECK_INT(cfg.error_count, 0);
+
+    /* The named monitor: its own layer, and NOT the general one under it. */
+    CHECK(config_wallpaper_on_output(&cfg, &cfg.wallpapers[1], "HDMI-A-1"));
+    CHECK(!config_wallpaper_on_output(&cfg, &cfg.wallpapers[0], "HDMI-A-1"));
+    /* Every other screen: the general layer only. */
+    CHECK(config_wallpaper_on_output(&cfg, &cfg.wallpapers[0], "eDP-1"));
+    CHECK(!config_wallpaper_on_output(&cfg, &cfg.wallpapers[1], "eDP-1"));
+
+    CHECK_STR(config_wallpaper_first(&cfg, "HDMI-A-1")->path, b);
+    CHECK_STR(config_wallpaper_first(&cfg, "eDP-1")->path, a);
+    CHECK_STR(config_wallpaper_first(&cfg, "")->path, a);
+
+    CASE("a pick lands on one monitor and leaves the others alone");
+    /* What the picker does: the named layer keeps its fit, and the screen with
+     * nothing of its own grows a layer instead of stealing someone else's. */
+    CHECK_NOT_NULL(config_wallpaper_set_path(&cfg, "HDMI-A-1", a));
+    CHECK_STR(cfg.wallpapers[1].path, a);
+    CHECK_INT(cfg.wallpapers[1].fit, WALLPAPER_FIT_CONTAIN);
+    CHECK_INT(cfg.wallpaper_count, 2);
+
+    CHECK_NOT_NULL(config_wallpaper_set_path(&cfg, "DP-3", b));
+    CHECK_INT(cfg.wallpaper_count, 3);
+    CHECK_STR(cfg.wallpapers[2].output, "DP-3");
+    CHECK_INT(cfg.wallpapers[2].fit, WALLPAPER_FIT_COVER);
+    CHECK_STR(config_wallpaper_first(&cfg, "DP-3")->path, b);
+    /* And the untouched screens are where they were. */
+    CHECK_STR(config_wallpaper_first(&cfg, "eDP-1")->path, a);
+
+    config_free(&cfg);
+    drop_config();
+    unlink(a);
+    unlink(b);
+}
+
 static void test_stats(void) {
     /* Four, not five: `bat` is in the default pill because a machine without a
      * battery drops the readout entirely, while `net` is available everywhere
@@ -1580,6 +1643,7 @@ int main(void) {
     test_option_nudge();
     test_output_spellings();
     test_outputs();
+    test_wallpaper_outputs();
     test_stats();
     test_idle();
     test_clipboard();

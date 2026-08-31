@@ -1161,6 +1161,7 @@ static void output_build_wallpaper(FwmOutput *out) {
     }
     if (server->config.wallpaper_count <= 0) return;
     out->wallpaper = wallpaper_create(server->layer_background, &server->config,
+                                      out->wlr_output->name,
                                       out->box.width, out->box.height);
     if (!out->wallpaper) return;
     /* Its own strip of the scene, moved onto this monitor. The layers are laid

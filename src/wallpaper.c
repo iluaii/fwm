@@ -207,7 +207,7 @@ static void draw_layer(cairo_t *cr, int w, int h, void *user) {
 }
 
 FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *cfg,
-                               int screen_w, int screen_h) {
+                               const char *output, int screen_w, int screen_h) {
     if (!parent || cfg->wallpaper_count <= 0 || screen_w <= 0 || screen_h <= 0) {
         return NULL;
     }
@@ -223,6 +223,13 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
 
     for (int i = 0; i < cfg->wallpaper_count; i++) {
         const WallpaperLayer *layer = &cfg->wallpapers[i];
+
+        // Somebody else's monitor. Each screen builds its own set out of the
+        // layers that are for it, so a layer naming another output is simply
+        // not part of this one — see config_wallpaper_on_output.
+        if (!config_wallpaper_on_output(cfg, layer, output)) continue;
+        wlr_log(WLR_DEBUG, "wallpaper %s: layer %d is '%s'",
+                output ? output : "(unnamed)", i, layer->path);
 
         // Video layer: its own module owns the scene buffer and the decode
         // thread. It never pans (slack 0), so wallpaper_update leaves it put.

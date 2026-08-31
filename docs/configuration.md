@@ -999,6 +999,7 @@ fit    = "pan"        # "cover" | "contain" | "pan" | "video"
 path   = "~/Videos/rain.mp4"
 fit    = "video"
 #fps   = 30           # "video" only: cap the presentation rate
+#output = "HDMI-A-1"  # this layer belongs to one monitor
 ```
 
 | `fit` | What it does |
@@ -1011,6 +1012,32 @@ fit    = "video"
 Video decodes on its own thread in software; playback pauses whenever a
 fullscreen window covers it, and `fps` trims CPU further on weak hardware.
 
+### One wallpaper per monitor
+
+`output` names the screen a layer is for, spelled as fwm logs it (`DP-1`,
+`HDMI-A-1`, `eDP-1` — `fwmctl outputs` lists them). A monitor named anywhere in
+the array shows **only** the layers naming it; every other monitor shows only
+the layers that name none. So the common shape — one wallpaper everywhere, one
+screen that differs — is two tables, and the general image does not also sit
+underneath the special one:
+
+```toml
+[[wallpaper]]
+path   = "~/Pictures/sky.jpg"     # every screen without an entry of its own
+
+[[wallpaper]]
+path   = "~/Pictures/desk.jpg"
+output = "HDMI-A-1"               # …except this one
+```
+
+A layer naming a monitor that is not plugged in is simply not built, and comes
+back with the screen. Panning is per monitor as well: each screen walks its own
+image with its own camera.
+
+With two different images the UI palette (`color_source = "wallpaper"`) can only
+come from one of them — it follows the monitor you are on, which is the one the
+picker was last used on.
+
 ## wallpaper_picker
 
 ```toml
@@ -1020,8 +1047,15 @@ fps = 30.0     # base fps cap for videos chosen through the picker
 ```
 
 What `wallpaper_picker` (`Super+Shift+P`) browses. A picked image is remembered
-in `~/.local/state/fwm/wallpaper` and applied over the configured one on every
-load, so a reload keeps it rather than snapping back.
+and applied over the configured one on every load, so a reload keeps it rather
+than snapping back.
+
+With one monitor the pick is the whole desktop's, remembered in
+`~/.local/state/fwm/wallpaper`. With two or more it lands on the screen you are
+on and is remembered per monitor, in `~/.local/state/fwm/wallpaper.HDMI-A-1` —
+so the other screen keeps its image, and a screen that is currently dark still
+gets its own back when it returns. Deleting the file forgets the pick and the
+`[[wallpaper]]` layers stand again.
 
 ## cava
 

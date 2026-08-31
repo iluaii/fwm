@@ -40,6 +40,7 @@
 #include "grass.h"
 #include "group.h"
 
+#include <dirent.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -125,9 +126,22 @@ static void server_state_mkdir_parents(const char *file) {
     mkdir(dir, 0755);
 }
 
-static void server_state_save_wallpaper(const char *path) {
+/* The state file a monitor's pick lives in: `wallpaper` for the un-named set,
+ * `wallpaper.DP-1` for one screen. Output names come from the kernel and carry
+ * no slashes, so they are their own file name. */
+static void server_state_wallpaper_path(char *buf, size_t cap, const char *output) {
+    if (output && output[0]) {
+        char name[128];
+        snprintf(name, sizeof(name), "wallpaper.%s", output);
+        server_state_path(buf, cap, name);
+    } else {
+        server_state_path(buf, cap, "wallpaper");
+    }
+}
+
+static void server_state_save_wallpaper(const char *output, const char *path) {
     char sp[512];
-    server_state_path(sp, sizeof(sp), "wallpaper");
+    server_state_wallpaper_path(sp, sizeof(sp), output);
     server_state_mkdir_parents(sp);
 
     FILE *f = fopen(sp, "w");
@@ -459,81 +473,79 @@ void server_state_apply_settings(FwmServer *server) {
     }
 }
 
-/* Apply the remembered wallpaper over the configured one. Called after every
- * config load, so a reload keeps the picked image rather than snapping back. */
-void server_state_apply_wallpaper(FwmServer *server) {
-    char sp[512];
-    server_state_path(sp, sizeof(sp), "wallpaper");
-    FILE *f = fopen(sp, "r");
+/* Read one remembered pick and put it over the configured layers. A stale
+ * entry (image deleted since) must not blank the wallpaper: it is dropped and
+ * whatever the config says stands. */
+static void state_apply_wallpaper_file(FwmServer *server, const char *output,
+                                       const char *file) {
+    FILE *f = fopen(file, "r");
     if (!f) return;
 
     char line[512];
     if (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = '\0';
-        /* A stale entry (image deleted since) must not blank the wallpaper —
-         * fall through to whatever the config says. */
         if (line[0] && access(line, R_OK) == 0) {
-            if (server->config.wallpaper_count <= 0) {
-                WallpaperLayer *w = calloc(1, sizeof(WallpaperLayer));
-                if (w) {
-                    w->fit = WALLPAPER_FIT_COVER;
-                    server->config.wallpapers = w;
-                    server->config.wallpaper_count = 1;
-                }
-            }
-            if (server->config.wallpaper_count > 0) {
-                snprintf(server->config.wallpapers[0].path,
-                         sizeof(server->config.wallpapers[0].path), "%s", line);
-                /* Remembered picks are picker choices, so honour the picker's
-                 * base fps here too — a restart must not revert to source rate. */
-                if (server->config.wallpaper_picker_fps > 0.0)
-                    server->config.wallpapers[0].fps = server->config.wallpaper_picker_fps;
-            }
+            WallpaperLayer *w = config_wallpaper_set_path(&server->config, output, line);
+            /* Remembered picks are picker choices, so honour the picker's base
+             * fps here too — a restart must not revert to source rate. */
+            if (w && server->config.wallpaper_picker_fps > 0.0)
+                w->fps = server->config.wallpaper_picker_fps;
         }
     }
     fclose(f);
 }
 
-void server_set_wallpaper(FwmServer *server, const char *path) {
-    if (!path || !path[0]) return;
-    if (access(path, R_OK) != 0) {
-        wlr_log(WLR_ERROR, "wallpaper '%s' is not readable", path);
-        return;
+/* Apply the remembered wallpapers over the configured ones. Called after every
+ * config load, so a reload keeps the picked images rather than snapping back.
+ *
+ * The per-monitor files are found by reading the state directory rather than
+ * by asking the outputs: this runs while the config is being loaded, before
+ * anyone knows which screens are plugged in, and a pick made on a monitor that
+ * is currently dark must still be there when it comes back. */
+void server_state_apply_wallpaper(FwmServer *server) {
+    char sp[512];
+    server_state_wallpaper_path(sp, sizeof(sp), NULL);
+    state_apply_wallpaper_file(server, "", sp);
+
+    char dir[512];
+    snprintf(dir, sizeof(dir), "%s", sp);
+    char *slash = strrchr(dir, '/');
+    if (!slash) return;
+    *slash = '\0';
+
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (strncmp(e->d_name, "wallpaper.", 10) != 0) continue;
+        const char *output = e->d_name + 10;
+        if (!output[0]) continue;
+        char file[600];
+        snprintf(file, sizeof(file), "%s/%s", dir, e->d_name);
+        state_apply_wallpaper_file(server, output, file);
     }
+    closedir(d);
+}
 
-    /* No [[wallpaper]] in the config: start one, keeping "cover" — a lone
-     * layer with pan semantics would scroll an image the user never asked to
-     * walk across. */
-    if (server->config.wallpaper_count <= 0) {
-        WallpaperLayer *w = calloc(1, sizeof(WallpaperLayer));
-        if (!w) return;
-        w->fit = WALLPAPER_FIT_COVER;
-        server->config.wallpapers = w;
-        server->config.wallpaper_count = 1;
-    }
-    /* Only the path changes: fit and zoom stay as configured, so a "pan"
-     * setup keeps panning with the new image. */
-    snprintf(server->config.wallpapers[0].path,
-             sizeof(server->config.wallpapers[0].path), "%s", path);
-
-    /* A video chosen through the picker takes the picker's base fps cap, so the
-     * user has a single knob for everything they pick. Only when one is set
-     * (>0), so an explicit per-layer [[wallpaper]] fps is not clobbered. */
-    if (server->config.wallpaper_picker_fps > 0.0)
-        server->config.wallpapers[0].fps = server->config.wallpaper_picker_fps;
-
-    /* Cross-fade rather than cut: the outgoing set stays underneath (the new
-     * one is created later, so the scene draws it on top) until the fade ends.
-     * A swap still in flight is finished immediately, so rapid picking cannot
-     * pile up wallpapers. */
+/* Rebuild the wallpaper of every monitor that shows `layer`, cross-fading from
+ * what it had. The monitors that do not show it are left alone: re-decoding
+ * another screen's image to fade it into itself is work that buys nothing. */
+static void wallpaper_rebuild_showing(FwmServer *server, const WallpaperLayer *layer) {
     FwmOutput *out;
     wl_list_for_each(out, &server->outputs, link) {
+        if (layer && !config_wallpaper_on_output(&server->config, layer,
+                                                 out->wlr_output->name))
+            continue;
+
+        /* A swap still in flight is finished immediately, so rapid picking
+         * cannot pile up wallpapers. */
         if (out->wallpaper_prev) {
             wallpaper_destroy(out->wallpaper_prev);
             out->wallpaper_prev = NULL;
         }
         out->wallpaper_prev = out->wallpaper;
         out->wallpaper = wallpaper_create(server->layer_background, &server->config,
+                                          out->wlr_output->name,
                                           out->box.width, out->box.height);
         if (out->wallpaper) {
             wallpaper_set_origin(out->wallpaper, out->box.x, out->box.y);
@@ -551,21 +563,73 @@ void server_set_wallpaper(FwmServer *server, const char *path) {
                 server_reclaim_memory();
             }
         }
-        /* The new set went in above everything already in the background layer,
-         * grass included. */
+        /* The new set went in above everything already in the background
+         * layer, grass included. */
         if (out->grass) grass_raise(out->grass);
     }
+}
+
+/* Which monitor a pick is for, and therefore which layer and which state file
+ * it is written to. */
+static const char *wallpaper_pick_target(FwmServer *server) {
+    FwmOutput *out = server_active_output(server);
+    if (!out) return "";
+    const char *name = out->wlr_output->name;
+
+    /* A screen with a layer of its own is written by name whatever else is
+     * plugged in: it shows only what names it, so a pick written to the
+     * un-named set would land on a layer this monitor never draws — the picker
+     * would look like it had done nothing. */
+    for (int i = 0; i < server->config.wallpaper_count; i++)
+        if (strcmp(server->config.wallpapers[i].output, name) == 0) return name;
+
+    /* Otherwise: with one screen there is nothing to choose and the un-named
+     * set is written, so a single-monitor session keeps exactly the state file
+     * it always had. With two, the pick lands on the screen you are looking at
+     * and the other one keeps its own image. */
+    return wl_list_length(&server->outputs) < 2 ? "" : name;
+}
+
+void server_set_wallpaper(FwmServer *server, const char *path) {
+    if (!path || !path[0]) return;
+    if (access(path, R_OK) != 0) {
+        wlr_log(WLR_ERROR, "wallpaper '%s' is not readable", path);
+        return;
+    }
+
+    const char *output = wallpaper_pick_target(server);
+
+    /* Only the path changes: fit and zoom stay as configured, so a "pan" setup
+     * keeps panning with the new image. A monitor with no layer of its own
+     * gets one, as "cover". */
+    WallpaperLayer *layer = config_wallpaper_set_path(&server->config, output, path);
+    if (!layer) return;
+
+    /* A video chosen through the picker takes the picker's base fps cap, so the
+     * user has a single knob for everything they pick. Only when one is set
+     * (>0), so an explicit per-layer [[wallpaper]] fps is not clobbered. */
+    if (server->config.wallpaper_picker_fps > 0.0)
+        layer->fps = server->config.wallpaper_picker_fps;
+
+    /* Cross-fade rather than cut: the outgoing set stays underneath (the new
+     * one is created later, so the scene draws it on top) until the fade
+     * ends. */
+    wallpaper_rebuild_showing(server, layer);
 
     /* Start (or stop) driving video frames for whatever was just built. */
     server_video_sync(server);
 
-    /* The palette may be derived from the image that just changed. */
+    /* The palette may be derived from the image that just changed, and it is
+     * the screen the user is looking at that it should come from. */
+    snprintf(server->config.palette_output, sizeof(server->config.palette_output),
+             "%s", output);
     theme_build(&server->config);
     ipc_emit_palette(server->ipc);
     server_request_tray_redraw(server);
 
-    server_state_save_wallpaper(path);
-    wlr_log(WLR_INFO, "wallpaper set to %s", path);
+    server_state_save_wallpaper(output, path);
+    if (output[0]) wlr_log(WLR_INFO, "wallpaper on %s set to %s", output, path);
+    else           wlr_log(WLR_INFO, "wallpaper set to %s", path);
 }
 
 void server_apply_physics_config(FwmServer *server) {
@@ -604,6 +668,15 @@ void server_apply_physics_config(FwmServer *server) {
  * decodes the image from disk: fine once per reload, far too expensive for a
  * knob someone is dragging through a range. */
 void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
+    /* A reload re-reads the file, which knows nothing about which screen the
+     * palette came from; point it back at the active one before the colours
+     * are computed. Empty while no monitor is up yet — then the first layer
+     * answers for the palette, as it always did. */
+    FwmOutput *active = server_active_output(server);
+    snprintf(server->config.palette_output, sizeof(server->config.palette_output),
+             "%s", active && wl_list_length(&server->outputs) > 1
+                       ? active->wlr_output->name : "");
+
     /* Before anything reads colours: a new wallpaper or color_source repaints
      * the whole system. */
     theme_build(&server->config);
@@ -651,6 +724,7 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
             }
             if (server->config.wallpaper_count > 0) {
                 out->wallpaper = wallpaper_create(server->layer_background, &server->config,
+                                                  out->wlr_output->name,
                                                   out->box.width, out->box.height);
                 if (out->wallpaper) {
                     wallpaper_set_origin(out->wallpaper, out->box.x, out->box.y);

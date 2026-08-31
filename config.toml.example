@@ -1333,6 +1333,8 @@ tap = true
 # Built-in wallpaper picker: which folder to browse (flat, no recursion).
 # The pick is remembered in ~/.local/state/fwm/wallpaper and overrides the
 # first [[wallpaper]] layer on the next start; this file is never rewritten.
+# With more than one monitor the pick lands on the screen you are on and is
+# remembered per monitor, in ~/.local/state/fwm/wallpaper.<OUTPUT>.
 # Deleting that state file goes back to the wallpaper configured here.
 # The picker lists videos too (their icon is a random frame); picking one makes
 # it a looping video wallpaper.
@@ -1437,3 +1439,18 @@ dir = "~/Pictures"
 #path = "/home/you/Pictures/wallpaper.mp4"
 #fit  = "video"
 #fps  = 15
+
+# One wallpaper per monitor. `output` names the screen a layer is for, spelled
+# as fwm logs it (`fwmctl outputs` lists them). A monitor named anywhere in the
+# array shows ONLY the layers naming it; every other monitor shows only the
+# layers that name none — so a general wallpaper plus one screen that differs is
+# two blocks, and the general one does not also sit underneath the special one.
+# A layer naming an unplugged monitor is simply not built, and comes back with
+# it. The picker (super+shift+p) sets the screen you are on when you have more
+# than one, and remembers it per monitor.
+#[[wallpaper]]
+#path = "/home/you/Pictures/sky.jpg"
+#
+#[[wallpaper]]
+#path   = "/home/you/Pictures/desk.jpg"
+#output = "HDMI-A-1"

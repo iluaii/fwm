@@ -455,9 +455,12 @@ static void palette_fields(FwmServer *server, struct Buf *b) {
     /* The image as well as the colours: matugen and pywal both make a better
      * scheme from the picture than from one colour lifted out of it, and the
      * event is the only notice they get that it changed. */
-    if (from_wallpaper && server->config.wallpaper_count > 0) {
+    const WallpaperLayer *pal = from_wallpaper
+        ? config_wallpaper_first(&server->config, server->config.palette_output)
+        : NULL;
+    if (pal) {
         buf_puts(b, ",\"wallpaper\":");
-        buf_json_string(b, server->config.wallpapers[0].path);
+        buf_json_string(b, pal->path);
     }
 
     buf_printf(b, ",\"generation\":%u,\"colors\":{", theme_generation());

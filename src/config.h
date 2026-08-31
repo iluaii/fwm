@@ -1133,6 +1133,19 @@ typedef struct {
  *   path = "/home/me/Pictures/scene.jpg"
  *   fit  = "pan"
  *   # zoom = 1.5   # optional: more travel, slightly softer
+ *
+ * `output` names the monitor a layer belongs to, as fwm logs it ("DP-1"). A
+ * monitor that is named anywhere in the array shows ONLY the layers naming it;
+ * every other monitor shows only the layers that name none. That is what makes
+ * the common shape work — a general wallpaper plus one screen that differs —
+ * without the general one showing through underneath the special one:
+ *
+ *   [[wallpaper]]
+ *   path = "~/Pictures/sky.jpg"        # everything without an entry of its own
+ *
+ *   [[wallpaper]]
+ *   path = "~/Pictures/desk.jpg"
+ *   output = "HDMI-A-1"
  */
 enum {
     WALLPAPER_FIT_COVER   = 0, /* fill screen, crop overflow, static */
@@ -1143,6 +1156,8 @@ enum {
 
 typedef struct {
     char   path[512];
+    char   output[64]; /* monitor this layer is for; "" = every monitor that
+                        * has no layer of its own (see above) */
     int    fit;    /* WALLPAPER_FIT_* */
     double pan_crop; /* "pan" only, 0..0.9: how much of the image height may be
                       * given up to buy pan travel when the image is not wide
@@ -1357,6 +1372,12 @@ typedef struct {
     int             rule_count;
     ConfigOutput    outputs[CONFIG_MAX_OUTPUTS];
     int             output_count;
+    /* Which monitor the wallpaper palette is taken from, when monitors differ.
+     * Runtime-only (never in the file): the compositor points it at the active
+     * output, so picking an image on the screen you are looking at is what
+     * recolours the UI. Empty = sample the first layer, as before. */
+    char            palette_output[64];
+
     /* [wallpaper_picker] dir — where the built-in picker looks for images.
      * "~" is expanded at load. */
     char            wallpaper_dir[512];
@@ -1372,6 +1393,23 @@ typedef struct {
 } FwmConfig;
 
 /* ── api ─────────────────────────────────────────────────────────────── */
+
+/* Does this layer belong on the monitor named `output` (NULL/"" = a monitor
+ * whose name we do not know, which gets the un-named layers)? See the
+ * [[wallpaper]] comment above for the rule this implements. */
+bool config_wallpaper_on_output(const FwmConfig *cfg, const WallpaperLayer *layer,
+                                const char *output);
+
+/* The first layer that monitor shows, or NULL when it shows none. What the
+ * palette samples, and what `fwmctl theme` reports. */
+const WallpaperLayer *config_wallpaper_first(const FwmConfig *cfg, const char *output);
+
+/* Point that monitor's wallpaper at `path`, growing the array by one "cover"
+ * layer if it has none yet (the picker's path: it only ever sets an image, and
+ * a layer it did not write keeps its own fit and zoom). `output` NULL or "" is
+ * the un-named set. Returns the layer written, or NULL if it could not grow. */
+WallpaperLayer *config_wallpaper_set_path(FwmConfig *cfg, const char *output,
+                                          const char *path);
 
 void config_load(FwmConfig *cfg, const char *path);
 void config_free(FwmConfig *cfg);

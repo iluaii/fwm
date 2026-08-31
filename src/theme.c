@@ -326,12 +326,22 @@ void theme_build(FwmConfig *cfg) {
         return;
     }
 
+    /* With two monitors showing two images the palette can only come from one
+     * of them: the screen the user is on (see FwmConfig.palette_output), which
+     * is the one the picker was last used on. */
+    const WallpaperLayer *pal = config_wallpaper_first(cfg, cfg->palette_output);
+    if (!pal) {
+        theme_current = t;
+        theme_gen++;
+        return;
+    }
+
     struct Sampled s = {0};
-    if (!sample_wallpaper(cfg->wallpapers[0].path, &s)) {
+    if (!sample_wallpaper(pal->path, &s)) {
         config_report_error(cfg, "[decor] color_source = \"wallpaper\": \"%s\" has no "
                                  "colour to derive from (unreadable or greyscale) — "
                                  "keeping config colours",
-                            cfg->wallpapers[0].path);
+                            pal->path);
         theme_current = t;
         theme_gen++;
         return;
