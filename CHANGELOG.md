@@ -32,6 +32,12 @@
 - **`[tiling] smart_gaps`**: a desktop holding one window loses its outer gap —
   the window is the whole layout, and the margin was holding it away from
   nothing. The gap returns with the second window.
+- **`fwm -debug` shows both halves again.** Its first desktop is meant to hold a
+  window under physics and its second a tile; a config that tiles every desktop
+  by default (or `remember` carrying the last session's choices over) had tiled
+  the first one too, so the scratch session came up tiled on both. It now sets
+  both modes itself. A `-debug` run also no longer writes the modes-and-settings
+  state file, which belongs to the session it was started beside.
 
 ### Wallpaper
 

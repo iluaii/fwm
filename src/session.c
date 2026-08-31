@@ -369,6 +369,13 @@ void session_debug_desktop(struct FwmServer *server) {
     const char *cmd = server_terminal_command(server);
     if (!cmd) return;   /* it has already said so, in the tray */
 
+    /* Both modes are SET, not assumed. The first desktop is meant to be the
+     * loose half of the demonstration, and it is only loose by default: a
+     * config with `[tiling] default = true` (or `remember` carrying yesterday's
+     * choice over) had already tiled all ten before we got here, so the debug
+     * run came up tiled on both desktops and showed the same half twice. What
+     * this function puts on screen is its own business, not the config's. */
+    server_set_desktop_mode(server, 0, DESKTOP_MODE_PHYSICS);
     launched_note(server, server_spawn(cmd), 0);
 
     /* Tiling before the window rather than after it, so the second terminal is
@@ -378,7 +385,7 @@ void session_debug_desktop(struct FwmServer *server) {
     launched_note(server, server_spawn(cmd), 1);
 
     wlr_log(WLR_INFO, "fwm -debug: no session restore, no startup commands, "
-                      "two terminals (desktop 2 tiling)");
+                      "two terminals (desktop 1 physics, desktop 2 tiling)");
 }
 
 /* Called only on the way out of a NORMAL shutdown — a crash never reaches

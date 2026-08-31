@@ -165,6 +165,13 @@ static void server_state_save_wallpaper(const char *output, const char *path) {
  * keys are skipped, so a file written by a newer fwm never stops an older one
  * from starting. */
 void server_state_save_modes(FwmServer *server) {
+    /* A -debug run writes nothing: it is a second fwm over the first one's
+     * HOME, and this file is the first one's. Its own desktop modes are set by
+     * hand (session_debug_desktop) and its settings are scratch — saving them
+     * would hand the session you are still using the leftovers of a test.
+     * Same reasoning as session_maybe_save and session_clear_on_clean_exit. */
+    if (server->debug) return;
+
     char sp[512];
     server_state_path(sp, sizeof(sp), "modes");
     server_state_mkdir_parents(sp);
