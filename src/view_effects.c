@@ -415,8 +415,10 @@ static void rubber_layout(FwmView *view, int w, int h) {
 }
 
 bool view_rubber_begin(FwmView *view) {
-    /* A fresh grab cancels whatever the last one was still settling. */
+    /* A fresh grab cancels whatever the last one was still settling, glide and
+     * all: the size in the hand is the only one that means anything now. */
     view->rs_t = 0.0;
+    view->rs_glide = view->rs_glide_len = 0.0;
     view->rs_pin_r = view->rs_pin_b = 0;
     view->rub_settling = 0;
     if (view->rub_buf) return true;
@@ -613,6 +615,77 @@ void view_resize_settle(FwmView *view, int pin_r, int pin_b, int x1, int y1) {
     view_committed_size(view, &view->rs_cw, &view->rs_ch);
 }
 
+/* THE LAST FEW PIXELS OF A RESIZE.
+ *
+ * A client is not obliged to take the size it is offered, and plenty do not: a
+ * terminal answers in whole character cells, so the last cell of a drag is up
+ * to twenty pixels the hand asked for and did not get. The rubber draws what
+ * the hand asked for — that is what makes the drag itself smooth — and those
+ * pixels therefore all arrived at once, in the frame the picture came down: one
+ * jolt at the end of every resize, the window dropping onto a grid it had never
+ * shown while it was being dragged.
+ *
+ * They arrive over a tenth of a second instead. The picture is stretched either
+ * way; taking it from the size in the hand to the size the client took is the
+ * same stretch, moving. Short enough to read as the window settling and not as
+ * an animation of its own. */
+#define RS_GLIDE_S 0.10
+
+/* Where the glide is now. Eased out — it is the tail of a movement the hand was
+ * already making, so it slows into its place rather than starting from rest. */
+static void rubber_glide_apply(FwmView *view) {
+    double u = view->rs_glide_len > 0.0
+             ? 1.0 - view->rs_glide / view->rs_glide_len : 1.0;
+    if (u < 0.0) u = 0.0;
+    if (u > 1.0) u = 1.0;
+    double e = 1.0 - (1.0 - u) * (1.0 - u);
+
+    int w = (int)lround(view->rs_gw + (view->rs_tw - view->rs_gw) * e);
+    int h = (int)lround(view->rs_gh + (view->rs_th - view->rs_gh) * e);
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+
+    /* The edges nobody was holding still do not move — the same pin the wait
+     * before this one kept. */
+    if (view->rs_pin_r) view->x = view->rs_x1 - w;
+    if (view->rs_pin_b) view->y = view->rs_y1 - h;
+    view->width = w;
+    view->height = h;
+    view_rubber_to(view, w, h);
+    physics_sync_body(&view->server->physics, view->id, view->x, view->y,
+                      w, h, view->server->screen_width);
+    if (view->scene_tree) server_place_view(view->server, view, view->x, view->y);
+}
+
+/* Start one, if there is anything to ride out. False when the client took
+ * exactly what it was given, which is most windows and most drags: then there
+ * is nothing between the picture and the window and the rubber can simply go. */
+static bool rubber_glide_begin(FwmView *view) {
+    if (!view->rub_buf) return false;
+    int cw, ch;
+    view_committed_size(view, &cw, &ch);
+    if (cw <= 0 || ch <= 0) return false;
+    if (cw == view->width && ch == view->height) return false;
+
+    view->rs_gw = view->width;
+    view->rs_gh = view->height;
+    view->rs_tw = cw;
+    view->rs_th = ch;
+    view->rs_glide = view->rs_glide_len = RS_GLIDE_S;
+    return true;
+}
+
+/* Whatever it was in the middle of, it is over: the picture comes down and the
+ * window becomes the size the client actually holds. */
+static void rubber_settle_finish(FwmView *view) {
+    view->rs_glide = view->rs_glide_len = 0.0;
+    view->rub_settling = 0;
+    view_rubber_end(view);       /* no-op when there was no rubber */
+    view_resize_adopt(view);
+    view->rs_pin_r = view->rs_pin_b = 0;
+    view->rs_serial = 0;
+}
+
 void view_rubber_tick(FwmView *view, double dt) {
     /* The moment after the release: hold the far edges, and keep the stretched
      * picture up until the client has drawn the size it was last asked for.
@@ -628,6 +701,7 @@ void view_rubber_tick(FwmView *view, double dt) {
         FwmInteractiveState *in = &view->server->interactive;
         if (in->action != FWM_ACTION_NONE && in->view == view) {
             view->rs_t = 0.0;
+            view->rs_glide = view->rs_glide_len = 0.0;
             view->rub_settling = 0;
             view->rs_pin_r = view->rs_pin_b = 0;
             view->rs_serial = 0;
@@ -637,13 +711,39 @@ void view_rubber_tick(FwmView *view, double dt) {
         view->rs_t -= dt;
         if (view->rs_t <= 0.0 || view_resize_answered(view)) {
             view->rs_t = 0.0;
-            view->rub_settling = 0;
-            view_rubber_end(view);       /* no-op when there was no rubber */
-            view_resize_adopt(view);
-            view->rs_pin_r = view->rs_pin_b = 0;
-            view->rs_serial = 0;
+            /* The answer is in. If it is not the size the hand let go at, the
+             * difference is ridden out rather than jumped; the glide below
+             * finishes the settle when it arrives. */
+            if (!rubber_glide_begin(view)) rubber_settle_finish(view);
             return;
         }
+    }
+
+    /* The tail of the settle. */
+    if (view->rs_glide > 0.0) {
+        FwmInteractiveState *in = &view->server->interactive;
+        if (in->action != FWM_ACTION_NONE && in->view == view) {
+            /* Taken by another gesture mid-glide, exactly as above: where the
+             * window goes is the new hand's business. */
+            rubber_settle_finish(view);
+            return;
+        }
+        /* The window is still behind the picture and still owes the scene its
+         * frame callbacks; a tenth of a second of silence is enough for a
+         * client that animates to stutter as it comes back. */
+        view_send_frame_done(view);
+        /* And it may answer again while this runs — a client that took two
+         * commits to arrive at its size. Aim at wherever it is now rather than
+         * finishing at a size it has already left. */
+        {
+            int cw, ch;
+            view_committed_size(view, &cw, &ch);
+            if (cw > 0 && ch > 0) { view->rs_tw = cw; view->rs_th = ch; }
+        }
+        view->rs_glide -= dt;
+        if (view->rs_glide <= 0.0) { rubber_settle_finish(view); return; }
+        rubber_glide_apply(view);
+        return;
     }
 
     if (!view->rub_buf) return;

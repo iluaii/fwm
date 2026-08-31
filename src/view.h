@@ -330,6 +330,13 @@ typedef struct FwmView {
     int rs_w, rs_h;                   /* ...or, for X11, the size it must be */
     int rs_cw, rs_ch;                 /* ...measured against the size at release */
     double rs_t;                      /* grace left, s; 0 = nothing pending */
+    /* ...and then the last few pixels of it, ridden out rather than jumped.
+     * The answer is not always the size that was asked for — a terminal
+     * answers in whole character cells — and the difference used to arrive in
+     * one frame, the moment the stretched picture came down. See RS_GLIDE_S. */
+    double rs_glide, rs_glide_len;    /* left, and how long it was; 0 = still */
+    int rs_gw, rs_gh;                 /* the size the hand let go at */
+    int rs_tw, rs_th;                 /* the size the client answered with */
 
     /* Wobble ("jelly") while a window is dragged: KDE's effect, a sheet of
      * springs that bends rather than a rectangle that is scaled. The model is
