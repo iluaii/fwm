@@ -1412,7 +1412,7 @@ static void test_tiling_defaults(void) {
     /* Nothing said: physics everywhere, and the split is the even one. */
     const char *p = write_config("[tiling]\ngaps_in = 4\n");
     config_load(&cfg, p);
-    for (int d = 0; d < 10; d++) CHECK_INT(cfg.tiling.default_mode[d], 0);
+    for (int d = 0; d < FWM_DESKTOPS; d++) CHECK_INT(cfg.tiling.default_mode[d], 0);
     CHECK_INT(cfg.tiling.remember, 0);
     CHECK_INT(cfg.tiling.smart_gaps, 0);
     CHECK_INT(cfg.tiling.force_split, -1);
@@ -1422,13 +1422,13 @@ static void test_tiling_defaults(void) {
 
     p = write_config("[tiling]\ndefault = true\n");
     config_load(&cfg, p);
-    for (int d = 0; d < 10; d++) CHECK_INT(cfg.tiling.default_mode[d], 1);
+    for (int d = 0; d < FWM_DESKTOPS; d++) CHECK_INT(cfg.tiling.default_mode[d], 1);
     config_free(&cfg);
     drop_config();
 
     p = write_config("[tiling]\ndefault = \"floating\"\n");
     config_load(&cfg, p);
-    for (int d = 0; d < 10; d++) CHECK_INT(cfg.tiling.default_mode[d], 2);
+    for (int d = 0; d < FWM_DESKTOPS; d++) CHECK_INT(cfg.tiling.default_mode[d], 2);
     config_free(&cfg);
     drop_config();
 
@@ -1438,7 +1438,7 @@ static void test_tiling_defaults(void) {
     CHECK_INT(cfg.tiling.default_mode[1], 1);
     CHECK_INT(cfg.tiling.default_mode[2], 2);
     /* Past the end of the list: untouched, not re-tiled. */
-    for (int d = 3; d < 10; d++) CHECK_INT(cfg.tiling.default_mode[d], 0);
+    for (int d = 3; d < FWM_DESKTOPS; d++) CHECK_INT(cfg.tiling.default_mode[d], 0);
     config_free(&cfg);
     drop_config();
 

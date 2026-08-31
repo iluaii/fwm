@@ -188,14 +188,15 @@ void server_state_save_modes(FwmServer *server) {
     /* The strength, not just on/off: switching the wind off and restarting must
      * not quietly forget a gale someone had tuned. */
     fprintf(f, "wind = %.3f\n", server->config.grass.wind);
-    /* The ten desktop modes as ten digits, in strip order, and only while
+    /* One digit per desktop mode, in strip order, and only while
      * [tiling] remember asks for them: without the line the next start reads
      * `default` from the file, which is what somebody who has just switched
      * remembering off is asking for. */
     if (server->config.tiling.remember) {
-        char modes[11];
-        for (int d = 0; d < 10; d++) modes[d] = (char)('0' + server->desktop_mode[d]);
-        modes[10] = '\0';
+        char modes[FWM_DESKTOPS + 1];
+        for (int d = 0; d < FWM_DESKTOPS; d++)
+            modes[d] = (char)('0' + server->desktop_mode[d]);
+        modes[FWM_DESKTOPS] = '\0';
         fprintf(f, "desktops = %s\n", modes);
     }
     /* hp is deliberately NOT written. It is the one mode that can destroy
@@ -249,7 +250,7 @@ void server_state_apply_modes(FwmServer *server) {
              * that is where the starting modes live; only the start reads
              * them, so a reload cannot yank a desktop out from under you. */
             if (server->config.tiling.remember)
-                for (int d = 0; d < 10 && val[d]; d++)
+                for (int d = 0; d < FWM_DESKTOPS && val[d]; d++)
                     if (val[d] >= '0' && val[d] <= '2')
                         server->config.tiling.default_mode[d] = val[d] - '0';
         } else if (strcmp(key, "wind") == 0) {

@@ -328,7 +328,7 @@ static int mode_from_name(const char *s, int *out) {
 static void load_default_modes(toml_table_t *tbl, TilingConfig *t, FwmConfig *cfg) {
     toml_datum_t b = toml_bool_in(tbl, "default");
     if (b.ok) {
-        for (int d = 0; d < 10; d++) t->default_mode[d] = b.u.b ? 1 : 0;
+        for (int d = 0; d < FWM_DESKTOPS; d++) t->default_mode[d] = b.u.b ? 1 : 0;
         return;
     }
 
@@ -336,7 +336,7 @@ static void load_default_modes(toml_table_t *tbl, TilingConfig *t, FwmConfig *cf
     if (s.ok) {
         int m;
         if (mode_from_name(s.u.s, &m))
-            for (int d = 0; d < 10; d++) t->default_mode[d] = m;
+            for (int d = 0; d < FWM_DESKTOPS; d++) t->default_mode[d] = m;
         else
             config_report_error(cfg, "[tiling] default: unknown mode \"%s\" "
                                      "(physics, tiling, floating)", s.u.s);
@@ -346,7 +346,7 @@ static void load_default_modes(toml_table_t *tbl, TilingConfig *t, FwmConfig *cf
 
     toml_array_t *arr = toml_array_in(tbl, "default");
     if (!arr) return;
-    for (int d = 0; d < 10; d++) {
+    for (int d = 0; d < FWM_DESKTOPS; d++) {
         toml_datum_t e = toml_string_at(arr, d);
         if (!e.ok) break;
         int m;
@@ -363,7 +363,7 @@ static void load_tiling(toml_table_t *root, TilingConfig *t, FwmConfig *cfg) {
     t->anim_speed = 12.0; /* ~250 ms glide */
     t->pickup     = 0.28; /* big enough to still be the window you picked up */
     t->spawn_cursor = 1;
-    for (int d = 0; d < 10; d++) t->default_mode[d] = 0;  /* physics */
+    for (int d = 0; d < FWM_DESKTOPS; d++) t->default_mode[d] = 0;  /* physics */
     t->remember     = 0;
     t->split_ratio  = 0.5;
     t->force_split  = -1;   /* the longer side of the slot */
