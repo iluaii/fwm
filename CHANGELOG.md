@@ -93,6 +93,18 @@
   The cost is a copy made in the last fraction of a second of a window's life,
   which is not kept.
 
+### Menus
+
+- **A right-click menu stays on the screen it was opened on, and out from under
+  the bar.** Three separate ways it did not: it was fitted to the whole
+  monitor, so a menu near the top sat under a tray that draws above it and ate
+  the clicks; a submenu was measured from the menu above it instead of from the
+  window, and slid further off the edge the deeper it went; and a menu the
+  client moved after opening it — which is how Chromium and Firefox walk a
+  submenu along — was never fitted again and was free to walk off the screen.
+- **A bar's own menu opens at the icon that opened it**, not in the corner of
+  the primary screen: the tree those popups live in follows the bar now.
+
 ## 0.5.0
 
 The first release since the Wayland port settled. 277 commits since 0.3.0.

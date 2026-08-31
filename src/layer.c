@@ -32,6 +32,17 @@ static struct wlr_scene_tree *tree_for_layer(FwmServer *server,
     return server->ls_top;
 }
 
+/* The popups of a layer surface live in a tree of their OWN (a sibling, so the
+ * bar cannot clip its own menu), and a sibling does not follow the bar around:
+ * left at the layout origin it put a tray menu in the top-left corner of the
+ * primary screen, nowhere near the icon that opened it. Every place the bar is
+ * configured, the popup tree is moved after it. */
+static void layer_sync_popups(FwmLayerSurface *ls) {
+    if (!ls->popups || !ls->scene) return;
+    wlr_scene_node_set_position(&ls->popups->node,
+                                ls->scene->tree->node.x, ls->scene->tree->node.y);
+}
+
 /* A bar belongs to ONE monitor, so each output is arranged on its own: the
  * surfaces that named it, against its box in layout coordinates. Giving every
  * surface the whole world (which is what a single-output compositor could get
@@ -73,6 +84,7 @@ void layer_arrange(FwmServer *server) {
                     int reserves = s->current.exclusive_zone > 0;
                     if (reserves != (pass == 0)) continue;
                     wlr_scene_layer_surface_v1_configure(ls->scene, &full, &usable);
+                    layer_sync_popups(ls);
                 }
             }
         }
@@ -262,6 +274,7 @@ static void layer_handle_commit(struct wl_listener *listener, void *data) {
         struct wlr_box usable = mon ? mon->usable_area : full;
         if (usable.width <= 0 || usable.height <= 0) usable = full;
         wlr_scene_layer_surface_v1_configure(ls->scene, &full, &usable);
+        layer_sync_popups(ls);
         return;
     }
 

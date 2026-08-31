@@ -422,8 +422,85 @@ struct FwmPopup {
     struct wlr_xdg_popup *popup;
     FwmServer *server;
     struct wl_listener commit;
+    struct wl_listener reposition;
     struct wl_listener destroy;
 };
+
+/* Put the menu where it fits: hand wlroots the box the popup may occupy and
+ * let its positioner rules flip/slide the menu into it.
+ *
+ * Two things this box must get right, and each one was a way for a right-click
+ * menu to end up somewhere useless:
+ *
+ *  - It is measured from the ROOT toplevel, not from the popup's immediate
+ *    parent (that is the contract of unconstrain_from_box). For a submenu the
+ *    immediate parent is another popup, already offset by its own position,
+ *    and measuring from it moved the box by that offset — the deeper the menu,
+ *    the further off the screen it slid.
+ *
+ *  - It is the monitor's USABLE area, what a bar or a tray left over. Against
+ *    the full screen a menu opened near the top is perfectly happy to sit
+ *    under the tray, which draws above it: the entries are there, they take
+ *    the clicks, and the user sees the bar.
+ */
+static void popup_place(struct FwmPopup *p) {
+    FwmServer *server = p->server;
+
+    /* Up the popup chain to the surface everything below it hangs off. */
+    struct wlr_xdg_surface *root = p->popup->base;
+    struct wlr_scene_tree *root_tree = NULL;
+    while (true) {
+        if (root->role != WLR_XDG_SURFACE_ROLE_POPUP || !root->popup->parent) {
+            root_tree = root->data;
+            break;
+        }
+        struct wlr_xdg_surface *parent =
+            wlr_xdg_surface_try_from_wlr_surface(root->popup->parent);
+        if (!parent) {
+            /* The parent is a layer surface (a bar's own menu): layer.c stashed
+             * the tree those popups live in on the wlr_surface. */
+            root_tree = root->popup->parent->data;
+            break;
+        }
+        root = parent;
+    }
+    if (!root_tree) return;
+
+    int rx = 0, ry = 0;
+    wlr_scene_node_coords(&root_tree->node, &rx, &ry);
+
+    /* THE monitor, not the first one: the box is in layout coordinates, and a
+     * box at the layout origin is the primary monitor. A menu opened on the
+     * second screen was therefore constrained to the first one and slid all
+     * the way there — the whole width of the primary monitor away from the
+     * window it belongs to. The monitor the parent is standing on is the one
+     * the menu must stay inside.
+     *
+     * The root's top-left can hang off its own screen (a window pushed against
+     * the left edge); its middle is the more honest answer to "which screen is
+     * this on", and the monitor the user is at is the last resort. */
+    FwmOutput *mon = server_output_at(server, rx, ry);
+    if (!mon) {
+        struct wlr_surface *rs = root->surface;
+        mon = server_output_at(server, rx + rs->current.width / 2.0,
+                                       ry + rs->current.height / 2.0);
+    }
+    if (!mon) mon = server_active_output(server);
+
+    struct wlr_box area = mon ? mon->usable_area : (struct wlr_box){ 0, 0, 0, 0 };
+    if (area.width <= 0 || area.height <= 0) {
+        area = mon ? mon->box
+                   : (struct wlr_box){ 0, 0, server->screen_width, server->screen_height };
+    }
+
+    struct wlr_box box = {
+        .x = area.x - rx,
+        .y = area.y - ry,
+        .width = area.width,
+        .height = area.height,
+    };
+    wlr_xdg_popup_unconstrain_from_box(p->popup, &box);
+}
 
 static void popup_handle_commit(struct wl_listener *listener, void *data) {
     (void)data;
@@ -433,44 +510,23 @@ static void popup_handle_commit(struct wl_listener *listener, void *data) {
     // assert inside wlroots (that abort looked like "rmb crashes fwm").
     if (!p->popup->base->initial_commit) return;
 
-    // Keep the menu on screen: give the popup the whole output as its
-    // constraint box, expressed in the parent's coordinate space.
-    //
-    // THE output, not the first one: the box is in layout coordinates, and a
-    // box at the layout origin is the primary monitor. A menu opened on the
-    // second screen was therefore constrained to the first one and slid all
-    // the way there — the whole width of the primary monitor away from the
-    // window it belongs to. The monitor the parent is standing on is the one
-    // the menu must stay inside.
-    FwmServer *server = p->server;
-    struct wlr_scene_tree *tree = p->popup->base->data;
-    if (tree && tree->node.parent) {
-        int px = 0, py = 0;
-        wlr_scene_node_coords(&tree->node.parent->node, &px, &py);
-
-        /* The parent's top-left can hang off its own screen (a window pushed
-         * against the left edge, a nested submenu); its middle is the more
-         * honest answer to "which screen is this on", and the monitor the user
-         * is at is the last resort. */
-        FwmOutput *mon = server_output_at(server, px, py);
-        if (!mon && p->popup->parent) {
-            mon = server_output_at(server,
-                                   px + p->popup->parent->current.width / 2.0,
-                                   py + p->popup->parent->current.height / 2.0);
-        }
-        if (!mon) mon = server_active_output(server);
-
-        struct wlr_box box = {
-            .x = (mon ? mon->box.x : 0) - px,
-            .y = (mon ? mon->box.y : 0) - py,
-            .width  = mon ? mon->box.width  : server->screen_width,
-            .height = mon ? mon->box.height : server->screen_height,
-        };
-        wlr_xdg_popup_unconstrain_from_box(p->popup, &box);
-    }
+    popup_place(p);
 
     // The compositor must answer the popup's initial commit with a configure,
     // same contract as for toplevels (view.c).
+    wlr_xdg_surface_schedule_configure(p->popup->base);
+}
+
+/* A client may move a popup that is already up (a menu following the item the
+ * pointer walked onto — Chromium and Firefox do this constantly). The new
+ * position comes from a fresh positioner and is NOT constrained: without this
+ * the first placement was kept on screen and every one after it was free to
+ * walk off the edge, which is what a submenu opened near the screen border
+ * did. */
+static void popup_handle_reposition(struct wl_listener *listener, void *data) {
+    (void)data;
+    struct FwmPopup *p = wl_container_of(listener, p, reposition);
+    popup_place(p);
     wlr_xdg_surface_schedule_configure(p->popup->base);
 }
 
@@ -478,6 +534,7 @@ static void popup_handle_destroy(struct wl_listener *listener, void *data) {
     (void)data;
     struct FwmPopup *p = wl_container_of(listener, p, destroy);
     wl_list_remove(&p->commit.link);
+    wl_list_remove(&p->reposition.link);
     wl_list_remove(&p->destroy.link);
     free(p);
 }
@@ -510,6 +567,8 @@ static void handle_new_xdg_popup(struct wl_listener *listener, void *data) {
     p->server = server;
     p->commit.notify = popup_handle_commit;
     wl_signal_add(&popup->base->surface->events.commit, &p->commit);
+    p->reposition.notify = popup_handle_reposition;
+    wl_signal_add(&popup->events.reposition, &p->reposition);
     p->destroy.notify = popup_handle_destroy;
     wl_signal_add(&popup->events.destroy, &p->destroy);
 }
