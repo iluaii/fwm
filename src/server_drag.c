@@ -731,30 +731,55 @@ bool server_drag_motion(FwmServer *server, double lx, double ly,
         int new_w = server->interactive.resize_left ? start_w - dx : start_w + dx;
         int new_h = server->interactive.resize_top  ? start_h - dy : start_h + dy;
 
-        /* Room to grow reaches the edge of the MONITOR showing the window's own
-         * desktop, not of the world: view_start_x is a world coordinate, so on
-         * desktop N it is already N screens along and a plain screen_width - x
-         * is negative there. That negative then beat the 50px floor below (the
-         * ceiling was applied second) and a negative width tripped an assertion
-         * inside wlroots — resizing any window off desktop 0 killed the
-         * compositor. And a column is the size of the PRIMARY monitor, so on a
-         * smaller screen the last stretch of it is glass nobody has: growing
-         * into it put the corner the hand was holding past the edge, where
-         * server_views_clip cuts it away. */
-        int desk = server->interactive.view_start_x / server->screen_width;
-        if (desk < 0) desk = 0;
-        if (desk >= FWM_DESKTOPS) desk = FWM_DESKTOPS - 1;
+        /* HOW FAR THE EDGE IN THE HAND MAY GO. Not to the edge of the
+         * monitor, which is what this used to say and what made a window near
+         * a join almost unresizable.
+         *
+         * The reason it said so was a real bug: view_start_x is a WORLD
+         * coordinate, so on desktop N it is already N screens along, and a
+         * plain screen_width - x is negative there — a negative width tripped
+         * an assertion inside wlroots and took the compositor with it. But the
+         * answer was to measure the room from the window's own column and stop
+         * at the monitor's edge, and that stops the wrong thing. The edge being
+         * dragged is under the CURSOR, and the cursor is on a screen by
+         * definition: it cannot be pulled anywhere there is nothing to see. So
+         * the monitor's edge needed no defending — while a window standing
+         * across a join, or over the stretch of a column that a smaller screen
+         * does not reach, had a ceiling BELOW its own width and was crushed
+         * against it the instant the hand moved. Which is exactly what dragging
+         * such a window there is allowed to do: it overhangs, and
+         * server_views_clip cuts what falls off. Resizing it may do the same.
+         *
+         * What is left is the world itself. The strip has walls at both ends
+         * (drag_place clamps a carried window to them, physics keeps a thrown
+         * one inside them), and the edge that is NOT in the hand does not move
+         * — so bounding the size by the room between that edge and the wall is
+         * the same statement, and the one that keeps the body on the strip.
+         *
+         * Downwards is still the monitor's, and for a different reason: there
+         * is no second row of desktops to overhang into, and the column is the
+         * PRIMARY monitor's height, so on a shorter screen its bottom stretch
+         * is glass nobody has. */
+        int desk = server_desktop_at_x(server,
+                       server->interactive.view_start_x + start_w / 2.0);
         FwmOutput *rmon = server_output_showing(server, desk);
-        int lim_w = rmon && rmon->box.width  > 0 ? rmon->box.width  : server->screen_width;
         int lim_h = rmon && rmon->box.height > 0 ? rmon->box.height : server->screen_height;
-        int col_x = desk * server->screen_width;
+        int world_w = (int)PHYSICS_WORLD_W(server->screen_width);
 
         int max_w = server->interactive.resize_left
-                  ? server->interactive.view_start_x + start_w - col_x
-                  : col_x + lim_w - server->interactive.view_start_x;
+                  ? server->interactive.view_start_x + start_w
+                  : world_w - server->interactive.view_start_x;
         int max_h = server->interactive.resize_top
                   ? server->interactive.view_start_y + start_h
                   : lim_h - server->interactive.view_start_y;
+
+        /* A ceiling, never a floor. A window already hanging past the bottom of
+         * a short screen has less room under it than it is tall, and the
+         * ceiling would then be an order to shrink — the window snapped to it
+         * the instant the hand moved, before the drag had asked for anything.
+         * A window that is already out there is not growing. */
+        if (max_w < start_w) max_w = start_w;
+        if (max_h < start_h) max_h = start_h;
 
         if (new_w > max_w) new_w = max_w;
         if (new_h > max_h) new_h = max_h;
