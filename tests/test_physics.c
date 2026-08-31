@@ -26,7 +26,7 @@
 
 #define SW  1920
 #define SH  1080
-#define SPAN (FWM_DESKTOPS * SW)
+#define SPAN PHYSICS_WORLD_W(SW)
 #define DT  (1.0 / 60.0)
 
 static PhysicsBody *spawn(PhysicsWorld *w, int x, int y) {

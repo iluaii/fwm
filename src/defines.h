@@ -20,13 +20,26 @@
  * been opened over the session. Costs ~256 * (sizeof(PhysicsBody) +
  * sizeof(BodySlot)) of static memory, which is tens of kilobytes. */
 #define MAX_WINDOWS             256
-/* Virtual desktops on the strip. Every desktop index, and every array indexed
- * by one, derives from this. The physics world does NOT yet: its walls, its
- * wrap and its escape net are still a hardcoded ten screens wide (issue #15),
- * so changing this number moves the desktops without moving the ground under
- * them. Until that is fixed, treat this as read-only outside a test build. */
+/* Virtual desktops on the strip, and with them the width of the physics world:
+ * one screen per desktop, PHYSICS_WORLD_W in physics.h. Every desktop index,
+ * every array indexed by one, and the walls, wrap and escape net those indices
+ * point into all derive from this number, so it can be changed.
+ *
+ * The floor is the SUITE's, not the compositor's. src/ runs at three — checked
+ * headless: windows move to the last desktop, the tray draws, urgent lights,
+ * expo opens — and the assert is here so that a count the tests cannot vouch
+ * for is refused rather than shipped. Two tests set it: test_physics_profiles
+ * needs one unclaimed desktop, two for one profile and one for another, and
+ * the 40000 px/s drag in test_physics_speed needs a couple of thousand px of
+ * clear track to measure at all. Teach those two to work in a smaller world
+ * and this comes down to 2, which is where TRAY_MAX_OTHER stops being a
+ * zero-length array.
+ *
+ * The ceiling IS the compositor's: the tray packs one urgent flag per desktop
+ * into an int (sig_urgent, ui/tray.h). */
 #define FWM_DESKTOPS            10
-_Static_assert(FWM_DESKTOPS >= 4, "FWM_DESKTOPS must be at least 4");
+_Static_assert(FWM_DESKTOPS >= 4,  "FWM_DESKTOPS below 4 is untestable, not unbuildable");
+_Static_assert(FWM_DESKTOPS <= 31, "FWM_DESKTOPS must fit the tray's urgent bitmask");
 #define DRAG_MARGIN             5
 #define PHYSICS_MARGIN          3
 #define MASS_DENSITY            0.0005

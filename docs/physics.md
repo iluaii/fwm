@@ -19,6 +19,12 @@ extreme. Desktop *n* is the region from `n × screen_width` to
 why dragging a window past the screen edge moves it to the next desktop and why
 throwing one can send it there.
 
+Ten because that is what `FWM_DESKTOPS` says. The width of the world is not a
+separate number: it is one screen per desktop (`PHYSICS_WORLD_W`), and the walls,
+the wrap and the escape net all measure from it. They have to — a world wider
+than the desktops has space belonging to none of them, and a narrower one leaves
+desktops standing outside the wall where no window can arrive.
+
 With `[camera] wrap = true` the strip closes into a ring and the two end walls
 are removed. A window thrown off one end flies on and arrives at the other with
 its velocity intact — only once it is *entirely* past, so it is never visible at

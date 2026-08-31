@@ -721,7 +721,7 @@ static void rebuild_walls(struct Engine *eng, PhysicsWorld *world, int screen_w,
         }
     }
 
-    double W = 10.0 * screen_w; // full virtual-desktop span
+    double W = PHYSICS_WORLD_W(screen_w); // full virtual-desktop span
     double T = top;             // ceiling y: 0, or below a bar anchored up there
     double t = WALL_THICK_PX;
 
@@ -1333,7 +1333,7 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
              * position can be anywhere. */
             int d = m->desktop_id;
             if (d < 0 || d >= FWM_DESKTOPS) d = 0;
-            double W = 10.0 * screen_width;
+            double W = PHYSICS_WORLD_W(screen_width);
             double H = world->desktop_h[d] > 0 ? world->desktop_h[d] : (double)screen_height;
             double max_x = W - m->width;  if (max_x < 0) max_x = 0;
             double max_y = H - m->height; if (max_y < 0) max_y = 0;

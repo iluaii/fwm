@@ -18,6 +18,19 @@
 #include <stdint.h>
 #include "defines.h"
 
+/* How wide the world is, in px, from a screen width. The strip is one screen
+ * per desktop and the stride is what turns a world x into a desktop number
+ * (desktop_w below), so the two cannot be set independently — a world wider
+ * than FWM_DESKTOPS strides has space belonging to no desktop, and one
+ * narrower has desktops standing outside the right-hand wall where nothing
+ * can reach them.
+ *
+ * It has a name because it was written out as `10.0 * screen_w` in three
+ * places — the walls, the wrap transport and the escape net — and none of the
+ * three asked FWM_DESKTOPS. Changing the count moved every index and left the
+ * ground where it was (#15). */
+#define PHYSICS_WORLD_W(screen_w) ((double)FWM_DESKTOPS * (double)(screen_w))
+
 #define CORNER_SHARP   0
 #define CORNER_CHAMFER 1
 #define CORNER_ROUND   2

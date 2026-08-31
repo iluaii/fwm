@@ -28,7 +28,7 @@
 
 #define SW 1920
 #define SH 1080
-#define WORLD (10.0 * SW)
+#define WORLD PHYSICS_WORLD_W(SW)
 #define DT   (1.0 / 60.0)
 
 /* Depth of the intersection of two windows, in px; 0 when they are apart. */
@@ -326,13 +326,29 @@ static void test_init_gives_a_closed_world(void) {
     w.throw_speed_multiplier = 1.0;
     w.max_throw_speed = 1.0e9;
 
-    physics_sync_body(&w, 1, 200, 400, 400, 300, SW);
+    PhysicsBody *b = physics_sync_body(&w, 1, 200, 400, 400, 300, SW);
     physics_throw_body(&w, 1, -20000.0, 0.0);   /* straight at the left end */
-    for (int i = 0; i < 240; i++) physics_step(&w, SW, SH, 0, 0, 0, DT);
 
-    PhysicsBody *b = physics_find_body(&w, 1);
+    /* What goes wrong here is a TELEPORT, not a long slide: a body that left
+     * the left end of a world with no ring came back at the right in a single
+     * step. So the assertion is continuity — no step carries the window
+     * further than its own speed could — and that says the same thing at any
+     * world width. "It stayed in the left half" only said it while the world
+     * was ten screens wide and the throw happened to run out before the
+     * middle; in a four-screen world the same bounce crosses the middle
+     * honestly and the test called it a wrap. */
+    double prev_x = b->x, prev_vx = b->vx;
+    for (int i = 0; i < 240; i++) {
+        physics_step(&w, SW, SH, 0, 0, 0, DT);
+        b = physics_find_body(&w, 1);
+        double reach = fmax(fabs(prev_vx), fabs(b->vx)) * DT + 80.0;
+        CHECK(fabs(b->x - prev_x) < reach);
+        prev_x = b->x;
+        prev_vx = b->vx;
+    }
+
     CHECK(b->x > -80.0);                 /* bounced, not gone */
-    CHECK(b->x < WORLD / 2.0);           /* and did not reappear at the far end */
+    CHECK(b->x < WORLD);                 /* and still in the world it bounced in */
     physics_destroy(&w);
 }
 

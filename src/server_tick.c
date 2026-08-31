@@ -236,10 +236,11 @@ static void server_consume_impacts(FwmServer *server) {
         const PhysicsImpact *im = &server->physics.impacts[i];
         /* A contact point sits ON the surface it hit, so a wall impact lands
          * just OUTSIDE the play area: the right wall's inner face is at
-         * 10*screen_width, which divides to desktop 10 — a desktop that does
-         * not exist — and every hit against it was silently dropped. (The left
-         * wall only escaped because C truncates -2/1920 toward zero.) Clamp
-         * into the real range instead of trusting the division. */
+         * the far end of the world, which divides to one desktop past the
+         * last — a desktop that does not exist — and every hit against it was
+         * silently dropped. (The left wall only escaped because C truncates
+         * -2/1920 toward zero.) Clamp into the real range instead of trusting
+         * the division. */
         int impact_d = (int)(im->x / server->screen_width);
         if (impact_d < 0) impact_d = 0;
         if (impact_d > FWM_DESKTOPS - 1) impact_d = FWM_DESKTOPS - 1;
@@ -1335,7 +1336,7 @@ void server_drag_swing_place(FwmServer *server) {
 
     double cx = px + rx, cy = py + ry;
     double nx = cx - b->width / 2.0, ny = cy - b->height / 2.0;
-    double max_x = 10.0 * server->screen_width - b->width;
+    double max_x = PHYSICS_WORLD_W(server->screen_width) - b->width;
     double max_y = server->screen_height - b->height;
     if (nx < 0) nx = 0;
     if (ny < 0) ny = 0;

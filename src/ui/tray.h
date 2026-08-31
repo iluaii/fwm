@@ -97,7 +97,8 @@ typedef struct {
     char sig_name[128];
     int  sig_speed, sig_angle, sig_mass10, sig_flying;
     int  sig_counts[FWM_DESKTOPS];
-    int  sig_urgent;   /* one flag per desktop, as a bitmask */
+    int  sig_urgent;   /* one flag per desktop, as a bitmask — the ceiling in
+                        * the FWM_DESKTOPS static_assert is this field */
     int  sig_active_desktop, sig_pos_mil, sig_opacity1000, sig_minute;
     int  sig_other_count, sig_other_mil[TRAY_MAX_OTHER];
     char sig_kbd[8];
