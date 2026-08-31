@@ -310,6 +310,7 @@ static void load_tiling(toml_table_t *root, TilingConfig *t) {
     t->gaps_out   = 14;
     t->anim_speed = 12.0; /* ~250 ms glide */
     t->pickup     = 0.28; /* big enough to still be the window you picked up */
+    t->spawn_cursor = 1;
 
     toml_table_t *tbl = toml_table_in(root, "tiling");
     if (!tbl) return;
@@ -321,6 +322,8 @@ static void load_tiling(toml_table_t *root, TilingConfig *t) {
     if (d.ok) t->gaps_out = (int)d.u.i;
     LOAD_DOUBLE(tbl, "anim_speed", t->anim_speed);
     LOAD_DOUBLE(tbl, "pickup", t->pickup);
+    toml_datum_t sc = toml_bool_in(tbl, "spawn_cursor");
+    if (sc.ok) t->spawn_cursor = sc.u.b;
 
     if (t->gaps_in < 0) t->gaps_in = 0;
     if (t->gaps_out < 0) t->gaps_out = 0;
@@ -1856,7 +1859,7 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
 void config_load(FwmConfig *cfg, const char *path) {
     cfg->physics         = physics_defaults;
     cfg->tiling          = (TilingConfig){ .gaps_in = 6, .gaps_out = 14, .anim_speed = 12.0,
-                                           .pickup = 0.28 };
+                                           .pickup = 0.28, .spawn_cursor = 1 };
     cfg->camera          = (CameraConfig){ .anim_ms = 350.0, .free_speed = 14.0 };
     // Defaults for the no-config-file path; load_decor re-applies them anyway.
     cfg->decor.border_width = 2;

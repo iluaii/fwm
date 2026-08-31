@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Tiling
+
+- **A new window opens beside the window under the pointer**, splitting it on
+  the edge the pointer is nearest, instead of always splitting the focused one
+  along its longer side. It is the rule a window carried in and dropped was
+  already put down by, given to a window that arrives on its own: the hand is
+  usually over the place you meant it to go. The pointer over another desktop
+  or in a gap between tiles still splits the focused window, and
+  `[tiling] spawn_cursor = false` turns the whole thing off.
+
 ### Monitors of different sizes
 
 - **A desktop is the size of the largest monitor, not the primary one.** A

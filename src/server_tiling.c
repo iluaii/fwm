@@ -415,6 +415,37 @@ void server_align_tiles(FwmServer *server, int desktop) {
     }
 }
 
+BspSide server_tile_side_at(const BspNode *leaf, double wx, double wy) {
+    /* Measured as a fraction of the window rather than in pixels, so a tall
+     * thin tile is judged by its own shape: half way down a sliver is the
+     * bottom half of it, not a point 40px from an edge. */
+    double fx = (wx - leaf->ax) / leaf->aw - 0.5;
+    double fy = (wy - leaf->ay) / leaf->ah - 0.5;
+    return fabs(fx) >= fabs(fy)
+        ? (fx < 0 ? BSP_SIDE_LEFT : BSP_SIDE_RIGHT)
+        : (fy < 0 ? BSP_SIDE_UP   : BSP_SIDE_DOWN);
+}
+
+void server_tile_insert(FwmServer *server, int desktop, uint32_t id) {
+    if (server->config.tiling.spawn_cursor) {
+        double wx, wy;
+        server_cursor_world(server, &wx, &wy);
+        /* World coordinates carry the desktop in them, so a cursor parked on
+         * another desktop — a window opening where it was launched from, not
+         * where you are looking — hits nothing here and falls through to the
+         * focused window, which is the right answer for a layout you are not
+         * pointing at. */
+        BspNode *leaf = bsp_leaf_at(server->bsp_roots[desktop], wx, wy);
+        if (leaf && leaf->aw > 0 && leaf->ah > 0 && leaf->id != id) {
+            bsp_insert_at(&server->bsp_roots[desktop], leaf->id, id,
+                          server_tile_side_at(leaf, wx, wy));
+            return;
+        }
+    }
+    bsp_insert(&server->bsp_roots[desktop],
+               server->focused_view ? server->focused_view->id : 0, id);
+}
+
 void server_apply_tiling(FwmServer *server, int desktop) {
     int x, y, usable_w, usable_h;
     tile_area(server, desktop, &x, &y, &usable_w, &usable_h);

@@ -215,6 +215,7 @@ gaps_in    = 6      # px between adjacent tiles
 gaps_out   = 14     # px between tiles and the screen edge
 anim_speed = 12.0   # tile-glide rate, 1/s; 0 = snap into place
 pickup     = 0.28   # size a window leaves the layout at, fraction of the screen
+spawn_cursor = true # a new window joins beside the tile under the pointer
 ```
 
 `pickup` is what you get in your hand when you drag a window out of the tree.
@@ -230,6 +231,21 @@ still wearing its slot.
 
 See `droplet` under [effects](#effects) for what the window *looks* like on the
 way out and back.
+
+`spawn_cursor` says where a window that opens on a tiling desktop is put: beside
+the tile under the pointer, splitting it on the edge the pointer is nearest —
+left half of a window and the newcomer takes its left side, bottom half and it
+takes the bottom. That is the rule a window dragged in and dropped is already
+put down by; this gives it to a window that arrives on its own. The hand is
+usually already over the place you meant the window to appear in, and reading
+it beats asking the focus, which on a tiled desktop is often at the other end
+of the screen.
+
+Set it to `false` for the older behaviour: the **focused** window is split along
+its longer side, wherever the pointer happens to be. Either way, a pointer that
+is on another desktop — a window opening where it was launched from while you
+read something else — or in the gaps between tiles falls back to the focused
+window, since there is nothing under it to split.
 
 ## camera
 

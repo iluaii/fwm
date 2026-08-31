@@ -343,11 +343,20 @@ color          = "#000000"
 # sliver to carry is the thing this replaces. 0 goes back to the old answer —
 # the size the window had before the desktop was tiled, which a window that
 # opened onto a tiled desktop never had.
+#
+# spawn_cursor decides where a NEW window joins the tree: on, it lands beside
+# the window under the pointer and on the edge of it the pointer is nearest —
+# the same rule a window carried in and dropped is put down by. Off, the
+# focused window is split along its longer side, which is what fwm always did
+# and what Hyprland's dwindle does by default. With the pointer on another
+# desktop, or in the gaps between windows, the focused window answers either
+# way.
 [tiling]
 gaps_in    = 6
 gaps_out   = 14
 anim_speed = 12.0
 pickup     = 0.28
+spawn_cursor = true
 
 # Desktop-switch camera slide (ease-in-out). 0 = instant snap. A window SENT to
 # another desktop (move_to:, move_to_view:) crosses the strip on the same curve

@@ -166,6 +166,18 @@ typedef struct {
      * geometry the window had before the desktop was tiled, and nothing much
      * at all for a window that was born on a tiled desktop and never had one. */
     double pickup;
+    /* Where a new window joins the tree: 1 = beside the window under the
+     * cursor, on the edge of it the cursor is nearest; 0 = beside the focused
+     * window, split along its longer side.
+     *
+     * The hand already says where the window should go — it is over the half
+     * of the screen you were about to put it in — and the layout may as well
+     * read that instead of asking the focus, which on a tiling desktop is
+     * often somewhere else entirely. It is the drop rule (server_tile_side_at)
+     * applied to a window that arrives by itself rather than by being carried.
+     * With the cursor off this desktop, or in the gaps between windows, there
+     * is nothing to read and the focused window answers as before. */
+    int spawn_cursor;
 } TilingConfig;
 
 /* ── camera ──────────────────────────────────────────────────────────── */

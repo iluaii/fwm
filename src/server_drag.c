@@ -468,15 +468,8 @@ static void tile_drop(FwmServer *server, FwmView *view, int d, double wx, double
 
     BspNode *leaf = bsp_leaf_at(server->bsp_roots[d], wx, wy);
     if (leaf && leaf->aw > 0 && leaf->ah > 0) {
-        /* Which edge of the target the cursor is nearest, measured as a
-         * fraction of the slot so a tall thin window is judged by its own
-         * shape rather than by pixels. */
-        double fx = (wx - leaf->ax) / leaf->aw - 0.5;
-        double fy = (wy - leaf->ay) / leaf->ah - 0.5;
-        BspSide side = fabs(fx) >= fabs(fy)
-            ? (fx < 0 ? BSP_SIDE_LEFT : BSP_SIDE_RIGHT)
-            : (fy < 0 ? BSP_SIDE_UP   : BSP_SIDE_DOWN);
-        bsp_insert_at(&server->bsp_roots[d], leaf->id, view->id, side);
+        bsp_insert_at(&server->bsp_roots[d], leaf->id, view->id,
+                      server_tile_side_at(leaf, wx, wy));
     } else {
         bsp_insert(&server->bsp_roots[d], 0, view->id);
     }

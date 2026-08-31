@@ -454,11 +454,8 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
              * (fullscreened under physics, then tiling switched on), so insert
              * it if the tree does not know it yet before re-applying. */
             if (server->desktop_mode[d] == DESKTOP_MODE_TILING) {
-                if (!bsp_find(server->bsp_roots[d], view->id)) {
-                    bsp_insert(&server->bsp_roots[d],
-                               server->focused_view ? server->focused_view->id : 0,
-                               view->id);
-                }
+                if (!bsp_find(server->bsp_roots[d], view->id))
+                    server_tile_insert(server, d, view->id);
                 server_apply_tiling(server, d);
             }
         }

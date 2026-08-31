@@ -1000,6 +1000,16 @@ void server_cursor_world(FwmServer *server, double *wx, double *wy);
 void server_output_show_desktop(FwmServer *server, FwmOutput *out, int d, int seam);
 
 void server_apply_tiling(FwmServer *server, int desktop);
+/* Which edge of a tile a point is nearest, as a fraction of that tile's own
+ * shape: the side a window dropped there — or opened there — is put down on. */
+BspSide server_tile_side_at(const BspNode *leaf, double wx, double wy);
+/* Put a new window into a desktop's tree. With [tiling] spawn_cursor set that
+ * is beside the window under the pointer, on the edge of it the pointer is
+ * nearest — the drop rule, for a window that arrived by itself; otherwise, and
+ * whenever the pointer is over no tile of this desktop, beside the focused
+ * window as bsp_insert splits it. Does not lay the desktop out: call
+ * server_apply_tiling after. */
+void server_tile_insert(FwmServer *server, int desktop, uint32_t id);
 /* Re-run tile positioning against the sizes clients actually committed. Called
  * when a tiled window commits a size different from the one it was asked for. */
 void server_align_tiles(FwmServer *server, int desktop);

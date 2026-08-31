@@ -1003,7 +1003,11 @@ void view_map(FwmView *view) {
 
     int desktop = body ? body->desktop_id : current_desktop;
     if (view->server->desktop_mode[desktop] == DESKTOP_MODE_TILING) {
-        bsp_insert(&view->server->bsp_roots[desktop], view->server->focused_view ? view->server->focused_view->id : 0, view->id);
+        /* Beside the window under the hand, on the edge of it the hand is
+         * nearest — the same rule a carried window is put down by. See
+         * server_tile_insert; [tiling] spawn_cursor turns it off, and then the
+         * focused window is split as it always was. */
+        server_tile_insert(view->server, desktop, view->id);
         server_apply_tiling(view->server, desktop);
     } else if (view->server->desktop_mode[desktop] == DESKTOP_MODE_FLOATING) {
         /* Overlapping is the whole point of floating — shoving the new window
