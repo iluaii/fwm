@@ -305,12 +305,69 @@ static void load_physics(toml_table_t *root, FwmConfig *cfg) {
 
 /* ── tiling section ──────────────────────────────────────────────────── */
 
-static void load_tiling(toml_table_t *root, TilingConfig *t) {
+/* `[tiling] default` — what the ten desktops come up as. Three spellings, all
+ * meaning the same array:
+ *
+ *   default = true                     every desktop tiled
+ *   default = "floating"               every desktop in that mode
+ *   default = ["physics", "tiling"]    desktop by desktop
+ *
+ * The array names desktops from the first one up and stops where it stops: a
+ * desktop it does not reach keeps the built-in answer, physics. That is the
+ * predictable reading of a short list, and it is the one that lets `["physics"]`
+ * mean what it looks like it means rather than quietly re-tiling the other
+ * nine. */
+static int mode_from_name(const char *s, int *out) {
+    if      (strcmp(s, "physics")  == 0) *out = 0;
+    else if (strcmp(s, "tiling")   == 0) *out = 1;
+    else if (strcmp(s, "floating") == 0) *out = 2;
+    else return 0;
+    return 1;
+}
+
+static void load_default_modes(toml_table_t *tbl, TilingConfig *t, FwmConfig *cfg) {
+    toml_datum_t b = toml_bool_in(tbl, "default");
+    if (b.ok) {
+        for (int d = 0; d < 10; d++) t->default_mode[d] = b.u.b ? 1 : 0;
+        return;
+    }
+
+    toml_datum_t s = toml_string_in(tbl, "default");
+    if (s.ok) {
+        int m;
+        if (mode_from_name(s.u.s, &m))
+            for (int d = 0; d < 10; d++) t->default_mode[d] = m;
+        else
+            config_report_error(cfg, "[tiling] default: unknown mode \"%s\" "
+                                     "(physics, tiling, floating)", s.u.s);
+        free(s.u.s);
+        return;
+    }
+
+    toml_array_t *arr = toml_array_in(tbl, "default");
+    if (!arr) return;
+    for (int d = 0; d < 10; d++) {
+        toml_datum_t e = toml_string_at(arr, d);
+        if (!e.ok) break;
+        int m;
+        if (mode_from_name(e.u.s, &m)) t->default_mode[d] = m;
+        else config_report_error(cfg, "[tiling] default[%d]: unknown mode \"%s\" "
+                                      "(physics, tiling, floating)", d, e.u.s);
+        free(e.u.s);
+    }
+}
+
+static void load_tiling(toml_table_t *root, TilingConfig *t, FwmConfig *cfg) {
     t->gaps_in    = 6;
     t->gaps_out   = 14;
     t->anim_speed = 12.0; /* ~250 ms glide */
     t->pickup     = 0.28; /* big enough to still be the window you picked up */
     t->spawn_cursor = 1;
+    for (int d = 0; d < 10; d++) t->default_mode[d] = 0;  /* physics */
+    t->remember     = 0;
+    t->split_ratio  = 0.5;
+    t->force_split  = -1;   /* the longer side of the slot */
+    t->smart_gaps   = 0;
 
     toml_table_t *tbl = toml_table_in(root, "tiling");
     if (!tbl) return;
@@ -324,6 +381,29 @@ static void load_tiling(toml_table_t *root, TilingConfig *t) {
     LOAD_DOUBLE(tbl, "pickup", t->pickup);
     toml_datum_t sc = toml_bool_in(tbl, "spawn_cursor");
     if (sc.ok) t->spawn_cursor = sc.u.b;
+    toml_datum_t rm = toml_bool_in(tbl, "remember");
+    if (rm.ok) t->remember = rm.u.b;
+    toml_datum_t sg = toml_bool_in(tbl, "smart_gaps");
+    if (sg.ok) t->smart_gaps = sg.u.b;
+    LOAD_DOUBLE(tbl, "split_ratio", t->split_ratio);
+    d = toml_string_in(tbl, "force_split");
+    if (d.ok) {
+        if      (strcmp(d.u.s, "auto")       == 0) t->force_split = -1;
+        else if (strcmp(d.u.s, "vertical")   == 0) t->force_split = 0;
+        else if (strcmp(d.u.s, "horizontal") == 0) t->force_split = 1;
+        else config_report_error(cfg, "[tiling] force_split: unknown value \"%s\" "
+                                      "(auto, vertical, horizontal)", d.u.s);
+        free(d.u.s);
+    }
+    load_default_modes(tbl, t, cfg);
+
+    /* A window squeezed to nothing is not a split, it is a window that has
+     * gone. Either side keeps a tenth of the space at the least; the divider
+     * can still be dragged past this by hand, where a floor of its own —
+     * bsp_ratio_limits, which knows what the clients will actually accept —
+     * takes over. */
+    if (t->split_ratio < 0.1) t->split_ratio = 0.1;
+    if (t->split_ratio > 0.9) t->split_ratio = 0.9;
 
     if (t->gaps_in < 0) t->gaps_in = 0;
     if (t->gaps_out < 0) t->gaps_out = 0;
@@ -1921,7 +2001,8 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
 void config_load(FwmConfig *cfg, const char *path) {
     cfg->physics         = physics_defaults;
     cfg->tiling          = (TilingConfig){ .gaps_in = 6, .gaps_out = 14, .anim_speed = 12.0,
-                                           .pickup = 0.28, .spawn_cursor = 1 };
+                                           .pickup = 0.28, .spawn_cursor = 1,
+                                           .split_ratio = 0.5, .force_split = -1 };
     cfg->camera          = (CameraConfig){ .anim_ms = 350.0, .free_speed = 14.0 };
     // Defaults for the no-config-file path; load_decor re-applies them anyway.
     cfg->decor.border_width = 2;
@@ -1995,7 +2076,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     }
 
     load_physics(root, cfg);
-    load_tiling(root, &cfg->tiling);
+    load_tiling(root, &cfg->tiling, cfg);
     load_camera(root, &cfg->camera);
     load_decor(root, cfg);
     load_sun(root, cfg);

@@ -15,6 +15,16 @@
 #include "bsp.h"
 #include <stdlib.h>
 
+/* Defaults are the answer fwm gave before either was configurable, so a build
+ * that never calls bsp_configure behaves exactly as it always did. */
+static float g_ratio   = 0.5f;
+static int   g_force_h = -1;
+
+void bsp_configure(float ratio, int force_split_h) {
+    if (ratio > 0.05f && ratio < 0.95f) g_ratio = ratio;
+    g_force_h = (force_split_h == 0 || force_split_h == 1) ? force_split_h : -1;
+}
+
 BspNode *bsp_new_leaf(uint32_t id) {
     BspNode *n = calloc(1, sizeof(BspNode));
     n->id = id;
@@ -48,7 +58,11 @@ void bsp_insert(BspNode **root, uint32_t focused, uint32_t new_id) {
     old_leaf->parent = target;
     new_leaf->parent = target;
 
-    target->split_h = (target->w >= target->h) ? 0 : 1;
+    target->split_h = (g_force_h >= 0) ? g_force_h
+                                       : ((target->w >= target->h) ? 0 : 1);
+    /* The existing window is the FIRST child here, so the ratio is its share
+     * as written. */
+    target->ratio = g_ratio;
     target->id = 0;
     target->left  = old_leaf;
     target->right = new_leaf;
@@ -157,7 +171,10 @@ void bsp_insert_at(BspNode **root, uint32_t target, uint32_t new_id, BspSide sid
 
     int before = (side == BSP_SIDE_LEFT || side == BSP_SIDE_UP);
     leaf->id = 0;
-    leaf->ratio = 0.5f;
+    /* Mirrored when the newcomer goes first, so that split_ratio stays the
+     * share of the window that was ALREADY there whichever edge it was dropped
+     * on. The axis is not forced here: this drop named it. */
+    leaf->ratio = before ? (1.0f - g_ratio) : g_ratio;
     leaf->split_h = (side == BSP_SIDE_UP || side == BSP_SIDE_DOWN);
     leaf->left  = before ? new_leaf : old_leaf;
     leaf->right = before ? old_leaf : new_leaf;

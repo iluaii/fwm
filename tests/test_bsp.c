@@ -125,6 +125,60 @@ static void test_split_direction(void) {
     bsp_free(root);
 }
 
+/* [tiling] split_ratio and force_split, which reach the tree through
+ * bsp_configure and nothing else. Every test after this one assumes the
+ * built-in answer, so each case here puts it back before it returns. */
+static void test_configure(void) {
+    CASE("force_split overrides the longer side, both ways");
+    bsp_configure(0.5f, 1);
+    BspNode *root = NULL;
+    bsp_insert(&root, 0, 1);
+    bsp_recalc(root, 0, 0, 200, 100, 0);   /* wide: would cut vertically */
+    bsp_insert(&root, 1, 2);
+    CHECK_INT(root->split_h, 1);
+    bsp_free(root);
+
+    bsp_configure(0.5f, 0);
+    root = NULL;
+    bsp_insert(&root, 0, 1);
+    bsp_recalc(root, 0, 0, 100, 200, 0);   /* tall: would cut horizontally */
+    bsp_insert(&root, 1, 2);
+    CHECK_INT(root->split_h, 0);
+    bsp_free(root);
+
+    CASE("split_ratio is the share the window already there keeps");
+    bsp_configure(0.7f, -1);
+    root = NULL;
+    bsp_insert(&root, 0, 1);
+    bsp_recalc(root, 0, 0, 200, 100, 0);
+    bsp_insert(&root, 1, 2);
+    CHECK(root->ratio > 0.69f && root->ratio < 0.71f);
+    bsp_recalc(root, 0, 0, 200, 100, 0);
+    CHECK_INT(bsp_find(root, 1)->w, 140);
+    CHECK_INT(bsp_find(root, 2)->w, 60);
+    bsp_free(root);
+
+    CASE("...and it is mirrored when the newcomer is dropped in front");
+    root = NULL;
+    bsp_insert(&root, 0, 1);
+    bsp_insert_at(&root, 1, 2, BSP_SIDE_LEFT);
+    bsp_recalc(root, 0, 0, 200, 100, 0);
+    CHECK_INT(bsp_find(root, 1)->w, 140);
+    CHECK_INT(bsp_find(root, 2)->w, 60);
+    bsp_free(root);
+
+    CASE("a ratio that would empty one side is refused, not obeyed");
+    bsp_configure(0.99f, -1);
+    root = NULL;
+    bsp_insert(&root, 0, 1);
+    bsp_insert(&root, 1, 2);
+    CHECK(root->ratio > 0.69f && root->ratio < 0.71f);  /* still the 0.7 above */
+    bsp_free(root);
+
+    /* Back to the built-in answer for everything below. */
+    bsp_configure(0.5f, -1);
+}
+
 static void test_remove(void) {
     CASE("remove the only leaf");
     BspNode *root = NULL;
@@ -616,6 +670,7 @@ int main(void) {
     test_find();
     test_insert();
     test_split_direction();
+    test_configure();
     test_remove();
     test_recalc();
     test_collect_leaves();

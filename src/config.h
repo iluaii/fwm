@@ -178,6 +178,34 @@ typedef struct {
      * With the cursor off this desktop, or in the gaps between windows, there
      * is nothing to read and the focused window answers as before. */
     int spawn_cursor;
+    /* What each of the ten desktops comes up as, one entry per desktop, in the
+     * numbering server.h spells out: 0 physics, 1 tiling, 2 floating. For the
+     * life spent inside the layout, where switching each desktop over by hand
+     * at every login is a chore the file should have done. It is a STARTING
+     * mode, not a lock: toggle_tiling still moves a desktop out of the layout,
+     * and a reload does not drag it back in — the array is read once, at
+     * start. */
+    int default_mode[10];
+    /* ...and then the desktop you switched over by hand outlives the session:
+     * the modes each desktop was in at the end of the last run are written to
+     * ~/.local/state/fwm/modes and stand in for default_mode above. Off, and
+     * every login starts from what the file says. */
+    int remember;
+    /* The share of a split its EXISTING window keeps when a new one joins it.
+     * 0.5 is the even cut fwm has always made; 0.6 leaves the window that was
+     * already there the larger half, which is a master area without any of the
+     * machinery of one. Both children of the split are still ordinary tiles
+     * and the divider still drags. */
+    double split_ratio;
+    /* Which way a new window cuts the one it joins: -1 reads the slot and cuts
+     * its longer side (what fwm has always done), 0 always side by side, 1
+     * always one above the other. A window DROPPED on a particular edge is
+     * unaffected — that drop named its axis outright. */
+    int force_split;
+    /* A desktop holding one window gets no outer gap: the window is the layout
+     * and there is nothing for the margin to separate it from. The gap comes
+     * back with the second window. */
+    int smart_gaps;
 } TilingConfig;
 
 /* ── camera ──────────────────────────────────────────────────────────── */

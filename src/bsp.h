@@ -58,6 +58,14 @@ typedef struct {
     int x, y, w, h;
 } BspBorder;
 
+/* The two knobs a split is made with, set from [tiling] and read by every
+ * insert after it. Module-level rather than per-call because a split is made
+ * from four different places and none of them has an opinion of its own: they
+ * all want whatever the config says. `ratio` is the share the window that was
+ * already there keeps; `force_split_h` is -1 to cut the longer side of the
+ * slot, 0 to always cut it side by side, 1 to always stack. */
+void bsp_configure(float ratio, int force_split_h);
+
 BspNode *bsp_new_leaf(uint32_t id);
 BspNode *bsp_find(BspNode *root, uint32_t id);
 void bsp_insert(BspNode **root, uint32_t focused, uint32_t new_id);

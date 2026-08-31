@@ -1401,6 +1401,94 @@ static void test_stats(void) {
     drop_config();
 }
 
+/* [tiling] default decides what ten desktops are when the session opens, so a
+ * parse that quietly means something else is a login spent putting them back.
+ * All three spellings, and the short array's promise that a desktop it does not
+ * reach is left alone. */
+static void test_tiling_defaults(void) {
+    CASE("[tiling] default: bool, string and per-desktop array");
+    FwmConfig cfg;
+
+    /* Nothing said: physics everywhere, and the split is the even one. */
+    const char *p = write_config("[tiling]\ngaps_in = 4\n");
+    config_load(&cfg, p);
+    for (int d = 0; d < 10; d++) CHECK_INT(cfg.tiling.default_mode[d], 0);
+    CHECK_INT(cfg.tiling.remember, 0);
+    CHECK_INT(cfg.tiling.smart_gaps, 0);
+    CHECK_INT(cfg.tiling.force_split, -1);
+    CHECK(fabs(cfg.tiling.split_ratio - 0.5) < 1e-9);
+    config_free(&cfg);
+    drop_config();
+
+    p = write_config("[tiling]\ndefault = true\n");
+    config_load(&cfg, p);
+    for (int d = 0; d < 10; d++) CHECK_INT(cfg.tiling.default_mode[d], 1);
+    config_free(&cfg);
+    drop_config();
+
+    p = write_config("[tiling]\ndefault = \"floating\"\n");
+    config_load(&cfg, p);
+    for (int d = 0; d < 10; d++) CHECK_INT(cfg.tiling.default_mode[d], 2);
+    config_free(&cfg);
+    drop_config();
+
+    p = write_config("[tiling]\ndefault = [\"physics\", \"tiling\", \"floating\"]\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.tiling.default_mode[0], 0);
+    CHECK_INT(cfg.tiling.default_mode[1], 1);
+    CHECK_INT(cfg.tiling.default_mode[2], 2);
+    /* Past the end of the list: untouched, not re-tiled. */
+    for (int d = 3; d < 10; d++) CHECK_INT(cfg.tiling.default_mode[d], 0);
+    config_free(&cfg);
+    drop_config();
+
+    /* A misspelt mode is reported and the desktop keeps the built-in answer;
+     * the entries either side of it still land. */
+    p = write_config("[tiling]\ndefault = [\"tiling\", \"tilling\", \"tiling\"]\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.tiling.default_mode[0], 1);
+    CHECK_INT(cfg.tiling.default_mode[1], 0);
+    CHECK_INT(cfg.tiling.default_mode[2], 1);
+    CHECK(cfg.error_count > 0);
+    config_free(&cfg);
+    drop_config();
+}
+
+static void test_tiling_splits(void) {
+    CASE("[tiling] split_ratio, force_split, smart_gaps and remember");
+    FwmConfig cfg;
+    const char *p = write_config(
+        "[tiling]\n"
+        "split_ratio = 0.62\n"
+        "force_split = \"horizontal\"\n"
+        "smart_gaps  = true\n"
+        "remember    = true\n");
+    config_load(&cfg, p);
+    CHECK(fabs(cfg.tiling.split_ratio - 0.62) < 1e-9);
+    CHECK_INT(cfg.tiling.force_split, 1);
+    CHECK_INT(cfg.tiling.smart_gaps, 1);
+    CHECK_INT(cfg.tiling.remember, 1);
+    config_free(&cfg);
+    drop_config();
+
+    p = write_config("[tiling]\nforce_split = \"vertical\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.tiling.force_split, 0);
+    config_free(&cfg);
+    drop_config();
+
+    /* A ratio that would leave one side of the split with nothing is clamped,
+     * not obeyed, and a force_split nobody can spell is reported and left at
+     * the longer side. */
+    p = write_config("[tiling]\nsplit_ratio = 0.99\nforce_split = \"sideways\"\n");
+    config_load(&cfg, p);
+    CHECK(cfg.tiling.split_ratio <= 0.9 + 1e-9);
+    CHECK_INT(cfg.tiling.force_split, -1);
+    CHECK(cfg.error_count > 0);
+    config_free(&cfg);
+    drop_config();
+}
+
 static void test_camera_back_and_forth(void) {
     /* Default on, and both spellings of "off" reach the same field: the key is
      * what makes super+1 twice a round trip, so a config that turns it off has
@@ -1649,6 +1737,8 @@ int main(void) {
     test_clipboard();
     test_battery();
     test_startup();
+    test_tiling_defaults();
+    test_tiling_splits();
     test_camera_back_and_forth();
     test_caps_hold();
     return t_report("config");

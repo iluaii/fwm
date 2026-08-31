@@ -181,6 +181,16 @@ void server_state_save_modes(FwmServer *server) {
     /* The strength, not just on/off: switching the wind off and restarting must
      * not quietly forget a gale someone had tuned. */
     fprintf(f, "wind = %.3f\n", server->config.grass.wind);
+    /* The ten desktop modes as ten digits, in strip order, and only while
+     * [tiling] remember asks for them: without the line the next start reads
+     * `default` from the file, which is what somebody who has just switched
+     * remembering off is asking for. */
+    if (server->config.tiling.remember) {
+        char modes[11];
+        for (int d = 0; d < 10; d++) modes[d] = (char)('0' + server->desktop_mode[d]);
+        modes[10] = '\0';
+        fprintf(f, "desktops = %s\n", modes);
+    }
     /* hp is deliberately NOT written. It is the one mode that can destroy
      * unsaved work, and a setting that survives a restart is one you can be
      * living under without having chosen it today. Every session starts with
@@ -224,6 +234,17 @@ void server_state_apply_modes(FwmServer *server) {
         } else if (strcmp(key, "grass") == 0) {
             if      (strcmp(val, "on")  == 0) server->config.grass.enabled = 1;
             else if (strcmp(val, "off") == 0) server->config.grass.enabled = 0;
+        } else if (strcmp(key, "desktops") == 0) {
+            /* Over `default`, and only when the config still asks to be
+             * remembered — the file is the way back, so switching remember off
+             * and reloading is enough to get it, without deleting anything.
+             * Read into the config rather than into the live desktops because
+             * that is where the starting modes live; only the start reads
+             * them, so a reload cannot yank a desktop out from under you. */
+            if (server->config.tiling.remember)
+                for (int d = 0; d < 10 && val[d]; d++)
+                    if (val[d] >= '0' && val[d] <= '2')
+                        server->config.tiling.default_mode[d] = val[d] - '0';
         } else if (strcmp(key, "wind") == 0) {
             char *end;
             double w = strtod(val, &end);
@@ -759,6 +780,13 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
     /* Monitors may have moved, been turned off, or been pointed at another
      * desktop. Before the tiling below, which is sized to a screen. */
     server_outputs_apply_config(server);
+
+    /* The shape of the next split — [tiling] split_ratio and force_split.
+     * Existing splits keep the ratio they were made with, the same as they keep
+     * one dragged by hand: this says how a split is BORN, and re-cutting the
+     * layout under a reload would throw away every divider ever placed. */
+    bsp_configure((float)server->config.tiling.split_ratio,
+                  server->config.tiling.force_split);
 
     /* New gaps / anim settings take effect on tiled desktops. */
     for (int d = 0; d < 10; d++) {

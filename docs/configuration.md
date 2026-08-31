@@ -216,6 +216,11 @@ gaps_out   = 14     # px between tiles and the screen edge
 anim_speed = 12.0   # tile-glide rate, 1/s; 0 = snap into place
 pickup     = 0.28   # size a window leaves the layout at, fraction of the screen
 spawn_cursor = true # a new window joins beside the tile under the pointer
+default     = false # what the ten desktops come up as; true tiles all of them
+remember    = false # ...or bring back the modes the last run ended in
+split_ratio = 0.5   # share of a split the window already there keeps
+force_split = "auto" # "auto" cuts the longer side; "vertical", "horizontal"
+smart_gaps  = false # a desktop holding one window gets no outer gap
 ```
 
 `pickup` is what you get in your hand when you drag a window out of the tree.
@@ -231,6 +236,52 @@ still wearing its slot.
 
 See `droplet` under [effects](#effects) for what the window *looks* like on the
 way out and back.
+
+`default` says what the ten desktops come up as, for the life that is spent in
+the layout and where switching each desktop over by hand at every login is a
+chore the file should have done. It takes three spellings, all meaning the same
+array:
+
+```toml
+default = true                    # every desktop tiled
+default = "floating"              # every desktop in that mode
+default = ["physics", "tiling"]   # desktop by desktop, from the first up
+```
+
+The array names desktops from the first one up and stops where it stops; a
+desktop it does not reach stays in physics. It says where a desktop *starts*,
+not where it stays: `toggle_tiling` moves one out of the layout as always, and a
+reload does not pull it back in — the line is read once, at start.
+
+`remember = true` goes one further: the mode each desktop was in is written to
+`~/.local/state/fwm/modes` as it changes, and that file stands in for `default`
+at the next start, so the desktop you switched over by hand outlives the
+session. The file is fwm's, on the same contract as the modes menu's other
+choices; turning `remember` off and reloading goes back to what `default` says,
+without deleting anything.
+
+`split_ratio` is the share of a split the window that was **already there**
+keeps when a new one joins it — `0.6` leaves it the larger half, which is a
+master area without any of the machinery of one. It is mirrored for a window
+dropped on the left or top edge, so the older window keeps the same share
+whichever side the newcomer arrived on. Splits already made keep the ratio they
+were made with, exactly as they keep one dragged by hand: this says how a split
+is *born*, and a reload re-cutting the layout would throw away every divider
+ever placed.
+
+`force_split` is which way a new window cuts the one it joins: `"auto"` reads
+the slot and cuts its longer side (dwindle, and the default), `"vertical"`
+always puts the two side by side, `"horizontal"` always stacks them. A window
+carried in and dropped on a particular edge is unaffected — that drop named its
+axis outright.
+
+`smart_gaps = true` drops `gaps_out` on a desktop holding a single window: that
+window is the whole layout and the margin is holding it away from nothing. The
+gap comes back with the second window. `gaps_in` is untouched, having nothing to
+do in that case anyway.
+
+`split_ratio`, `force_split` and `smart_gaps` are live — `fwmctl set` reaches
+all three. `default` is not, being read once at start.
 
 `spawn_cursor` says where a window that opens on a tiling desktop is put: beside
 the tile under the pointer, splitting it on the edge the pointer is nearest —

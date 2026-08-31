@@ -16,6 +16,7 @@
  * it all down again in the reverse order. Split out of server.c; see
  * server_internal.h. */
 #include "server.h"
+#include "bsp.h"
 #include "clipboard.h"
 #include "view.h"
 #include "rotate.h"
@@ -728,6 +729,19 @@ bool server_init(FwmServer *server, bool debug) {
     server_state_apply_settings(server);
     server_state_apply_wallpaper(server);
     server_state_apply_modes(server);
+    /* `[tiling] default`, or the modes the last run ended in when `remember`
+     * is on — server_state_apply_modes above has already put one over the
+     * other. Written straight into the array instead of going through
+     * server_set_desktop_mode because there is nothing yet to move — no
+     * window, no tray, no ipc — and a desktop that is tiled BEFORE the session
+     * restores is one the restored windows join as tiles, instead of landing
+     * as loose bodies the layout swallows a frame later. Only here, never on
+     * reload: after that the mode is the user's to toggle. */
+    for (int d = 0; d < 10; d++)
+        server->desktop_mode[d] = server->config.tiling.default_mode[d];
+    /* And the shape of every split made from here on. */
+    bsp_configure((float)server->config.tiling.split_ratio,
+                  server->config.tiling.force_split);
     /* Prime the `setting` event's memory with what the session is starting
      * from. Without it the first change of the session is the call that fills
      * the snapshot in, and so is the one change nobody is told about. */

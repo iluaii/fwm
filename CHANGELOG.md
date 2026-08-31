@@ -11,6 +11,27 @@
   usually over the place you meant it to go. The pointer over another desktop
   or in a gap between tiles still splits the focused window, and
   `[tiling] spawn_cursor = false` turns the whole thing off.
+- **Every desktop can start tiled.** `[tiling] default = true` brings all ten
+  up in the layout instead of under physics, for the life that is lived there
+  and where flipping each desktop by hand at every login is a chore. It also
+  takes a mode name (`"floating"`) or a list, one entry per desktop from the
+  first up. It is a starting mode, not a lock: `toggle_tiling` still takes a
+  desktop out, and a reload leaves it out — the line is read once, at start.
+- **...or the modes the last session ended in.** `[tiling] remember = true`
+  writes each desktop's mode to `~/.local/state/fwm/modes` as it changes and
+  starts from there, so a desktop switched over by hand outlives the session.
+  Turning it off and reloading goes back to what `default` says.
+- **A split can be uneven.** `[tiling] split_ratio` is the share of a split the
+  window that was already there keeps — `0.6` is a master area with none of the
+  machinery of one. Mirrored for a window dropped in front of it, so the older
+  window keeps its share whichever edge the newcomer came in on, and splits
+  already made keep the ratio they were made with.
+- **A split can be forced.** `[tiling] force_split = "vertical" | "horizontal"`
+  stops reading the longer side of the slot and always cuts the same way. A
+  window dropped on a named edge still goes where it was dropped.
+- **`[tiling] smart_gaps`**: a desktop holding one window loses its outer gap —
+  the window is the whole layout, and the margin was holding it away from
+  nothing. The gap returns with the second window.
 
 ### Wallpaper
 

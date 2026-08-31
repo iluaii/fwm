@@ -352,12 +352,48 @@ color          = "#000000"
 # and what Hyprland's dwindle does by default. With the pointer on another
 # desktop, or in the gaps between windows, the focused window answers either
 # way.
+#
+# default says what the ten desktops come up as, instead of starting them all
+# under physics and reaching for super+t on each in turn. Three spellings, all
+# meaning the same array:
+#
+#   default = true                       every desktop tiled
+#   default = "floating"                 every desktop in that mode
+#   default = ["physics", "tiling"]      desktop by desktop, from the first up;
+#                                        a desktop the list does not reach stays
+#                                        physics
+#
+# It is a STARTING mode and not a lock: toggle_tiling still takes a desktop out
+# of the layout, and a config reload leaves it out — only the next start reads
+# the line. remember goes one further and writes the modes each desktop was in
+# at the end of the last run to ~/.local/state/fwm/modes, which then stands in
+# for `default`; switching it back off and reloading returns to the file.
+#
+# split_ratio is the share of a split the window that was ALREADY there keeps
+# when a new one joins it. 0.5 is the even cut; 0.6 leaves the older window the
+# larger half, which is a master area without any of the machinery of one. A
+# divider dragged by hand still wins, and splits already made keep the ratio
+# they were made with.
+#
+# force_split is which way a new window cuts the one it joins: "auto" reads the
+# slot and cuts its longer side (dwindle, what fwm has always done), "vertical"
+# always puts them side by side, "horizontal" always stacks them. A window
+# DROPPED on a particular edge is unaffected — that drop named its axis.
+#
+# smart_gaps drops gaps_out on a desktop holding a single window: it is the
+# whole layout, and there is nothing for the margin to hold it away from. The
+# gap comes back with the second window.
 [tiling]
 gaps_in    = 6
 gaps_out   = 14
 anim_speed = 12.0
 pickup     = 0.28
 spawn_cursor = true
+#default     = true
+#remember    = true
+#split_ratio = 0.5
+#force_split = "auto"
+#smart_gaps  = true
 
 # Desktop-switch camera slide (ease-in-out). 0 = instant snap. A window SENT to
 # another desktop (move_to:, move_to_view:) crosses the strip on the same curve

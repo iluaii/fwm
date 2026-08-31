@@ -44,6 +44,13 @@ static const ConfigOption config_option_table[] = {
     { "tiling.anim_speed",              CFG_OPT_DOUBLE, offsetof(FwmConfig, tiling.anim_speed),               0.0,  1000.0,    "tile-glide rate, 1/s; 0 disables" },
     { "tiling.pickup",                  CFG_OPT_DOUBLE, offsetof(FwmConfig, tiling.pickup),                   0.0,     0.9,    "size a window leaves the layout at, fraction of the screen" },
     { "tiling.spawn_cursor",            CFG_OPT_INT,    offsetof(FwmConfig, tiling.spawn_cursor),             0.0,     1.0,    "a new tile joins beside the window under the cursor, not the focused one" },
+    { "tiling.smart_gaps",              CFG_OPT_INT,    offsetof(FwmConfig, tiling.smart_gaps),               0.0,     1.0,    "1 = a desktop holding one window gets no outer gap" },
+    { "tiling.split_ratio",             CFG_OPT_DOUBLE, offsetof(FwmConfig, tiling.split_ratio),              0.1,     0.9,    "share of a split the window already there keeps" },
+    /* Numeric like physics.mass and cava.mode, and for the same reason — the
+     * table is typed. -1 the longer side of the slot, 0 side by side, 1
+     * stacked. `default` is deliberately absent: it is read once at start, so
+     * a live set of it would do nothing at all. */
+    { "tiling.force_split",             CFG_OPT_INT,    offsetof(FwmConfig, tiling.force_split),             -1.0,     1.0,    "-1 cut the longer side, 0 always side by side, 1 always stacked" },
 
     { "camera.anim_ms",                 CFG_OPT_DOUBLE, offsetof(FwmConfig, camera.anim_ms),                  0.0, 10000.0,    "desktop-switch slide, ms" },
     { "camera.free_speed",              CFG_OPT_DOUBLE, offsetof(FwmConfig, camera.free_speed),               0.0,  1000.0,    "held move_camera chase rate, 1/s" },

@@ -131,8 +131,30 @@ void server_work_area(FwmServer *server, int desktop, int *x, int *y, int *w, in
     if (*h < 1) *h = 1;
 }
 
+/* Count the leaves without collecting them: smart_gaps only ever asks whether
+ * there is more than one. */
+static int tile_leaf_count(const BspNode *n) {
+    if (!n) return 0;
+    if (!n->left) return 1;
+    return tile_leaf_count(n->left) + tile_leaf_count(n->right);
+}
+
 static void tile_area(FwmServer *server, int desktop, int *x, int *y, int *w, int *h) {
     server_work_area(server, desktop, x, y, w, h);
+
+    /* [tiling] smart_gaps: one window on the desktop is the whole layout, and
+     * an outer gap around it separates it from nothing. Given back here rather
+     * than in server_work_area because that answer is also what fake fullscreen
+     * is sized to, on desktops with no layout at all — the margin around a lone
+     * window is a tiling question and this is the tiling caller. */
+    if (server->config.tiling.smart_gaps
+     && tile_leaf_count(server->bsp_roots[desktop]) == 1) {
+        int gout = server->config.tiling.gaps_out;
+        *x -= gout; *y -= gout;
+        *w += gout * 2; *h += gout * 2;
+        if (*w < 1) *w = 1;
+        if (*h < 1) *h = 1;
+    }
 }
 
 /* Move one tile to where the alignment pass decided it goes. */

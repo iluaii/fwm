@@ -194,6 +194,11 @@ void server_set_desktop_mode(FwmServer *server, int d, int mode) {
 
     server_request_tray_redraw(server);
     ipc_emit_mode(server->ipc, d, mode);
+
+    /* [tiling] remember: the modes file is rewritten on every change, exactly
+     * as the modes menu rewrites it, so a session that dies without a clean
+     * exit still comes back the way it was left. */
+    if (server->config.tiling.remember) server_state_save_modes(server);
 }
 
 /* Kept as the entry point for the toggle_tiling bind: physics <-> tiling, with
