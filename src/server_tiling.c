@@ -315,7 +315,7 @@ void server_tile_ratio_limits(FwmServer *server, int desktop, BspNode *node,
                               float *lo, float *hi) {
     *lo = 0.05f;
     *hi = 0.95f;
-    if (desktop < 0 || desktop >= 10) return;
+    if (desktop < 0 || desktop >= FWM_DESKTOPS) return;
     BspNode *root = server->bsp_roots[desktop];
     if (!root || !node) return;
 

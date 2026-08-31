@@ -20,7 +20,11 @@
  * been opened over the session. Costs ~256 * (sizeof(PhysicsBody) +
  * sizeof(BodySlot)) of static memory, which is tens of kilobytes. */
 #define MAX_WINDOWS             256
-/* Virtual desktops on the strip. The world is this many screens wide. */
+/* Virtual desktops on the strip. Every desktop index, and every array indexed
+ * by one, derives from this. The physics world does NOT yet: its walls, its
+ * wrap and its escape net are still a hardcoded ten screens wide (issue #15),
+ * so changing this number moves the desktops without moving the ground under
+ * them. Until that is fixed, treat this as read-only outside a test build. */
 #define FWM_DESKTOPS            10
 _Static_assert(FWM_DESKTOPS >= 4, "FWM_DESKTOPS must be at least 4");
 #define DRAG_MARGIN             5

@@ -185,7 +185,7 @@ typedef struct {
      * mode, not a lock: toggle_tiling still moves a desktop out of the layout,
      * and a reload does not drag it back in — the array is read once, at
      * start. */
-    int default_mode[10];
+    int default_mode[FWM_DESKTOPS];
     /* ...and then the desktop you switched over by hand outlives the session:
      * the modes each desktop was in at the end of the last run are written to
      * ~/.local/state/fwm/modes and stand in for default_mode above. Off, and

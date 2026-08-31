@@ -583,7 +583,7 @@ void server_request_tray_redraw(FwmServer *server) {
             if (d2.other_count >= TRAY_MAX_OTHER) break;
             double p = (double)o2->camera_x / server->screen_width;
             if (p < 0.0) p = 0.0;
-            if (p > 9.0) p = 9.0;
+            if (p > FWM_DESKTOPS - 1.0) p = FWM_DESKTOPS - 1.0;
             d2.other_pos[d2.other_count++] = p;
         }
 

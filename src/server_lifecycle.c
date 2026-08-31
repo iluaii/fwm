@@ -737,7 +737,7 @@ bool server_init(FwmServer *server, bool debug) {
      * restores is one the restored windows join as tiles, instead of landing
      * as loose bodies the layout swallows a frame later. Only here, never on
      * reload: after that the mode is the user's to toggle. */
-    for (int d = 0; d < 10; d++)
+    for (int d = 0; d < FWM_DESKTOPS; d++)
         server->desktop_mode[d] = server->config.tiling.default_mode[d];
     /* And the shape of every split made from here on. */
     bsp_configure((float)server->config.tiling.split_ratio,
