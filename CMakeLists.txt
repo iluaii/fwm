@@ -7,6 +7,12 @@ cmake_minimum_required(VERSION 3.10)
 # tagging v<that>.
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FWM_VERSION)
 string(STRIP "${FWM_VERSION}" FWM_VERSION)
+# Editing that file has to re-run this one, or an existing build directory goes
+# on baking the old number into the binary and the IPC: `cmake --build` after a
+# bump rebuilt nothing and reported the previous release. Listing it here makes
+# CMake watch it like it watches this file.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 
 project(fwm VERSION ${FWM_VERSION} LANGUAGES C)
 
