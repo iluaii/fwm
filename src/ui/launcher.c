@@ -246,8 +246,16 @@ static void scan_dir(Launcher *l, const LsLocale *loc, const char *dir,
             if (strcmp((*seen)[i], e->d_name) == 0) { dup = 1; break; }
         }
         if (dup) continue;
-        *seen = realloc(*seen, sizeof(char *) * (*seen_count + 1));
-        (*seen)[(*seen_count)++] = strdup(e->d_name);
+        /* Out of memory: this entry goes unrecorded and the file is still
+         * read, rather than the old realloc-into-NULL, which crashed the
+         * compositor for want of a few bytes. Losing the record costs at most
+         * one entry listed twice, when a user override shadows a system one. */
+        char **grown = realloc(*seen, sizeof(char *) * (*seen_count + 1));
+        if (grown) {
+            *seen = grown;
+            char *id = strdup(e->d_name);
+            if (id) (*seen)[(*seen_count)++] = id;
+        }
 
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);

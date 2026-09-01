@@ -935,21 +935,26 @@ static void handle_new_input(struct wl_listener *listener, void *data) {
     
     if (device->type == WLR_INPUT_DEVICE_KEYBOARD) {
         struct FwmKeyboard *keyboard = calloc(1, sizeof(struct FwmKeyboard));
-        keyboard->server = server;
-        keyboard->wlr_keyboard = wlr_keyboard_from_input_device(device);
-        
-        keyboard_apply_input_config(server, keyboard->wlr_keyboard);
-        
-        keyboard->modifiers.notify = handle_keyboard_modifiers;
-        keyboard->key.notify = handle_keyboard_key;
-        keyboard->destroy.notify = handle_keyboard_destroy;
-        
-        wl_signal_add(&keyboard->wlr_keyboard->events.modifiers, &keyboard->modifiers);
-        wl_signal_add(&keyboard->wlr_keyboard->events.key, &keyboard->key);
-        wl_signal_add(&device->events.destroy, &keyboard->destroy);
-        
-        wlr_seat_set_keyboard(server->seat, keyboard->wlr_keyboard);
-        wl_list_insert(&server->keyboards, &keyboard->link);
+        /* Checked like the pointer and the switch below it: a keyboard fwm
+         * cannot allocate is a keyboard that does not work, not a session that
+         * dies the moment one is plugged in. */
+        if (keyboard) {
+            keyboard->server = server;
+            keyboard->wlr_keyboard = wlr_keyboard_from_input_device(device);
+
+            keyboard_apply_input_config(server, keyboard->wlr_keyboard);
+
+            keyboard->modifiers.notify = handle_keyboard_modifiers;
+            keyboard->key.notify = handle_keyboard_key;
+            keyboard->destroy.notify = handle_keyboard_destroy;
+
+            wl_signal_add(&keyboard->wlr_keyboard->events.modifiers, &keyboard->modifiers);
+            wl_signal_add(&keyboard->wlr_keyboard->events.key, &keyboard->key);
+            wl_signal_add(&device->events.destroy, &keyboard->destroy);
+
+            wlr_seat_set_keyboard(server->seat, keyboard->wlr_keyboard);
+            wl_list_insert(&server->keyboards, &keyboard->link);
+        }
     } else if (device->type == WLR_INPUT_DEVICE_POINTER) {
         wlr_cursor_attach_input_device(server->cursor, device);
         pointer_apply_input_config(server, device);
