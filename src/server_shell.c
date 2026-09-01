@@ -526,6 +526,11 @@ static void popup_handle_commit(struct wl_listener *listener, void *data) {
 static void popup_handle_reposition(struct wl_listener *listener, void *data) {
     (void)data;
     struct FwmPopup *p = wl_container_of(listener, p, reposition);
+    /* Same guard as the commit above, for the same assertion: a client is
+     * free to send xdg_popup.reposition before it has ever committed, and
+     * configuring a surface wlroots has not initialised aborts the whole
+     * compositor over one misbehaving menu. */
+    if (!p->popup->base->initialized) return;
     popup_place(p);
     wlr_xdg_surface_schedule_configure(p->popup->base);
 }

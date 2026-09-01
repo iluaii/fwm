@@ -64,6 +64,21 @@ static void handle_commit(struct wl_listener *listener, void *data) {
     if (view->type == FWM_VIEW_XDG && view->xdg_toplevel->base->initial_commit) {
         wlr_xdg_toplevel_set_size(view->xdg_toplevel, 0, 0);
     }
+
+    /* A commit on a surface that is not mapped is either the one BEFORE the
+     * first map — answered just above and nothing else — or the one a client
+     * makes on its way out, attaching a null buffer before it destroys the
+     * window. Everything below this line is about a window that is on screen,
+     * and one of them, physics_sync_body, CREATES what it cannot find: run on
+     * the parting commit it handed a fresh body to a window that had already
+     * been unmapped and stripped of its own. That body made the dead window a
+     * focus candidate again (server_refocus takes the newest view with a body
+     * on the desktop), and focusing it configured an xdg_surface wlroots had
+     * already de-initialised — an assertion inside wlroots, which is a session
+     * gone. Three terminals closing together was enough to hit it. */
+    struct wlr_surface *surface = view_surface(view);
+    if (!surface || !surface->mapped) return;
+
     // The mapping commit lands here immediately after view_map; the one after
     // it is the first with content the client actually drew, which is when the
     // fade may start.
@@ -156,8 +171,7 @@ static void handle_commit(struct wl_listener *listener, void *data) {
     // Keep our own lock on the latest committed buffer: at unmap time the
     // client's buffer may already be gone, but the close animation needs the
     // last frame as a snapshot.
-    struct wlr_surface *surface = view_surface(view);
-    if (surface && surface->buffer) {
+    if (surface->buffer) {
         wlr_buffer_lock(&surface->buffer->base);
         if (view->last_buffer) wlr_buffer_unlock(view->last_buffer);
         view->last_buffer = &surface->buffer->base;
@@ -855,6 +869,27 @@ void view_destroy(FwmView *view) {
     if (surface && surface->mapped) {
         view_unmap(view);
     }
+
+    /* Belt and braces for the window that is destroyed WITHOUT ever mapping —
+     * the one path that skips view_unmap, and so skips every place that clears
+     * a pointer to this view. The compositor is about to free it: anything the
+     * server is still holding it by would be read on the next tick, which is a
+     * use-after-free rather than a crash you can see. Nothing here has an
+     * effect on the ordinary close, where view_unmap did it all already. */
+    FwmServer *server = view->server;
+    bool was_focused = server->focused_view == view;
+    if (was_focused)                        server->focused_view = NULL;
+    if (server->last_touched_view == view)  server->last_touched_view = NULL;
+    if (server->interactive.view == view)   server->interactive.view = NULL;
+    if (server->ptr_view == view) {
+        server->ptr_view = NULL;
+        server->ptr_surface = NULL;
+        server->ptr_node_have = 0;
+    }
+    /* The list link is gone by now, so this cannot come back to the window
+     * being freed. */
+    if (was_focused) server_refocus(server, server_active_desktop(server), NULL);
+
     if (view->last_buffer) {
         wlr_buffer_unlock(view->last_buffer);
         view->last_buffer = NULL;
