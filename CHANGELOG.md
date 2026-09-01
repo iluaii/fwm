@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
+
+Two days on top of 0.5.0, cut for the last thing in it: a window closing beside
+another one could take the whole session down, which is the one bug a
+compositor cannot ask anyone to live with.
+
+The rest is what the first days of living on 0.5.0 turned up — per-monitor
+wallpapers, the tiling layout read from the config, menus that stay on their
+own screen, and a resize that ends without a jolt.
 
 ### Tiling
 
@@ -110,6 +118,45 @@
   submenu along — was never fitted again and was free to walk off the screen.
 - **A bar's own menu opens at the icon that opened it**, not in the corner of
   the primary screen: the tree those popups live in follows the bar now.
+
+### Resizing and dragging
+
+- **A resize ends smoothly instead of on a jolt.** A client is not obliged to
+  take the size it is offered, and a terminal answers in whole character cells
+  — so the last cell of a drag used to arrive in a single frame, the one where
+  the rubber came down. That difference is now ridden out: the window is eased
+  from the size in the hand to the size the client took. A new gesture on the
+  window ends the settle where it stands, and the tiling divider settles the
+  same way.
+- **An edge dragged by hand goes as far as the hand does**, and a window being
+  resized stays on the screen it is being resized on.
+- **A window held under an effect is drawn as the window, not as the client's
+  buffer.** A client-decorated toplevel paints its shadow margins into the same
+  surface and calls a sub-rectangle of it the window; handing that texture
+  straight to the wobble or the spin stretched the margins over the window's
+  box and looked like one client's bug (Discord's, since an undecorated
+  terminal does not do it).
+- **A window dragged by its own titlebar does not leave the client holding the
+  button.** If the press went to the client and the compositor then took the
+  drag over, the release went nowhere and the seat's button count stayed above
+  zero. The release is now always sent; one the client is not owed is ignored
+  by the seat.
+
+### Crashes
+
+- **Closing several windows at once no longer takes the session with it.** A
+  client's last commit before it destroys a window was run like any other, and
+  one of the things that runs creates a physics body when it cannot find one —
+  so the window that had just been unmapped got a new one, became a focus
+  candidate again, and being focused configured a surface wlroots had already
+  torn down. That is an assertion inside wlroots, which is the display server
+  gone. Three terminals closing together was enough. The use-after-free hiding
+  behind it — the focus left pointing at a window freed without ever being
+  mapped — is closed too, and so is the same abort reached from a popup a
+  client repositions before it has committed.
+- **An allocation that fails costs a device, not the session.** A keyboard
+  arriving on a failed `calloc`, and the launcher's directory scan growing its
+  list with an unchecked `realloc`, both wrote through NULL.
 
 ## 0.5.0
 
