@@ -880,7 +880,19 @@ void view_destroy(FwmView *view) {
     bool was_focused = server->focused_view == view;
     if (was_focused)                        server->focused_view = NULL;
     if (server->last_touched_view == view)  server->last_touched_view = NULL;
-    if (server->interactive.view == view)   server->interactive.view = NULL;
+    if (server->interactive.view == view) {
+        server->interactive.view = NULL;
+        /* And the gesture it was the subject of. Clearing only the pointer left
+         * the compositor believing a drag was still running with nothing being
+         * dragged: from there every click is swallowed as "part of the gesture"
+         * and no window is clickable again until some other press and release
+         * happens to end it. */
+        if (server->interactive.action != FWM_ACTION_NONE &&
+            server->interactive.action != FWM_ACTION_BSP_RESIZE) {
+            server->interactive.action = FWM_ACTION_NONE;
+            server->interactive.tile_grab = 0;
+        }
+    }
     if (server->ptr_view == view) {
         server->ptr_view = NULL;
         server->ptr_surface = NULL;
@@ -1160,6 +1172,13 @@ void view_unmap(FwmView *view) {
     }
     if (view->server->interactive.view == view) {
         view->server->interactive.view = NULL;
+        /* With the window gone there is no gesture left to run; see
+         * view_destroy for what leaving it set costs. */
+        if (view->server->interactive.action != FWM_ACTION_NONE &&
+            view->server->interactive.action != FWM_ACTION_BSP_RESIZE) {
+            view->server->interactive.action = FWM_ACTION_NONE;
+            view->server->interactive.tile_grab = 0;
+        }
     }
     /* The window the pointer was last measured against (implicit grab). */
     if (view->server->ptr_view == view) {
