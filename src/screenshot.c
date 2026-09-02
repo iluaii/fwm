@@ -691,11 +691,31 @@ static void picker_redraw(struct FwmShotPicker *p) {
         snprintf(p->label_text, sizeof(p->label_text), "%s", text);
         cairo_overlay_update(p->label, picker_label_draw, p->label_text);
     }
-    /* Under the box while there is room, inside its top-left when the drag has
-     * reached the bottom of the screen. */
-    int lx = c.x;
+    /* Outside the selection wherever there is room for it: under the box
+     * first, over it when the drag has reached the bottom of the screen. The
+     * label used to fall back INTO the box there, which covers the one thing
+     * you are looking at while you aim — the picture you are about to take.
+     *
+     * A selection tall enough to leave no room on either side is the only case
+     * that puts it inside, and then in the corner diagonally opposite the hand:
+     * (x1, y1) is the corner being dragged, so the far one is the part of the
+     * shot nobody is watching.
+     *
+     * Sideways it goes to the edge the hand is not on: dragging left puts the
+     * moving corner exactly where a left-aligned label would sit, so the label
+     * ends up under the cursor, over the ground the selection is growing
+     * into. */
+    int lx = p->dragging && p->x1 < p->x0 ? c.x + c.width - LABEL_W : c.x;
     int ly = c.y + c.height + 8;
-    if (ly + LABEL_H > o.y + o.height) ly = c.y + c.height - LABEL_H - 8;
+    if (ly + LABEL_H > o.y + o.height) {
+        int above = c.y - LABEL_H - 8;
+        if (above >= o.y) {
+            ly = above;
+        } else {
+            lx = p->x1 > c.x + c.width / 2.0 ? c.x + 8 : c.x + c.width - LABEL_W - 8;
+            ly = p->y1 > c.y + c.height / 2.0 ? c.y + 8 : c.y + c.height - LABEL_H - 8;
+        }
+    }
     if (lx + LABEL_W > o.x + o.width) lx = o.x + o.width - LABEL_W;
     if (lx < o.x) lx = o.x;
     if (ly < o.y) ly = o.y;
