@@ -30,6 +30,16 @@ typedef struct {
     PhysicsBody bodies[MAX_WINDOWS];
     int body_count;
     double gravity_scale;
+
+    /* tunables, defaulted in physics_init() and overridden from config.toml */
+    double friction;
+    double mass_density;
+    double throw_speed_multiplier;
+    double max_throw_speed;
+    double stop_speed_threshold;
+    double restitution;
+    double gravity;
+    double tick_rate;
 } PhysicsWorld;
 
 void physics_init(PhysicsWorld *world);

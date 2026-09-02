@@ -40,16 +40,6 @@ typedef enum {
     DESKTOP_MODE_NORMAL,
 } DesktopMode;
 
-typedef struct BspNode {
-    struct BspNode *parent;
-    struct BspNode *left;
-    struct BspNode *right;
-    Window win;
-    int x, y, w, h;
-    int split_h;
-    float ratio;
-} BspNode;
-
 typedef struct {
     BspNode *node;
     float start_ratio;

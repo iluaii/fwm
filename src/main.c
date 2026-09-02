@@ -53,7 +53,7 @@ int main(void) {
 
         struct timeval timeout;
         timeout.tv_sec = 0;
-        timeout.tv_usec = (long)(1000000.0 / PHYSICS_TICK_RATE);
+        timeout.tv_usec = (long)(1000000.0 / wm.physics.tick_rate);
 
         int ready = select(xfd + 1, &fds, NULL, NULL, &timeout);
 

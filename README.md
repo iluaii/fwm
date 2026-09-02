@@ -3,6 +3,8 @@
 > ⚠️ **This is the legacy X11 version and it is no longer supported.**
 > Development has moved to the Wayland port on the [`main`](https://github.com/iluaii/fwm/tree/main) branch,
 > which is the primary and actively maintained version. No fixes or features will land here.
+> It does still build and run: as of 2026-09-02 it compiles clean on gcc 14 and starts on a stock X server.
+> Expect nothing beyond that — no fixes, no features, no support.
 
 A lightweight X11 window manager written in C where windows behave as physical objects with **mass, momentum, inertia, and velocity**. Drag a window and throw it — it will slide, bounce off walls, and respond to gravity.
 

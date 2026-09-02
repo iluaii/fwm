@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
-static double calc_mass(int width, int height) {
-    return (double)(width * height) * MASS_DENSITY;
+static double calc_mass(double mass_density, int width, int height) {
+    return (double)(width * height) * mass_density;
 }
 
 static void clamp_velocity(double *vx, double *vy, double max_speed) {
@@ -19,12 +19,12 @@ static void clamp_velocity(double *vx, double *vy, double max_speed) {
     *vy *= scale;
 }
 
-static void update_body_geometry(PhysicsBody *body, int x, int y, int width, int height) {
+static void update_body_geometry(double mass_density, PhysicsBody *body, int x, int y, int width, int height) {
     body->x = x;
     body->y = y;
     body->width = width;
     body->height = height;
-    body->mass = calc_mass(width, height);
+    body->mass = calc_mass(mass_density, width, height);
 }
 
 static int rects_overlap(int ax, int ay, int aw, int ah,
@@ -71,7 +71,7 @@ static void separate_bodies(PhysicsBody *a, PhysicsBody *b) {
     }
 }
 
-static void resolve_collision(PhysicsBody *a, PhysicsBody *b) {
+static void resolve_collision(double restitution, PhysicsBody *a, PhysicsBody *b) {
     double m1 = a->mass;
     double m2 = b->mass;
 
@@ -80,10 +80,10 @@ static void resolve_collision(PhysicsBody *a, PhysicsBody *b) {
     double new_vy_a = ((m1 - m2) * a->vy + 2 * m2 * b->vy) / (m1 + m2);
     double new_vy_b = ((m2 - m1) * b->vy + 2 * m1 * a->vy) / (m1 + m2);
 
-    a->vx = new_vx_a * RESTITUTION;
-    b->vx = new_vx_b * RESTITUTION;
-    a->vy = new_vy_a * RESTITUTION;
-    b->vy = new_vy_b * RESTITUTION;
+    a->vx = new_vx_a * restitution;
+    b->vx = new_vx_b * restitution;
+    a->vy = new_vy_a * restitution;
+    b->vy = new_vy_b * restitution;
 
     a->flying = 1;
     b->flying = 1;
@@ -96,12 +96,21 @@ static int should_skip_collision(Window skip_a, Window skip_b, Window win) {
 void physics_init(PhysicsWorld *world) {
     world->body_count = 0;
     world->gravity_scale = 0.0;
+
+    world->friction               = FRICTION;
+    world->mass_density           = MASS_DENSITY;
+    world->throw_speed_multiplier = THROW_SPEED_MULTIPLIER;
+    world->max_throw_speed        = MAX_THROW_SPEED;
+    world->stop_speed_threshold   = STOP_SPEED_THRESHOLD;
+    world->restitution            = RESTITUTION;
+    world->gravity                = GRAVITY;
+    world->tick_rate              = PHYSICS_TICK_RATE;
 }
 
 PhysicsBody *physics_sync_body(PhysicsWorld *world, Window win, int x, int y, int width, int height, int screen_width) {
     for (int i = 0; i < world->body_count; i++) {
         if (world->bodies[i].active && world->bodies[i].win == win) {
-            update_body_geometry(&world->bodies[i], x, y, width, height);
+            update_body_geometry(world->mass_density, &world->bodies[i], x, y, width, height);
             int d = (int)((world->bodies[i].x + world->bodies[i].width / 2.0) / screen_width);
             if (d < 0) d = 0;
             if (d >= 10) d = 9;
@@ -123,7 +132,7 @@ PhysicsBody *physics_sync_body(PhysicsWorld *world, Window win, int x, int y, in
     body->vy = 0;
     body->pinned = 0;
     body->no_collide = 0;
-    update_body_geometry(body, x, y, width, height);
+    update_body_geometry(world->mass_density, body, x, y, width, height);
     
     int d = (int)((body->x + body->width / 2.0) / screen_width);
     if (d < 0) d = 0;
@@ -150,9 +159,9 @@ void physics_throw_body(PhysicsWorld *world, Window win, double vx, double vy) {
         PhysicsBody *body = &world->bodies[i];
         if (body->active && body->win == win) {
             body->flying = 1;
-            body->vx = vx * THROW_SPEED_MULTIPLIER;
-            body->vy = vy * THROW_SPEED_MULTIPLIER;
-            clamp_velocity(&body->vx, &body->vy, MAX_THROW_SPEED);
+            body->vx = vx * world->throw_speed_multiplier;
+            body->vy = vy * world->throw_speed_multiplier;
+            clamp_velocity(&body->vx, &body->vy, world->max_throw_speed);
 
             double angle_deg = atan2(body->vy, body->vx) * 180.0 / M_PI;
             fprintf(stderr, "fwm: throw vx=%.1f vy=%.1f angle=%.1f\n",
@@ -280,7 +289,7 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
         if (body->pinned) { body->vx = 0; body->vy = 0; body->flying = 0; continue; }
 
         if (world->gravity_scale > 0.0) {
-            body->vy += GRAVITY * world->gravity_scale * dt;
+            body->vy += world->gravity * world->gravity_scale * dt;
             body->flying = 1;
         }
 
@@ -289,17 +298,17 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
         double new_x = body->x + body->vx * dt;
         double new_y = body->y + body->vy * dt;
 
-        double friction_factor = pow(FRICTION, dt * PHYSICS_TICK_RATE);
+        double friction_factor = pow(world->friction, dt * world->tick_rate);
         body->vx *= friction_factor;
         body->vy *= friction_factor;
 
         if (world->gravity_scale > 0.0) {
-            body->vy += GRAVITY * world->gravity_scale * dt;
+            body->vy += world->gravity * world->gravity_scale * dt;
             body->flying = 1;
         }
 
         double speed = body->vx * body->vx + body->vy * body->vy;
-        if (speed < STOP_SPEED_THRESHOLD && world->gravity_scale == 0.0) {
+        if (speed < world->stop_speed_threshold && world->gravity_scale == 0.0) {
             body->flying = 0;
         }
 
@@ -308,10 +317,10 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
         double min_y = -(body->height - PHYSICS_MARGIN);
         double max_y = screen_height - PHYSICS_MARGIN - body->height;
 
-        if (new_x < min_x) { new_x = min_x; body->vx = -body->vx * RESTITUTION; }
-        if (new_x > max_x) { new_x = max_x; body->vx = -body->vx * RESTITUTION; }
-        if (new_y < min_y) { new_y = min_y; body->vy = -body->vy * RESTITUTION; }
-        if (new_y > max_y) { new_y = max_y; body->vy = -body->vy * RESTITUTION; }
+        if (new_x < min_x) { new_x = min_x; body->vx = -body->vx * world->restitution; }
+        if (new_x > max_x) { new_x = max_x; body->vx = -body->vx * world->restitution; }
+        if (new_y < min_y) { new_y = min_y; body->vy = -body->vy * world->restitution; }
+        if (new_y > max_y) { new_y = max_y; body->vy = -body->vy * world->restitution; }
 
         body->x = new_x;
         body->y = new_y;
@@ -341,20 +350,20 @@ void physics_step(PhysicsWorld *world, Display *dpy, int screen_width, int scree
 
             if (a_is_dragged) {
                 push_out_single(a, b);
-                b->vx = a->vx * RESTITUTION;
-                b->vy = a->vy * RESTITUTION;
+                b->vx = a->vx * world->restitution;
+                b->vy = a->vy * world->restitution;
                 b->flying = 1;
                 clamp_body_bounds(b, screen_width, screen_height);
                 XMoveWindow(dpy, b->win, (int)lround(b->x - camera_x), (int)lround(b->y));
             } else if (b_is_dragged) {
                 push_out_single(b, a);
-                a->vx = b->vx * RESTITUTION;
-                a->vy = b->vy * RESTITUTION;
+                a->vx = b->vx * world->restitution;
+                a->vy = b->vy * world->restitution;
                 a->flying = 1;
                 clamp_body_bounds(a, screen_width, screen_height);
                 XMoveWindow(dpy, a->win, (int)lround(a->x - camera_x), (int)lround(a->y));
             } else {
-                resolve_collision(a, b);
+                resolve_collision(world->restitution, a, b);
                 separate_bodies(a, b);
                 clamp_body_bounds(a, screen_width, screen_height);
                 clamp_body_bounds(b, screen_width, screen_height);

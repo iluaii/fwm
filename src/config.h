@@ -17,6 +17,13 @@ typedef struct {
     double tick_rate;
 } PhysicsConfig;
 
+/* ── action argument ────────────────────────────────── */
+
+typedef union {
+    int         i;
+    const void *v;
+} Arg;
+
 /* ── binds ───────────────────────────────────────────────────────────── */
 
 /*

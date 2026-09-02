@@ -161,7 +161,7 @@ static void calm_all(Fwm *wm, const Arg *arg) {
 
 static void spawn(Fwm *wm, const Arg *arg) {
     (void)wm;
-    window_spawn(arg->v);
+    window_spawn((const char **)arg->v);
 }
 
 static void killclient(Fwm *wm, const Arg *arg) {
@@ -713,6 +713,7 @@ void fwm_init(Fwm *wm, Display *dpy) {
     wm->physics.stop_speed_threshold = cfg.physics.stop_speed_threshold;
     wm->physics.restitution = cfg.physics.restitution;
     wm->physics.gravity = cfg.physics.gravity;
+    wm->physics.tick_rate = cfg.physics.tick_rate;
 
     for (int i = 0; i < cfg.key_count; i++) {
         KeyCode code = XKeysymToKeycode(dpy, cfg.keys[i].key);
