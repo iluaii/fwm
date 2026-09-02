@@ -228,6 +228,18 @@ static void server_animate(FwmServer *server) {
         }
     }
 
+    /* An effect that has just handed a window back its live content changed
+     * what the pointer is standing on, and no motion event will say so: the
+     * hand that let go of a resize is not moving. Answered once, here, after
+     * every effect has had its tick — server_pointer_resync refuses while a
+     * button is down or a gesture owns the pointer, so this cannot cut across
+     * one. Without it the resized window kept the cleared focus it was given
+     * while it was hidden, and swallowed the next click. */
+    if (server->pointer_resync_due) {
+        server->pointer_resync_due = 0;
+        server_pointer_resync(server);
+    }
+
     // Window open animation. The client's surface is never blended: it is
     // hidden until it has content, then shown fully opaque while a cover rect
     // we draw ourselves fades out over it and the window rises into place.

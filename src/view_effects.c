@@ -796,6 +796,7 @@ void view_rubber_end(FwmView *view) {
     view->rub_w = view->rub_h = 0;
     view->rub_bw = view->rub_bh = 0;
     view_set_content_enabled(view, true);
+    view->server->pointer_resync_due = 1;
     view_update_border_geometry(view);   /* back to the client's own box */
 }
 
@@ -810,6 +811,7 @@ void view_stop_squash(FwmView *view) {
     view->squash_t = 0.0;
     view->squash_amount = 0.0;
     view_set_content_enabled(view, true);
+    view->server->pointer_resync_due = 1;
     view_update_border_geometry(view); /* back to the real box */
 }
 
@@ -983,6 +985,7 @@ void view_jelly_stop(FwmView *view) {
     view->drop_filling = 0;
     view_jelly_free(view);
     view_set_content_enabled(view, true);
+    view->server->pointer_resync_due = 1;
     if (border) view_set_border_enabled(view, 1);
     /* The window is itself again and casts again: view->jelly was what kept
      * the shadow out, and the geometry pass puts it back. */
@@ -1443,6 +1446,7 @@ void view_stop_spin(FwmView *view) {
     int border = view->spin_border;
     view_spin_release(view);
     view_set_content_enabled(view, true);
+    view->server->pointer_resync_due = 1;
     if (border) view_set_border_enabled(view, 1);
     view_update_border_geometry(view);
 }

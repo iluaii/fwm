@@ -548,6 +548,14 @@ typedef struct FwmServer {
     int ptr_node_have;                    /* was the window's node placed? */
     int ptr_node_x, ptr_node_y;           /* and where, so a window that moves
                                            * under the grab carries it along */
+    /* An effect has just handed a window its live content back, so what the
+     * pointer is over has changed with no motion to say so. Consumed once per
+     * frame (server_animate): while a window is hidden behind a picture of
+     * itself the cursor is over one of OUR buffers, the seat's pointer focus
+     * is cleared, and nothing would ever give it back to a hand that let go of
+     * a resize and did not move again — the window then ignored the next
+     * click. */
+    int pointer_resync_due;
 
     /* Display power (swayidle turning the screen off), gamma (wlsunset night
      * light) and client-requested cursor shapes. */
