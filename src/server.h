@@ -655,6 +655,14 @@ typedef struct FwmServer {
     int click_consumed; /* a press was eaten (a tab-bar click, the click that
                          * woke a blanked screen); swallow its release too, or
                          * the client sees a release it never saw a press for */
+    /* The buttons whose PRESS we handed to a client, and which therefore owe
+     * that client a release — whatever happens in between. A client with a
+     * press it never saw come up keeps its own implicit grab for good: it
+     * ignores every later click, and the only cure is restarting it. So the
+     * release is delivered from the top of the button handler, ahead of every
+     * path that eats a click (a lock, an overlay, a gesture, click_consumed).
+     * 0 marks an empty slot; no real button code is 0. */
+    uint32_t fwd_buttons[8];
 
     /* When the last physics step finished. The tick timer and the display's
      * vsync are different clocks — the timer is armed in whole milliseconds, so

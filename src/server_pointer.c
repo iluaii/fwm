@@ -577,11 +577,43 @@ int button_to_fwm(uint32_t button) {
     }
 }
 
+/* The buttons a client is owed a release for (server->fwd_buttons). */
+static void fwd_button_add(FwmServer *server, uint32_t button) {
+    for (size_t i = 0; i < sizeof(server->fwd_buttons) / sizeof(server->fwd_buttons[0]); i++) {
+        if (server->fwd_buttons[i] == button) return;
+        if (server->fwd_buttons[i] == 0) { server->fwd_buttons[i] = button; return; }
+    }
+}
+
+static bool fwd_button_take(FwmServer *server, uint32_t button) {
+    for (size_t i = 0; i < sizeof(server->fwd_buttons) / sizeof(server->fwd_buttons[0]); i++) {
+        if (server->fwd_buttons[i] == button) { server->fwd_buttons[i] = 0; return true; }
+    }
+    return false;
+}
+
 static void handle_cursor_button(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
 
     server_notify_activity(server);
+
+    /* A release that is OWED goes out first, before anything below can decide
+     * to eat this click: the screen locking mid-drag, an overlay opening under
+     * the hand, a gesture the compositor took over, a press swallowed by the
+     * tray. Each of those returns early, and every one of them used to leave
+     * the client that had been given the press believing the button was still
+     * down — which in a toolkit means an implicit grab that never ends, so the
+     * window ignores every click from then on and only a restart clears it.
+     *
+     * Only ever for a press we ourselves forwarded, and only while the seat
+     * still holds a button: a release nobody is owed is not invented here. */
+    if (event->state == WL_POINTER_BUTTON_STATE_RELEASED &&
+        fwd_button_take(server, event->button) &&
+        server->seat->pointer_state.button_count > 0) {
+        wlr_seat_pointer_notify_button(server->seat, event->time_msec,
+                                       event->button, event->state);
+    }
     /* Same rule as the keyboard's: the click that lit a blanked screen does not
      * also land on whatever happens to be under the pointer — and the release
      * that follows it is swallowed with it, like every other eaten click. */
@@ -788,14 +820,14 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
                                       fwd_mods) != NULL;
     bool should_forward = (server->interactive.action == FWM_ACTION_NONE && !(fwd_mods & FWM_MOD_LOGO) && !claimed);
 
-    /* If we sent a press to the client (e.g. they clicked the titlebar), we MUST
-     * send the release so the grab completes, even if the compositor took over
-     * the drag in the meantime. Otherwise wlr_seat's button_count stays stuck > 0.
-     * Sending one we do not owe is harmless: on a release the seat walks its own
-     * pointer_state.buttons[] and returns without touching the client if that
-     * button is not among the ones it is holding. */
-    if (should_forward || (event->state == WL_POINTER_BUTTON_STATE_RELEASED && server->seat->pointer_state.button_count > 0)) {
+    /* Presses only. The release that answers one of these was already sent at
+     * the top of this function, from the record made here — the decision below
+     * is about a press, and asking it again a moment later, of a compositor
+     * whose state has moved on, is exactly how a client ends up holding a
+     * button forever. */
+    if (event->state == WL_POINTER_BUTTON_STATE_PRESSED && should_forward) {
         wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
+        fwd_button_add(server, event->button);
     }
     
     double lx = server->cursor->x;
