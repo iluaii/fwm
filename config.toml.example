@@ -1150,7 +1150,7 @@ tap = true
 #
 # A mode is one-shot by default: the first action fires and drops you back, which
 # is what a leader key is usually for. sticky = true keeps it open until Escape,
-# for the modes you hold — nudging a tile's size a dozen times, say.
+# for the modes you hold — walking a window across the layout, say.
 #
 # `enter` is shorthand for putting "mode:<name>" in [binds]; you can bind that
 # by hand instead, and "mode:default" from anywhere returns to the root map.
@@ -1174,11 +1174,17 @@ tap = true
 #"c"     = "sun_mode"          # back on the clock
 #"0"     = "toggle_sun"
 #
-#[mode.resize]
-#enter  = "super+shift+e"
-#sticky = true              # stays open: resizing is never one keypress
+# Moving a window through the layout is the third: each press lands it one tile
+# over, and you rarely mean just one. Note what this mode is NOT — there is no
+# resize action to bind. A window's size is the layout's to decide, or the
+# hand's: drag it with the `resize` verb in [mouse] below. tile_move: moves.
+#[mode.layout]
+#enter   = "super+shift+e"
+#sticky  = true             # stays open: one press is rarely the whole move
 #"Left"  = "tile_move:l"
 #"Right" = "tile_move:r"
+#"Up"    = "tile_move:u"
+#"Down"  = "tile_move:d"
 
 # The radial menu: a ring of actions around a hub, built for a keyboard with a
 # knob. Turning the knob walks the ring, pressing it fires the petal you stopped

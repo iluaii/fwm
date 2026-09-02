@@ -882,12 +882,16 @@ enter    = "super+o"
 "c"      = "calm_all"
 "r"      = "spin_all"
 
-[mode.resize]
+[mode.layout]
 enter    = "super+shift+e"
 sticky   = true
 "h"      = "tile_move:l"
 "l"      = "tile_move:r"
 ```
+
+There is no resize action to bind. A window's size belongs to the layout, or to
+the hand — drag it with the `resize` verb in [`[mouse]`](#mouse). `tile_move:`
+moves a window through the layout; it does not change its size.
 
 While a mode is active it owns the keyboard outright: its binds fire, `Escape`
 leaves, and every other key does nothing rather than reaching the application

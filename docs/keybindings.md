@@ -99,7 +99,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `toggle_floating_all` | ...on every desktop |
 | `toggle_split` | flip the next BSP split |
 | `tile_focus:l|r|u|d` | focus the neighbouring tile — the pointer moves into it, so focus-follows-pointer does not hand the focus straight back |
-| `tile_move:l|r|u|d` | move the window inside the layout |
+| `tile_move:l|r|u|d` | move the window inside the layout — it moves the window, it does not resize it; there is no resize action, only the `resize` [mouse](configuration.md#mouse) verb |
 | `view:<0-9>` | show that desktop; asking for the one already on screen returns to the one before it (`[camera] back_and_forth`) |
 | `view:back` | that same way back, whatever desktop is on screen now |
 | `move_to:<0-9>` | send the focused window there — it flies across the strip rather than vanishing (`[camera] anim_ms`) |
