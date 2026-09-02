@@ -36,6 +36,7 @@
 #include "wallpaper.h"
 #include "group.h"
 #include "expo.h"
+#include "screenshot.h"
 #include <linux/input-event-codes.h>
 
 
@@ -241,9 +242,21 @@ void constraints_drop_unless(FwmServer *server, struct wlr_surface *surface) {
     }
 }
 
+/* The pointer handed back to the user, whoever was holding it. See server.h:
+ * the screenshot selector aims with the cursor, and a game holding it for
+ * mouse-look would leave it nothing to aim with. */
+void server_pointer_release_constraint(FwmServer *server) {
+    constraint_set_active(server, NULL);
+}
+
 static void handle_new_pointer_constraint(struct wl_listener *listener, void *data) {
     FwmServer *server = wl_container_of(listener, server, new_pointer_constraint);
     struct wlr_pointer_constraint_v1 *constraint = data;
+
+    /* Not while something is aiming with the cursor: a game whose lock was
+     * just taken away asks for it straight back, and granting it mid-selection
+     * would freeze the pointer again with the rectangle half dragged. */
+    if (screenshot_selecting(server)) return;
 
     /* Activate immediately when the pointer is already over the requesting
      * surface — which is the normal case: a game grabs the mouse on click. */

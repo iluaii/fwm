@@ -718,6 +718,11 @@ static void picker_close(FwmServer *server, bool keep_still) {
     /* Not at teardown, where the cursor is already gone. */
     if (server->cursor && server->cursor_mgr)
         wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+    /* The window under the cursor told it has the cursor again — and with it,
+     * the chance to take the pointer back: a game that was holding it for
+     * mouse-look re-locks on the enter this sends, rather than staying loose
+     * until the hand moves. */
+    server_pointer_resync(server);
 }
 
 /* The selector's own furniture, over `out`. Split out of screenshot_region
@@ -746,6 +751,14 @@ static bool picker_open(FwmServer *server, FwmOutput *out) {
 
     server->shot_picker = p;
     picker_redraw(p);
+    /* Whatever was holding the pointer lets go of it here. A fullscreen game
+     * locks the cursor for mouse-look — it does not move at all while the lock
+     * is on, so a selector opened over one would have nothing to drag a
+     * rectangle with, and photographing a game is exactly when you want one.
+     * The focus goes with it: a client told the cursor is still inside it asks
+     * for the lock straight back. Both come back at picker_close. */
+    wlr_seat_pointer_clear_focus(server->seat);
+    server_pointer_release_constraint(server);
     wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "crosshair");
     return true;
 }

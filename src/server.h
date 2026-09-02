@@ -832,6 +832,13 @@ struct wlr_surface *server_keyboard_target(FwmServer *server);
  * stationary pointer — a camera crossing to another desktop, a warp — or the
  * next click goes to whatever the pointer was over before. */
 void server_pointer_resync(FwmServer *server);
+/* Let go of whatever is holding the pointer, if anything is: a game that
+ * locked it for mouse-look, a window confining it to a region. For the
+ * overlays that aim with the cursor — the screenshot selector — since a locked
+ * pointer does not move at all and the selector would have nothing to drag a
+ * rectangle with. The constraint comes back on its own when the pointer next
+ * enters the surface that asked for it. */
+void server_pointer_release_constraint(FwmServer *server);
 /* Move the pointer into a window that was just given the keyboard, so
  * focus-follows-pointer does not take the focus straight back. A no-op when
  * the pointer is already inside it. */
