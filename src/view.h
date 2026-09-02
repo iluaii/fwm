@@ -41,11 +41,20 @@ typedef enum {
     TILE_ANIM_FLIGHT,  /* sent across the strip to another desktop */
 } FwmTileAnim;
 
+/* Where an X11 window goes while its desktop is on no monitor: far outside the
+ * X root, so nothing lands on it, and inside the 16 bits an X coordinate has —
+ * which is why this cannot be the scene's PARKED_X. See view_set_size. */
+#define XWL_PARK 30000
+
 typedef struct FwmView {
     uint32_t id; /* Unique ID matching the ID in physics */
     FwmViewType type;
     struct wlr_xdg_toplevel *xdg_toplevel;       /* NULL for X11 views */
     struct wlr_xwayland_surface *xwl_surface;    /* NULL for xdg views */
+    /* X11 only: the window is standing off the X root because its desktop is
+     * on no monitor (view_set_size). Cleared by the placement that finds it a
+     * screen again — see server_place_view. */
+    int xwl_parked;
     struct wlr_scene_tree *scene_tree;
     
     struct wl_listener map;

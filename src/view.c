@@ -27,6 +27,7 @@
 #include "foreign.h"
 #include "ipc.h"
 #include "urgent.h"
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -229,12 +230,35 @@ void view_set_size(FwmView *view, int width, int height) {
          * coords — GLFW warps the pointer to the window centre for mouse-look —
          * then aimed at nowhere and stopped responding to the mouse.
          *
-         * With the window's desktop off every monitor there is no screen
-         * position to map to. Leave the X one where it is; server_camera_settled
-         * resyncs every view once the camera stops, so it is corrected the
-         * moment the window can be seen again. */
-        double sx = view->xwl_surface->x, sy = view->xwl_surface->y;
-        server_world_to_screen(view->server, view->x, view->y, view->width, &sx, &sy);
+         * WITH THE WINDOW'S DESKTOP ON NO MONITOR there is no screen position
+         * to map to, and the X window is sent off the root instead.
+         *
+         * Leaving it where it was is what made the invisible window that takes
+         * clicks. Only the scene node was parked (PARKED_X); the X window
+         * stayed lying across whatever monitor its old coordinates named, and
+         * rootless Xwayland routes the pointer by root coordinates, in X, on
+         * its own — so the ghost took every event aimed at what was underneath
+         * it. Managed X windows are lifted over it by the restack in
+         * view_set_activated; override-redirect surfaces cannot be restacked
+         * at all (wlroots asserts), which is why Proton games and Steam's own
+         * menus were the ones left unclickable.
+         *
+         * Off the root rather than PARKED_X: X coordinates are 16-bit, and
+         * -1000000 does not survive the trip. */
+        double sx, sy;
+        if (server_world_to_screen(view->server, view->x, view->y, view->width, &sx, &sy)) {
+            view->xwl_parked = 0;
+        } else {
+            view->xwl_parked = 1;
+            /* Pulled back in for a window wide or tall enough to run off the
+             * end of the coordinate space from there: an edge past 32767 is
+             * not a place X can name. Even pulled all the way in it is still
+             * some twenty thousand pixels clear of any root. */
+            sx = XWL_PARK;
+            sy = XWL_PARK;
+            if (sx + width  > INT16_MAX) sx = INT16_MAX - width;
+            if (sy + height > INT16_MAX) sy = INT16_MAX - height;
+        }
         wlr_xwayland_surface_configure(view->xwl_surface,
             (int16_t)lround(sx), (int16_t)lround(sy),
             (uint16_t)width, (uint16_t)height);

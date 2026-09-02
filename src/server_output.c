@@ -804,6 +804,23 @@ void server_panel_to_active_output(FwmServer *server, struct wlr_scene_buffer *p
  * override-redirect surfaces use the plain node version below. */
 void server_place_view(FwmServer *server, FwmView *v, double wx, double wy) {
     if (!v || !v->scene_tree) return;
+    /* An X window standing off the root (view_set_size) comes back the moment
+     * there is a screen position to come back to. Asked here because this runs
+     * for every window every time anything moves, and asked of the same
+     * mapping view_set_size uses rather than of the frame below: a test that
+     * could say yes while that one still says no would send an X configure per
+     * frame for as long as the two disagreed. Arithmetic only — the X request
+     * happens on the one placement that finds the window a screen again.
+     *
+     * server_camera_settled sweeps every view for the same reason, but only
+     * when a camera stops; a desktop can arrive on a monitor without one
+     * moving at all (a screen plugged in, two monitors trading desktops), and
+     * a ghost that nothing ever unparked would be a window that had gone. */
+    if (v->type == FWM_VIEW_XWAYLAND && v->xwl_parked) {
+        double tx, ty;
+        if (server_world_to_screen(server, v->x, v->y, v->width, &tx, &ty))
+            view_sync_position(v);
+    }
     double shift_x, shift_y;
     FwmOutput *o = server_view_frame(server, v, wx, v->width, &shift_x, &shift_y);
     v->drawn_on = o;

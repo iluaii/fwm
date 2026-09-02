@@ -3,7 +3,6 @@
 Contents: [it will not start](#it-will-not-start) ·
 [the config did nothing](#the-config-did-nothing) · [it died](#it-died) ·
 [no sound](#no-sound) · [windows behave oddly](#windows-behave-oddly) ·
-[clicks land nowhere over a game](#clicks-land-nowhere-over-a-game-or-a-steam-menu) ·
 [monitors](#monitors) · [nested runs](#nested-runs) ·
 [debug switches](#debug-switches) · [tests](#tests)
 
@@ -112,35 +111,6 @@ actually went.
 **Everything is jittery under a spin or a drag.** `[effects] live = 0` puts
 windows under an effect back on a periodic still frame, which is the better trade
 on slower hardware. `FWM_DEBUG_EFFECTS=1` prints frame timings.
-
-## Clicks land nowhere over a game or a Steam menu
-
-A known fwm bug, diagnosed and **not fixed**. If the pointer works everywhere
-except over a Proton game or one of Steam's popup menus, this is very likely it.
-
-An X11 window is configured in screen coordinates, and a desktop that no monitor
-is showing has none to give. fwm then leaves the X window where it last was while
-parking only its scene node off-screen, so an X11 window whose desktop has
-scrolled away is invisible but still *somewhere* — usually lying across a monitor
-you are looking at. Xwayland in rootless mode routes pointer input by X's root
-coordinates, so that ghost takes the clicks meant for whatever is underneath it.
-
-Wayland clients are unaffected. Ordinary managed X11 windows are raised above the
-ghost and do not notice either. Override-redirect windows cannot be restacked
-without tripping an assertion inside wlroots, and those are exactly Proton's game
-windows and Steam's popups — so the bug looks like it only ever happens to games.
-
-It comes and goes with the camera: the ghost exists for exactly as long as its
-window's desktop is off screen.
-
-**What helps now.** Bring the desktop holding your other X11 windows back onto a
-monitor, or close them. `fwmctl windows | jq '.windows[] | select(.xwayland)'`
-lists which windows are X11 and which desktop each is on.
-
-**Not this bug** if the game itself stops taking mouse *and* keyboard and stays
-dead on its own desktop — that is the Wine focus bug, and the README's
-[Games under Wine and Proton](../README.md#games-under-wine-and-proton-exclusive-fullscreen-and-input)
-section has the registry setting for it.
 
 ## Screen sharing
 
