@@ -143,8 +143,16 @@ int parse_bind_key(const char *str, unsigned int *mod_out, xkb_keysym_t *key_out
 
     if (n == 0) return 0;
 
+    /* An unknown word in a modifier position is a typo, not a modifier — the
+     * same rule parse_mouse_key has always applied to [mouse]. Folding in a
+     * zero instead is what made "Super+q" (or "control+q", or "shft+q") a bind
+     * on the BARE key: config_binds.c reports nothing, the sheet shows no
+     * modifier, and pressing q on its own kills the window. Modifier names are
+     * lower case; the keysym after them is the only case-insensitive part. */
     for (int i = 0; i < n - 1; i++) {
-        *mod_out |= parse_mod_token(tokens[i]);
+        unsigned int m = parse_mod_token(tokens[i]);
+        if (!m) return 0;   /* caller reports it with the full bind string */
+        *mod_out |= m;
     }
 
     // Convert keysym name to xkb_keysym_t.

@@ -211,6 +211,33 @@ static void test_bad_input(void) {
     config_load(&cfg, p);
     CHECK(cfg.key_count > 0);
     config_free(&cfg);
+
+    CASE("a misspelled modifier is reported, never bound to the bare key");
+    /* The dangerous shape: an unknown word in a modifier position used to fold
+     * in as zero, so "Super+q" (capital S) or "control+w" became a bind on the
+     * bare letter — killclient on every q typed into a terminal. */
+    p = write_config(
+        "[binds]\n"
+        "\"Super+q\"   = \"killclient\"\n"
+        "\"control+w\" = \"killclient\"\n"
+        "\"super+t\"   = \"toggle_tiling\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 2);
+    CHECK_NULL(config_match_bind(&cfg, XKB_KEY_q, 0));
+    CHECK_NULL(config_match_bind(&cfg, XKB_KEY_w, 0));
+    /* Every modifier that IS spelled right still works, alone and in a chord. */
+    CHECK_NOT_NULL(config_match_bind(&cfg, XKB_KEY_t, FWM_MOD_LOGO));
+    config_free(&cfg);
+
+    p = write_config(
+        "[binds]\n"
+        "\"super+alt+ctrl+shift+F1\" = \"terminal\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_NOT_NULL(config_match_bind(&cfg, XKB_KEY_F1,
+                                     FWM_MOD_LOGO | FWM_MOD_ALT |
+                                     FWM_MOD_CTRL | FWM_MOD_SHIFT));
+    config_free(&cfg);
     drop_config();
 }
 
