@@ -263,6 +263,21 @@ static void clamp_velocity(double *vx, double *vy, double max_speed) {
     *vy *= scale;
 }
 
+/* Which column of the strip a body's middle stands in.
+ *
+ * The width is guarded because it is zero until the first monitor is measured,
+ * and a window can map before that (a client racing the backend, a headless
+ * start): dividing by it gives an infinity, and casting an infinity to int is
+ * undefined — the answer happened to land on something the clamp accepted, but
+ * only by the grace of the instruction set. */
+static int desktop_of(double centre_x, int screen_width) {
+    if (screen_width <= 0) return 0;
+    int d = (int)(centre_x / screen_width);
+    if (d < 0) d = 0;
+    if (d >= FWM_DESKTOPS) d = FWM_DESKTOPS - 1;
+    return d;
+}
+
 static void update_body_geometry(PhysicsBody *body, int x, int y, int width, int height, double mass_density) {
     body->x = x;
     body->y = y;
@@ -372,10 +387,8 @@ PhysicsBody *physics_sync_body(PhysicsWorld *world, uint32_t id, int x, int y, i
     for (int i = 0; i < world->body_count; i++) {
         if (world->bodies[i].active && world->bodies[i].id == id) {
             update_body_geometry(&world->bodies[i], x, y, width, height, world->mass_density);
-            int d = (int)((world->bodies[i].x + world->bodies[i].width / 2.0) / screen_width);
-            if (d < 0) d = 0;
-            if (d >= FWM_DESKTOPS) d = FWM_DESKTOPS - 1;
-            world->bodies[i].desktop_id = d;
+            world->bodies[i].desktop_id =
+                desktop_of(world->bodies[i].x + world->bodies[i].width / 2.0, screen_width);
             return &world->bodies[i];
         }
     }
@@ -419,10 +432,7 @@ PhysicsBody *physics_sync_body(PhysicsWorld *world, uint32_t id, int x, int y, i
     body->hp_frozen = 0.0;
     update_body_geometry(body, x, y, width, height, world->mass_density);
 
-    int d = (int)((body->x + body->width / 2.0) / screen_width);
-    if (d < 0) d = 0;
-    if (d >= FWM_DESKTOPS) d = FWM_DESKTOPS - 1;
-    body->desktop_id = d;
+    body->desktop_id = desktop_of(body->x + body->width / 2.0, screen_width);
 
     return body;
 }
@@ -1402,9 +1412,6 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
         s->svx = m->vx; s->svy = m->vy;
         s->sang = m->angle; s->sangvel = m->angvel;
 
-        int d = (int)((m->x + m->width / 2.0) / screen_width);
-        if (d < 0) d = 0;
-        if (d >= FWM_DESKTOPS) d = FWM_DESKTOPS - 1;
-        m->desktop_id = d;
+        m->desktop_id = desktop_of(m->x + m->width / 2.0, screen_width);
     }
 }
