@@ -62,6 +62,14 @@ struct wlr_seat;
 FwmClipboard *clipboard_create(struct wl_display *display, struct wlr_seat *seat);
 void clipboard_destroy(FwmClipboard *cb);
 
+/* Real user input arrived. fwm reads a client's selection into memory only
+ * once the user has taken their hands off for a moment — a paste is a keystroke
+ * or a middle click, and a read that overlaps one is a read racing the user for
+ * the client's single clipboard slot. See clipboard.c, "the wait before
+ * asking". Called from server_notify_activity, so every path that counts as
+ * activity anywhere counts here too. */
+void clipboard_note_activity(FwmClipboard *cb);
+
 /* [clipboard] persist and max_kb, live. Switching persistence off drops what is
  * being held: a setting that says "do not keep my clipboard" and then keeps the
  * last one anyway is not the setting it says it is. */

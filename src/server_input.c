@@ -20,6 +20,7 @@
 #include "bsp.h"
 #include "theme.h"
 #include "layer.h"
+#include "clipboard.h"
 #include "lock.h"
 #include "foreign.h"
 #include "ipc.h"
@@ -109,6 +110,10 @@ void server_notify_activity(FwmServer *server) {
     /* And fwm's own timers, which answer the same question with their own
      * hands: the screens it put out come back here. */
     server_idle_activity(server);
+    /* The clipboard waits for the user to be still before it reads a client's
+     * selection, because a paste is input too and the two would race for the
+     * client's one slot. This is how it learns the user is not still. */
+    clipboard_note_activity(server->clipboard);
     /* Input may set something moving (a throw, a drag, a bind), so leave the
      * idle heartbeat at once rather than waiting it out. */
     server_tick_wake(server);

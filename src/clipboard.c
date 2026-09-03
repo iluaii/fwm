@@ -24,6 +24,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <wayland-server-core.h>
@@ -81,15 +82,28 @@ struct FwmClipboard {
      * makes the first one pointless before it finishes. */
     struct ClipRead *read;
 
-    /* A read that has not been asked for yet: every source waits out
-     * READ_DELAY_MS before fwm touches it. See "the wait before asking". */
+    /* A read that has not been asked for yet: a source is not touched until
+     * the selection has stood still AND the user's hands have been off the
+     * input for a moment. See "the wait before asking". */
     struct wl_event_source *pending_timer;
     struct wlr_data_source *pending_source;
     const char             *pending_mime;   /* into TEXT_MIMES; never freed */
     struct wl_listener      pending_source_destroy;
+    double                  pending_since;  /* ms, when the selection landed */
+
+    /* When real input last arrived, fed by clipboard_note_activity. */
+    double last_activity;
 
     ClipSource *ours;   /* the source we put on the seat, while it is there */
 };
+
+/* CLOCK_MONOTONIC milliseconds. Monotonic because the two waits below are
+ * durations, and a clock that can be set backwards turns a wait into a hang. */
+static double now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+}
 
 static void xfer_finish(ClipXfer *x) {
     if (x->src) wl_event_source_remove(x->src);
@@ -310,44 +324,67 @@ static void read_start(FwmClipboard *cb, struct wlr_data_source *source,
 
 /* ── the wait before asking ──────────────────────────────────────────── */
 
-/* Asking a client for its bytes the instant it copies is asking too early.
+/* Asking a client for its bytes is asking for the one thing it can only do
+ * once at a time, so the whole question is WHEN.
  *
- * A copy is not one flavour but several — a line out of a chat window arrives
- * as text/plain AND text/html — and a Chromium-based client (Discord, anything
- * Electron, a browser) is still arranging the rest when the set_selection that
- * announced the first one lands here. Answering a read in the middle of that
- * occupies the one clipboard slot such a client has, and it never comes back:
- * every later paste in THAT application hands back whatever it cached, while
- * every other window on the seat sees the clipboard change normally. Only
- * killing the application clears it — which is a bad afternoon for whoever has
- * to work out that the compositor did it.
+ * Two ways it goes wrong, and both of them float — they depend on what the user
+ * happened to be doing in the same tenth of a second, so neither reproduces on
+ * demand and both look like "sometimes a copy just does not take".
  *
- * The same trap the image case fell into (see source_is_a_picture), reached
- * this time by a copy with no image anywhere in it. Not asking at all is no
- * longer the fix, because plain text is exactly what this module is for.
- * Asking LATER is.
+ * TOO EARLY. A copy is not one flavour but several — a line out of a chat
+ * window arrives as text/plain AND text/html — and a Chromium-based client
+ * (Discord, anything Electron, a browser) is still arranging the rest when the
+ * set_selection that announced the first one lands here. Answering a read in
+ * the middle of that occupies the one clipboard slot such a client has, and it
+ * never comes back: every later paste in THAT application hands back whatever
+ * it cached, while every other window on the seat sees the clipboard change
+ * normally. Only killing the application clears it — which is a bad afternoon
+ * for whoever has to work out that the compositor did it.
  *
- * A fifth of a second is nothing against the lifetime of the window whose text
- * we are keeping, and the wait is abandoned the moment the selection moves on
- * or the source dies — by then whatever it was about to hand over describes a
- * clipboard nobody can reach any more. Every new set_selection restarts it, so
- * what is actually waited for is the selection standing STILL for that long,
- * not a fixed delay after the first announcement.
+ * AT THE SAME TIME AS THE USER. The other one, and the one a fifth of a second
+ * of patience did nothing about: copy, then paste straight away. The paste is a
+ * receive on the same source, from another client, and it arrives while fwm is
+ * asking for its own copy. A client that serialises selection requests badly —
+ * Chromium, and every Java application through Xwayland's bridge, which turns
+ * our read into a second X ConvertSelection at the AWT clipboard owner — drops
+ * one of the two. The one that gets dropped is usually the user's, so the paste
+ * comes back empty or stale, and copying again "fixes" it because the second
+ * time round nobody is racing.
  *
- * It narrows the race; it does not end it. Nothing in the protocol says when a
- * client has finished offering flavours, so there is no moment that can be
- * waited for exactly — a machine loaded enough to push a client's own work past
- * 200ms puts the question back inside it. This is a number that fits observed
- * behaviour, not a proof.
+ * So the read waits for both to be true:
  *
- * The cost is a gap of that length where NOTHING is kept: the copy made in the
- * last 200ms of a window's life is lost, and so is the one kept before it,
- * because a new client taking the clipboard drops what was held at the moment
- * it takes it. Holding the old text across the wait instead would mean a window
- * that died in those 200ms handing back the text of a window that died before
- * it — the stale paste this module exists to not serve. The gap is the honest
- * end of that trade. */
-#define READ_DELAY_MS 200
+ *  - the selection has stood STILL for READ_DELAY_MS, which is the client
+ *    finishing its flavours; every new set_selection restarts it, so what is
+ *    waited for is stillness, not a fixed delay after the first announcement.
+ *
+ *  - no real input has arrived for READ_QUIET_MS. This is the one that closes
+ *    the second race rather than narrowing it: a paste is a keystroke or a
+ *    middle click, and fwm sees every one of them (clipboard_note_activity,
+ *    called from server_notify_activity). Hands off the keyboard means nothing
+ *    of the user's is in flight, and a read that lands in that gap is racing
+ *    nobody. The copy itself is input too, so the quiet is measured from the
+ *    Ctrl+C — and from the Ctrl+V after it, and from the one after that.
+ *
+ * Both are checked on a poll rather than one timer per condition, because the
+ * second one has no event to hang off: input pushes the target out, it does not
+ * announce when it stops.
+ *
+ * There is deliberately NO cap on the wait. A user who never stops typing never
+ * has their clipboard kept, and that is the right way round: this feature is
+ * insurance against a window closing, and asking anyway — during exactly the
+ * activity that breaks the asking — would spend the working clipboard to buy
+ * insurance on it.
+ *
+ * The remaining cost is a gap where nothing is kept: a copy made and a window
+ * closed inside it is lost, and so is what was held before, because a new
+ * client taking the clipboard drops what was held at the moment it takes it.
+ * Holding the old text across the wait instead would mean a window that died in
+ * the gap handing back the text of a window that died before it — the stale
+ * paste this module exists to not serve. The gap is the honest end of that
+ * trade, and it is now as long as the user is busy rather than a flat 200ms. */
+#define READ_DELAY_MS 200    /* the selection standing still */
+#define READ_QUIET_MS 1000   /* ...and nobody touching the input */
+#define READ_POLL_MS  100    /* how often the two are asked about */
 
 /* Forget the source that is waiting, whether it was asked yet or not. */
 static void pending_clear(FwmClipboard *cb) {
@@ -380,11 +417,29 @@ static void handle_pending_source_destroy(struct wl_listener *listener, void *da
 
 static int pending_fire(void *data) {
     FwmClipboard *cb = data;
+
+    /* Not yet: come back and ask again. Re-arming from inside the callback is
+     * the ordinary way to poll on a wl_event_loop timer. */
+    double now = now_ms();
+    if (now - cb->pending_since < READ_DELAY_MS ||
+        now - cb->last_activity < READ_QUIET_MS) {
+        wl_event_source_timer_update(cb->pending_timer, READ_POLL_MS);
+        return 0;
+    }
+
     struct wlr_data_source *source = cb->pending_source;
     const char *mime = cb->pending_mime;
+    double waited = now - cb->pending_since;
 
     pending_clear(cb);   /* one-shot: the timer and the listener go together */
-    if (source && mime) read_start(cb, source, mime);
+    if (source && mime) {
+        /* Logged because this is the one moment fwm touches somebody else's
+         * clipboard, and a report of a paste that came back empty is only
+         * worth anything next to the timestamp of this line. */
+        wlr_log(WLR_INFO, "clipboard: asking the owner for its text (%s) after %.0f ms",
+                mime, waited);
+        read_start(cb, source, mime);
+    }
     return 0;
 }
 
@@ -396,7 +451,7 @@ static void pending_schedule(FwmClipboard *cb, struct wlr_data_source *source,
     struct wl_event_source *timer =
         wl_event_loop_add_timer(cb->loop, pending_fire, cb);
     if (!timer) return;
-    if (wl_event_source_timer_update(timer, READ_DELAY_MS) < 0) {
+    if (wl_event_source_timer_update(timer, READ_POLL_MS) < 0) {
         wl_event_source_remove(timer);
         return;
     }
@@ -404,6 +459,7 @@ static void pending_schedule(FwmClipboard *cb, struct wlr_data_source *source,
     cb->pending_timer  = timer;
     cb->pending_source = source;
     cb->pending_mime   = mime;
+    cb->pending_since  = now_ms();
     cb->pending_source_destroy.notify = handle_pending_source_destroy;
     wl_signal_add(&source->events.destroy, &cb->pending_source_destroy);
 }
@@ -506,10 +562,17 @@ FwmClipboard *clipboard_create(struct wl_display *display, struct wlr_seat *seat
     cb->seat = seat;
     cb->persist = true;
     cb->max_bytes = 1024 * 1024;
+    /* Nothing has been touched yet, and a zero here would read as "input
+     * arrived at the epoch", which is quiet enough to skip the first wait. */
+    cb->last_activity = now_ms();
 
     cb->set_selection.notify = handle_set_selection;
     wl_signal_add(&seat->events.set_selection, &cb->set_selection);
     return cb;
+}
+
+void clipboard_note_activity(FwmClipboard *cb) {
+    if (cb) cb->last_activity = now_ms();
 }
 
 void clipboard_configure(FwmClipboard *cb, bool persist, size_t max_bytes) {
