@@ -562,9 +562,15 @@ FwmClipboard *clipboard_create(struct wl_display *display, struct wlr_seat *seat
     cb->seat = seat;
     cb->persist = true;
     cb->max_bytes = 1024 * 1024;
-    /* Nothing has been touched yet, and a zero here would read as "input
-     * arrived at the epoch", which is quiet enough to skip the first wait. */
-    cb->last_activity = now_ms();
+    /* The session starts QUIET, because nothing has been touched yet: the wait
+     * is for the user's hands to come off the input, and at this point they
+     * have never been on it. Stamping `now` instead said the opposite — the
+     * first second of every session read as somebody typing — and a copy made
+     * inside it was never asked for: the window could close, take its
+     * selection with it and cancel the wait before the second was up, so the
+     * text was simply lost. Backdated rather than zeroed only because a
+     * monotonic clock has no epoch worth naming. */
+    cb->last_activity = now_ms() - READ_QUIET_MS;
 
     cb->set_selection.notify = handle_set_selection;
     wl_signal_add(&seat->events.set_selection, &cb->set_selection);
