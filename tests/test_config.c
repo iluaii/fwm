@@ -238,6 +238,24 @@ static void test_bad_input(void) {
                                      FWM_MOD_LOGO | FWM_MOD_ALT |
                                      FWM_MOD_CTRL | FWM_MOD_SHIFT));
     config_free(&cfg);
+
+    CASE("[star] desktop outside the strip is reported and ignored");
+    /* Nothing downstream clamps it back: star_pull and the shadow pass compare
+     * it against a body's desktop, so an out-of-range one lights a star that
+     * pulls on nothing. */
+    p = write_config("[star]\nenabled = true\ndesktop = 42\n"
+                     "[binds]\n\"super+q\" = \"killclient\"\n");
+    config_load(&cfg, p);
+    CHECK(cfg.error_count > 0);
+    CHECK_INT(cfg.star.desktop, 0);
+    config_free(&cfg);
+
+    p = write_config("[star]\nenabled = true\ndesktop = 3\n"
+                     "[binds]\n\"super+q\" = \"killclient\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_INT(cfg.star.desktop, 3);
+    config_free(&cfg);
     drop_config();
 }
 

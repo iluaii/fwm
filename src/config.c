@@ -450,7 +450,7 @@ static void load_camera(toml_table_t *root, CameraConfig *c) {
 
 /* ── star section ────────────────────────────────────────────────────── */
 
-static void load_star(toml_table_t *root, StarConfig *c) {
+static void load_star(toml_table_t *root, StarConfig *c, FwmConfig *cfg) {
     c->enabled        = 0;   /* nothing about a desktop needs a star in it */
     c->desktop        = 0;
     c->x              = 480.0;
@@ -480,7 +480,19 @@ static void load_star(toml_table_t *root, StarConfig *c) {
     toml_datum_t e = toml_bool_in(tbl, "enabled");
     if (e.ok) c->enabled = e.u.b ? 1 : 0;
     toml_datum_t d = toml_int_in(tbl, "desktop");
-    if (d.ok) c->desktop = (int)d.u.i;
+    if (d.ok) {
+        /* Range-checked like [[rule]] and [[output]] are, because nothing
+         * downstream clamps it back. star_settle clamps a copy to place the
+         * star in the world, but star_pull and the shadow pass both ask
+         * `body->desktop_id == cfg->desktop` — so a desktop outside the strip
+         * lit a star on desktop 0 that pulled on nothing and cast no shadow,
+         * silently. */
+        if (d.u.i < 0 || d.u.i >= FWM_DESKTOPS)
+            config_report_error(cfg, "[star] desktop %lld out of range 0..%d — ignored",
+                                (long long)d.u.i, FWM_DESKTOPS - 1);
+        else
+            c->desktop = (int)d.u.i;
+    }
     LOAD_DOUBLE(tbl, "x", c->x);
     LOAD_DOUBLE(tbl, "y", c->y);
     LOAD_DOUBLE(tbl, "height", c->height);
@@ -2064,7 +2076,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_stats(NULL, cfg);
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
     load_sun(NULL, cfg);     /* likewise: a sun in the sky before anything is read */
-    load_star(NULL, &cfg->star);
+    load_star(NULL, &cfg->star, cfg);
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -2096,7 +2108,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_camera(root, &cfg->camera);
     load_decor(root, cfg);
     load_sun(root, cfg);
-    load_star(root, &cfg->star);
+    load_star(root, &cfg->star, cfg);
     load_input(root, cfg);
     load_focus(root, &cfg->focus, cfg);
     load_idle(root, cfg);
