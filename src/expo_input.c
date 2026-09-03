@@ -34,10 +34,15 @@ static ExpoItem *expo_item_at(FwmExpo *e, double lx, double ly) {
      * the same rectangle it always was.
      *
      * Later items are drawn on top, so the last match is the one the cursor is
-     * actually pointing at. */
+     * actually pointing at.
+     *
+     * A ray that misses the strip leaves all three out-parameters untouched —
+     * expo_point says so, and says the caller must treat it as "nothing
+     * there". Reading them anyway is a hit test against whatever the stack
+     * happened to hold. */
     int d;
     double wx, wy;
-    expo_point(e, lx, ly, &d, &wx, &wy);
+    if (!expo_point(e, lx, ly, &d, &wx, &wy)) return NULL;
 
     ExpoItem *hit = NULL;
     for (int i = 0; i < e->n_items; i++) {
@@ -88,7 +93,11 @@ void expo_drag_to(FwmExpo *e, double lx, double ly) {
     if (!e->drag) return;
     int d;
     double wx, wy;
-    expo_point(e, lx, ly, &d, &wx, &wy);
+    /* Off the strip — the backdrop above it, or straight through the seam —
+     * there is no world point to carry the card to. Leaving it where it is
+     * beats moving it to an uninitialised one: the hand is still holding it,
+     * and coming back over a facet picks it up again. */
+    if (!expo_point(e, lx, ly, &d, &wx, &wy)) return;
     e->drag->wx = wx - e->drag_off_x;
     e->drag->wy = wy - e->drag_off_y;
     e->drag->desktop = d;
@@ -429,10 +438,15 @@ bool expo_handle_button(FwmServer *server, uint32_t button, bool pressed,
     ExpoItem *it = expo_item_at(e, lx, ly);
     if (it && (mods & WLR_MODIFIER_LOGO)) {
         /* Super+drag moves the window, including across desktops — the reason
-         * the strip is a window manager and not a screenshot. */
+         * the strip is a window manager and not a screenshot.
+         *
+         * The card was found through this same ray, so the miss cannot happen
+         * — but the grab offset is what the whole drag is measured from, and
+         * taking it from an unwritten stack slot would put the window a screen
+         * away on the first motion. */
         int d;
         double wx, wy;
-        expo_point(e, lx, ly, &d, &wx, &wy);
+        if (!expo_point(e, lx, ly, &d, &wx, &wy)) return true;
         e->drag = it;
         e->drag_off_x = wx - it->wx;
         e->drag_off_y = wy - it->wy;
@@ -453,10 +467,14 @@ bool expo_handle_button(FwmServer *server, uint32_t button, bool pressed,
         return true;
     }
 
-    /* Empty space: go to the desktop that was clicked. */
+    /* Empty space: go to the desktop that was clicked — and a click that hit
+     * no facet at all (the backdrop above the strip, the gap between two
+     * cards on a ring) named no desktop. That used to leave `d` whatever the
+     * stack held, so clicking the empty sky closed the strip onto an arbitrary
+     * desktop; the one the strip is looking at is what Escape already means. */
     int d;
     double wx, wy;
-    expo_point(e, lx, ly, &d, &wx, &wy);
+    if (!expo_point(e, lx, ly, &d, &wx, &wy)) d = expo_view_desktop(server);
     expo_close(server, d);
     return true;
 }
