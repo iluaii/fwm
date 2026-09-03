@@ -26,7 +26,12 @@ void bsp_configure(float ratio, int force_split_h) {
 }
 
 BspNode *bsp_new_leaf(uint32_t id) {
+    /* NULL on a failed allocation, and every caller is written to leave the
+     * tree exactly as it found it. A window that cannot be tiled for want of
+     * two nodes is one untiled window; writing through the NULL is the whole
+     * layout, and with it the session. */
     BspNode *n = calloc(1, sizeof(BspNode));
+    if (!n) return NULL;
     n->id = id;
     n->ratio = 0.5f;
     return n;
@@ -54,6 +59,7 @@ void bsp_insert(BspNode **root, uint32_t focused, uint32_t new_id) {
 
     BspNode *old_leaf = bsp_new_leaf(target->id);
     BspNode *new_leaf = bsp_new_leaf(new_id);
+    if (!old_leaf || !new_leaf) { free(old_leaf); free(new_leaf); return; }
 
     old_leaf->parent = target;
     new_leaf->parent = target;
@@ -166,6 +172,7 @@ void bsp_insert_at(BspNode **root, uint32_t target, uint32_t new_id, BspSide sid
      * means and what bsp_insert has no way to say. */
     BspNode *old_leaf = bsp_new_leaf(leaf->id);
     BspNode *new_leaf = bsp_new_leaf(new_id);
+    if (!old_leaf || !new_leaf) { free(old_leaf); free(new_leaf); return; }
     old_leaf->parent = leaf;
     new_leaf->parent = leaf;
 
