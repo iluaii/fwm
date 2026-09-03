@@ -462,6 +462,30 @@ void wallpaper_layer_crop(FwmWallpaper *wp, int i, int camera_x,
         .x = shift * k, .y = 0,
         .width = screen_w * k, .height = screen_h * k,
     };
+
+    /* Held inside the card, always.
+     *
+     * The screen this box is measured in is the CALLER's, and the card was
+     * copied at the size of the monitor the wallpaper belongs to. The strip
+     * asks in the size of the world — the largest monitor — so on any smaller
+     * screen it asks for more card than there is, and a source box past the
+     * end of a texture is an assertion inside wlroots, which is the session.
+     * Two monitors of different sizes with a wallpaper on the smaller one was
+     * enough: opening the strip there took the compositor down.
+     *
+     * Clamping is not a patch over the arithmetic, it IS the answer: the card
+     * holds exactly one screen of that monitor's wallpaper, so "all of it" is
+     * precisely what a card of that desktop should show. Where the two sizes
+     * agree — one monitor, or the largest one — nothing changes. */
+    struct wlr_buffer *b = wallpaper_layer_buffer(wp, i);
+    if (b && b->width > 0 && b->height > 0) {
+        if (out->width  > b->width)  out->width  = b->width;
+        if (out->height > b->height) out->height = b->height;
+        if (out->x + out->width  > b->width)  out->x = b->width  - out->width;
+        if (out->y + out->height > b->height) out->y = b->height - out->height;
+        if (out->x < 0) out->x = 0;
+        if (out->y < 0) out->y = 0;
+    }
 }
 
 void wallpaper_fade_in(FwmWallpaper *wp, double duration_ms) {

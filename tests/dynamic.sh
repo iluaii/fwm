@@ -147,6 +147,39 @@ mkdir -p "$CLIPHOME/.config/fwm"
 : > "$CLIPHOME/.config/fwm/config.toml"
 clipboard_env="HOME=$CLIPHOME XDG_STATE_HOME=$LOGDIR/state-clipboard"
 
+# `outputs` reconfigures screens and then opens the desktop strip, and that
+# pair only bites when there is a WALLPAPER to draw the strip's cards from: the
+# card is a copy of the wallpaper at the size of the monitor it belongs to,
+# while the strip asks for it in the size of the WORLD — the largest monitor.
+# Change a mode, or stand on the smaller screen, and the strip asked for more
+# card than exists, which is an assertion inside wlroots and the session gone.
+# So this one gets a HOME of its own with an image in it, for the same reason
+# `threads` gets a video: without it the scenario runs the interesting path and
+# proves nothing. Its own state directory too, so the picker's saved choice
+# cannot reach in from the developer's own — which is exactly how this hid, CI
+# having no wallpaper anywhere.
+#
+# The image is written here rather than shipped: sixteen pixels of gradient is
+# smaller as base64 than as a file in the tree, and the wallpaper is scaled to
+# cover the screen whatever its size. Without base64 the scenario still runs,
+# just without this cover.
+OUTHOME="$LOGDIR/home-outputs"
+mkdir -p "$OUTHOME/.config/fwm"
+: > "$OUTHOME/.config/fwm/config.toml"
+if command -v base64 >/dev/null 2>&1 && base64 -d </dev/null >/dev/null 2>&1; then
+    base64 -d > "$OUTHOME/wallpaper.png" <<'PNG'
+iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAQ0lEQVR42mNgYGAQEBBQUFAwMDBw
+cHAICAhISEgoKChoaGiYMGHCggULNmzYcODAgQsXLjx48ODDhw8MoxpGNQxfDQBupWgQanZnuwAA
+AABJRU5ErkJggg==
+PNG
+    cat > "$OUTHOME/.config/fwm/config.toml" <<TOML
+[[wallpaper]]
+path = "$OUTHOME/wallpaper.png"
+fit  = "cover"
+TOML
+fi
+outputs_env="HOME=$OUTHOME XDG_STATE_HOME=$LOGDIR/state-outputs $outputs_env"
+
 # `settings` WRITES a state file — the overlay `fwmctl save` keeps — so it gets
 # a state directory of its own under the logs. The developer's own
 # ~/.local/state/fwm is never read and never written by the suite.
