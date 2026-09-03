@@ -296,9 +296,16 @@ FwmGroup *group_bar_at(FwmServer *server, double lx, double ly, int *tab_index) 
     wl_list_for_each(g, &server->groups, link) {
         struct FwmView *v = group_active_view(g);
         if (!v || !g->tabbar) continue;
-        double x, y_unused;
-        if (!server_world_to_screen(server, v->x, v->y, v->width, &x, &y_unused)) continue;
-        double y = v->y - GROUP_TAB_H;
+        /* Both ends of the hit test in LAYOUT coordinates, which is what the
+         * cursor is given in. The y used to be taken straight off v->y — a
+         * world coordinate — so the strip was hit-tested at the wrong height by
+         * exactly the monitor's box.y: on any screen not standing at the top of
+         * the layout the tabs could not be clicked at all, and during a
+         * desktop-swap animation (render_dy/swap_dy) they moved out from under
+         * the cursor on every screen. */
+        double x, y_top;
+        if (!server_world_to_screen(server, v->x, v->y, v->width, &x, &y_top)) continue;
+        double y = y_top - GROUP_TAB_H;
         double w = g->drawn_w;
         if (lx < x || lx >= x + w || ly < y || ly >= y + GROUP_TAB_H) continue;
         if (tab_index) {
