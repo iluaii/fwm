@@ -225,17 +225,19 @@ struct Group {
 };
 
 static const struct { const char *prefix, *label; } group_kinds[] = {
-    { "view:",          "switch desktop" },
-    { "move_camera:",   "scroll camera" },
-    { "tile_focus:",    "focus tile" },
-    { "tile_move:",     "move tile" },
-    { "move_to:",       "send window over" },
-    { "move_to_view:",  "send window, follow" },
-    { "swap_desktop:",  "trade desktops" },
-    { "focus_output:",  "go to monitor" },
-    { "volume:",        "volume" },
-    { "sun_azimuth:",   "turn the sun" },
-    { "sun_elevation:", "raise the sun" },
+    { "view:",                "switch desktop" },
+    { "move_camera:",         "scroll camera" },
+    { "tile_focus:",          "focus tile" },
+    { "tile_move:",           "move tile" },
+    { "move_to:",             "send window over" },
+    { "move_to_view:",        "send window, follow" },
+    { "move_to_output_view:", "send window to screen, follow" },
+    { "move_to_output:",      "send window to screen" },
+    { "swap_desktop:",        "trade desktops" },
+    { "focus_output:",        "go to monitor" },
+    { "volume:",              "volume" },
+    { "sun_azimuth:",         "turn the sun" },
+    { "sun_elevation:",       "raise the sun" },
 };
 
 /* Returns true when the bind belonged to a group and has been folded in. */

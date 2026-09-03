@@ -92,6 +92,14 @@ int action_is_known(const char *a) {
     };
     static const char *prefixes[] = {
         "spawn:", "view:", "move_camera:", "tile_focus:", "tile_move:",
+        /* The screen pair as well as the desktop pair. Missing here, these two
+         * were rejected at load time as unknown actions while
+         * server_dispatch_action implemented them and config.toml.example
+         * shipped nine binds using them: every one of those reported an error
+         * and did nothing when pressed. Nothing shadows anything — the colon
+         * makes "move_to:" and "move_to_output:" disjoint prefixes — so the
+         * order here is only for reading. */
+        "move_to_output_view:", "move_to_output:",
         "move_to:", "move_to_view:", "swap_desktop:", "global:",
         "sun_azimuth:", "sun_elevation:", "set:", "volume:", "focus_output:",
         FWM_MODE_ACTION, NULL
