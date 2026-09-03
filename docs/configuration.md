@@ -202,10 +202,17 @@ hardness  = 3.0        # ... but hits like a brick
 | `hardness` | Multiplies the damage this window **deals**. Separate from `toughness` so a heavy soft thing does not have to be a hammer. |
 | `nocollide` | Other windows pass through it; it still cannot leave the play area. |
 | `pin` | Immovable: physics never moves it. |
-| `desktop` | 0..9, where the window opens. |
+| `desktop` | 0..9, where the window opens. Applies to the application's own windows; a dialog opens on its parent's desktop instead, wherever the parent has been moved to since. |
 
 There is deliberately no per-window "float": tiling on fwm is a property of the
 **desktop**, so such a rule could not be honoured.
+
+A window that names a parent — an xdg-shell `set_parent`, an X11
+`WM_TRANSIENT_FOR`, which is to say a dialog, a file chooser, a preferences
+window — is placed by that parent and by nothing else: it opens on the parent's
+desktop, centred on it, floating above it and colliding with nothing. `desktop`
+above cannot pull it away, and neither can the tiling layout: a dialog is not a
+tile.
 
 ## tiling
 

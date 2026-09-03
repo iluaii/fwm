@@ -1217,6 +1217,11 @@ typedef struct {
  *
  * There is deliberately no per-window "float": tiling on fwm is a property of
  * the DESKTOP, not of the window, so such a rule could not be honoured.
+ *
+ * `desktop` names where the APPLICATION opens, and stops there: a window that
+ * names a parent goes to the parent's desktop instead, wherever that window has
+ * been carried since (see view_parent). A rule is not a chain on every dialog
+ * the application will ever open.
  */
 
 #define CONFIG_MAX_RULES 64

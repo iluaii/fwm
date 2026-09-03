@@ -1422,6 +1422,7 @@ dir = "~/Pictures"
 #[[rule]]
 #app_id  = "^(Slack|discord)$"
 #desktop = 3               # chat always opens on desktop 4
+#                          # (its dialogs follow the window, not this line)
 #
 #[[rule]]
 #title = "^Picture-in-Picture$"

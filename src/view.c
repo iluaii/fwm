@@ -209,6 +209,35 @@ pid_t view_pid(FwmView *view) {
     return view->xwl_surface ? (pid_t)view->xwl_surface->pid : 0;
 }
 
+/* The window this one is a child OF, or NULL when it stands on its own.
+ *
+ * Both shells say it, in their own spelling: xdg-shell has set_parent, X11 has
+ * WM_TRANSIENT_FOR, and both mean the same thing — this is a dialog, a file
+ * chooser, an "are you sure", and it belongs to that window over there. fwm
+ * used to read neither, so a dialog was just another window: it opened wherever
+ * a [[rule]] or the camera said, which is not necessarily where its parent is,
+ * and the physics then shoved it off its own parent into a corner.
+ *
+ * Matched by pointer against the views we know, so an unmapped or already
+ * destroyed parent is simply no parent, and a client naming itself (X clients
+ * do) falls out too. Linear over the window list, which is short and is walked
+ * once, when the child maps. */
+FwmView *view_parent(FwmView *view) {
+    struct wlr_xdg_toplevel *xdg_parent = NULL;
+    struct wlr_xwayland_surface *xwl_parent = NULL;
+    if (view->type == FWM_VIEW_XDG) xdg_parent = view->xdg_toplevel->parent;
+    else                            xwl_parent = view->xwl_surface->parent;
+    if (!xdg_parent && !xwl_parent) return NULL;
+
+    FwmView *v;
+    wl_list_for_each(v, &view->server->views, link) {
+        if (v == view) continue;
+        if (xdg_parent && v->type == FWM_VIEW_XDG      && v->xdg_toplevel == xdg_parent) return v;
+        if (xwl_parent && v->type == FWM_VIEW_XWAYLAND && v->xwl_surface  == xwl_parent) return v;
+    }
+    return NULL;
+}
+
 /* X11's closest equivalent of an app id is the WM_CLASS class. */
 const char *view_app_id(FwmView *view) {
     return view->type == FWM_VIEW_XDG ? view->xdg_toplevel->app_id
@@ -1024,13 +1053,40 @@ void view_map(FwmView *view) {
                                        view_app_id(view), view_title(view), &rule);
 
     int current_desktop = server_active_desktop(view->server);
-    if (have_rule && rule.desktop >= 0) current_desktop = rule.desktop;
+    int placed = 0;   /* somebody has already said where this window goes */
+
+    /* Above everything else: the window this one is a dialog OF. A [[rule]]
+     * naming a desktop is about an APPLICATION arriving — it is not a chain
+     * fastening every dialog that application will ever open to the desktop the
+     * user has since carried the window off. Open the editor on 4, drag it to
+     * 5, and its file chooser used to appear on 4, alone, out of sight. A
+     * parent is the whole answer: the dialog goes wherever the parent is now.
+     *
+     * The parent's desktop is read off the physics body rather than the view,
+     * because the body is what actually owns which desktop a window is on. */
+    FwmView *parent = view_parent(view);
+    PhysicsBody *parent_body = parent
+        ? physics_find_body(&view->server->physics, parent->id) : NULL;
+    if (parent_body) {
+        current_desktop = parent_body->desktop_id;
+        placed = 1;
+    }
+
+    if (!placed && have_rule && rule.desktop >= 0) {
+        current_desktop = rule.desktop;
+        placed = 1;
+    }
 
     /* A window from an application this session relaunched goes back where it
      * was. Checked after [[rule]] so that a rule the user wrote by hand still
-     * wins over what merely happened to be true last time. */
+     * wins over what merely happened to be true last time. Claimed either way,
+     * so that a dialog placed by its parent above does not leave the entry
+     * lying around for the next window to pick up. */
     int restored = session_claim_desktop(view->server, view);
-    if (restored >= 0 && !(have_rule && rule.desktop >= 0)) current_desktop = restored;
+    if (restored >= 0 && !placed) {
+        current_desktop = restored;
+        placed = 1;
+    }
 
     /* Otherwise: the desktop this application was STARTED from, which is not
      * always the one in front of you by the time it finally has a window to
@@ -1038,7 +1094,7 @@ void view_map(FwmView *view) {
      * loaded used to arrive on 1. Below [[rule]] and below the session, both of
      * which are somebody having said outright where this window goes; above the
      * camera, which is only where you happen to be standing. See launched.h. */
-    if (!(have_rule && rule.desktop >= 0) && restored < 0) {
+    if (!placed) {
         int asked = launched_desktop(view->server, view);
         if (asked >= 0) current_desktop = asked;
     }
@@ -1054,7 +1110,27 @@ void view_map(FwmView *view) {
     int cx = current_desktop * view->server->screen_width
            + (mon_w - initial_w) / 2;
     int cy = (mon_h - initial_h) / 2;
-    
+
+    /* A dialog is centred on the window it belongs to instead — that is where
+     * the eye already is, and it is the placement every desktop has made since
+     * dialogs existed. Clamped to the monitor afterwards, because a parent
+     * standing near an edge would otherwise push its dialog half off the
+     * screen; the clamp is skipped when the dialog is simply bigger than the
+     * screen, where there is no position that helps. */
+    if (parent_body) {
+        cx = parent->x + (parent->width  - initial_w) / 2;
+        cy = parent->y + (parent->height - initial_h) / 2;
+        int x0 = current_desktop * view->server->screen_width;
+        if (initial_w < mon_w) {
+            if (cx < x0)                    cx = x0;
+            if (cx > x0 + mon_w - initial_w) cx = x0 + mon_w - initial_w;
+        }
+        if (initial_h < mon_h) {
+            if (cy < 0)                     cy = 0;
+            if (cy > mon_h - initial_h)     cy = mon_h - initial_h;
+        }
+    }
+
     view->x = cx;
     view->y = cy;
     
@@ -1095,6 +1171,19 @@ void view_map(FwmView *view) {
             body->rule_toughness = rule.toughness;
             body->rule_hardness  = rule.hardness;
         }
+
+        /* A dialog stands OVER the window it belongs to, not among the others.
+         * It was just centred on its parent, and both halves of fwm would take
+         * that away again within a frame — the physics by shoving apart two
+         * windows that overlap, the tiler below by cutting it a slot of its
+         * own. So it floats and it does not collide, which is all "on top of
+         * the thing it belongs to" needs to mean. Set after the rule block, so
+         * that this is what a dialog IS rather than something a rule about the
+         * application happened to say. */
+        if (parent_body) {
+            body->floating   = 1;
+            body->no_collide = 1;
+        }
     }
     
     /* Publish to external panels BEFORE focusing, so the activation state that
@@ -1103,7 +1192,10 @@ void view_map(FwmView *view) {
     server_focus_view(view->server, view);
 
     int desktop = body ? body->desktop_id : current_desktop;
-    if (view->server->desktop_mode[desktop] == DESKTOP_MODE_TILING) {
+    if (parent_body) {
+        /* Already placed, over its parent: no layout slot, and nothing to push
+         * it out of the way of. See the body block above. */
+    } else if (view->server->desktop_mode[desktop] == DESKTOP_MODE_TILING) {
         /* Beside the window under the hand, on the edge of it the hand is
          * nearest — the same rule a carried window is put down by. See
          * server_tile_insert; [tiling] spawn_cursor turns it off, and then the

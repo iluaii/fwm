@@ -468,6 +468,10 @@ void view_unmap(FwmView *view);
 struct wlr_surface *view_surface(FwmView *view);
 const char *view_title(FwmView *view);
 const char *view_app_id(FwmView *view);
+/* The window this one is a dialog of (xdg set_parent / X11 WM_TRANSIENT_FOR),
+ * or NULL. A child window opens on its parent's desktop, centred on it, and
+ * floats above it rather than joining the layout — see view_map. */
+FwmView *view_parent(FwmView *view);
 /* The client's process, for anything that has to look the application up in
  * /proc (session restore, mass-from-RAM). 0 when it cannot be determined. */
 pid_t view_pid(FwmView *view);
