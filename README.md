@@ -111,6 +111,28 @@ https://github.com/user-attachments/assets/11c329e5-b3ff-4c3a-a595-ebc31ae2a2d4
 </tr>
 </table>
 
+## Try it without leaving your session
+
+fwm runs nested — as a window inside the compositor you are already using — so
+looking at it costs nothing and nobody has to log out of anything:
+
+```sh
+WLR_BACKENDS=wayland ./build/fwm   # inside a Wayland session
+WLR_BACKENDS=x11 ./build/fwm       # inside an X11 one
+```
+
+On Arch that is the whole thing from nothing, by way of [`fwm-git`](https://aur.archlinux.org/packages/fwm-git):
+
+```sh
+yay -S fwm-git && WLR_BACKENDS=wayland fwm
+```
+
+Throw the windows around with the mouse. Keybinds are the one thing a nested run
+cannot show you — the outer compositor claims them first — and everything else
+behaves. [Getting started](docs/getting-started.md) has the real session when the
+window stops being enough, and [Build](#build-manual) has it without a package
+manager.
+
 ## Features
 
 ### Physics
