@@ -139,6 +139,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `show_hints` | the key hints overlay |
 | `show_errors` | the config-problem panel (same as clicking the ⚠ pill) |
 | `wallpaper_picker` | the wallpaper picker |
+| `wallpaper_reroll` | a new generated wallpaper, cross-faded in (only when `[wallpaper_gen]` is what is on screen) |
 | `screenshot` | the whole monitor under the pointer, as a PNG on the clipboard |
 | `screenshot_region` | dim the screen, drag a rectangle out, copy that; Escape cancels |
 | `reload_config` | reload `config.toml`, discarding every `fwmctl set` |

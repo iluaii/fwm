@@ -1215,7 +1215,9 @@ static void output_build_wallpaper(FwmOutput *out) {
         wallpaper_destroy(out->wallpaper);
         out->wallpaper = NULL;
     }
-    if (server->config.wallpaper_count <= 0) return;
+    /* No early return on an empty [[wallpaper]] list any more: that is exactly
+     * the case wallpaper_create draws a landscape for. It answers NULL when
+     * the generator is off too, so there is still nothing to check here. */
     out->wallpaper = wallpaper_create(server->layer_background, &server->config,
                                       out->wlr_output->name,
                                       out->box.width, out->box.height);

@@ -1411,6 +1411,12 @@ typedef struct {
      * recolours the UI. Empty = sample the first layer, as before. */
     char            palette_output[64];
 
+    /* [wallpaper_gen] enabled — whether fwm draws itself a landscape when
+     * nothing else has said what the desktop looks like. Off goes back to a
+     * black background. It cannot override anything: one [[wallpaper]] layer,
+     * or one image picked at runtime, and the generator never runs. */
+    int             wallpaper_gen;
+
     /* [wallpaper_picker] dir — where the built-in picker looks for images.
      * "~" is expanded at load. */
     char            wallpaper_dir[512];

@@ -77,7 +77,8 @@ void config_report_error(FwmConfig *cfg, const char *fmt, ...) {
 int action_is_known(const char *a) {
     static const char *exact[] = {
         "killclient", "toggle_tiling", "toggle_split", "EXIT", "show_hints",
-        "show_errors", "reload_config", "wallpaper_picker", "group_toggle", "group_next",
+        "show_errors", "reload_config", "wallpaper_picker", "wallpaper_reroll",
+        "group_toggle", "group_next",
         "group_prev", "group_add", "cycle_gravity", "pin_window",
         "toggle_nocollide", "toggle_nocollide_all", "toggle_tiling_all",
         "toggle_floating", "toggle_floating_all",
@@ -1564,6 +1565,20 @@ static void load_wallpaper(toml_table_t *root, FwmConfig *cfg) {
     cfg->wallpapers      = NULL;
     cfg->wallpaper_count = 0;
 
+    /* On, because the alternative on a machine with no config yet is a black
+     * screen that reads as a failed start — which is precisely the machine
+     * this matters most on. NULL root is that machine: called from the
+     * preamble of config_load so the default survives the paths that never
+     * reach a file, exactly as [sun] and [star] do. */
+    cfg->wallpaper_gen = 1;
+    if (!root) return;
+
+    toml_table_t *gen = toml_table_in(root, "wallpaper_gen");
+    if (gen) {
+        toml_datum_t d = toml_bool_in(gen, "enabled");
+        if (d.ok) cfg->wallpaper_gen = d.u.b;
+    }
+
     toml_array_t *arr = toml_array_in(root, "wallpaper");
     if (!arr) return;
 
@@ -2077,6 +2092,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
     load_sun(NULL, cfg);     /* likewise: a sun in the sky before anything is read */
     load_star(NULL, &cfg->star, cfg);
+    load_wallpaper(NULL, cfg); /* and a wallpaper under them, for the same reason */
 
     FILE *f = fopen(path, "r");
     if (!f) {

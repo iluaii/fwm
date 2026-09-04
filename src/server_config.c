@@ -37,6 +37,7 @@
 #include "ui/launcher.h"
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
+#include "wpgen.h"
 #include "grass.h"
 #include "group.h"
 
@@ -661,6 +662,31 @@ void server_set_wallpaper(FwmServer *server, const char *path) {
     else           wlr_log(WLR_INFO, "wallpaper set to %s", path);
 }
 
+void server_reroll_wallpaper(FwmServer *server) {
+    if (server->config.wallpaper_count > 0) {
+        wlr_log(WLR_INFO, "wallpaper: nothing to reroll — a [[wallpaper]] layer "
+                          "or an image picked at runtime is what is on screen");
+        return;
+    }
+    if (!server->config.wallpaper_gen) {
+        wlr_log(WLR_INFO, "wallpaper: nothing to reroll — [wallpaper_gen] enabled "
+                          "is off, so the desktop has no wallpaper at all");
+        return;
+    }
+
+    /* A new landscape for the whole session, not for one screen: every monitor
+     * builds from the one process seed, so they all have to be rebuilt
+     * together or two screens end up in different worlds. NULL asks
+     * wallpaper_rebuild_showing for exactly that — every output, no filter. */
+    wpgen_reseed();
+    wallpaper_rebuild_showing(server, NULL);
+
+    /* The palette came out of the seed that has just been replaced. */
+    theme_build(&server->config);
+    ipc_emit_palette(server->ipc);
+    server_request_tray_redraw(server);
+}
+
 void server_apply_physics_config(FwmServer *server) {
     const PhysicsConfig *pc = &server->config.physics;
 
@@ -769,14 +795,17 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
                 wallpaper_destroy(out->wallpaper);
                 out->wallpaper = NULL;
             }
-            if (server->config.wallpaper_count > 0) {
-                out->wallpaper = wallpaper_create(server->layer_background, &server->config,
-                                                  out->wlr_output->name,
-                                                  out->box.width, out->box.height);
-                if (out->wallpaper) {
-                    wallpaper_set_origin(out->wallpaper, out->box.x, out->box.y);
-                    wallpaper_update(out->wallpaper, out->camera_x);
-                }
+            /* Unconditionally, because "no [[wallpaper]]" is a wallpaper now:
+             * a reload that deletes the last layer has to end up with the
+             * generated landscape rather than with a black screen, and one
+             * that turns [wallpaper_gen] off has to end up with the black
+             * screen. wallpaper_create decides which. */
+            out->wallpaper = wallpaper_create(server->layer_background, &server->config,
+                                              out->wlr_output->name,
+                                              out->box.width, out->box.height);
+            if (out->wallpaper) {
+                wallpaper_set_origin(out->wallpaper, out->box.x, out->box.y);
+                wallpaper_update(out->wallpaper, out->camera_x);
             }
             if (out->grass) grass_raise(out->grass);
         }

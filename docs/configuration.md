@@ -23,7 +23,8 @@ Contents: [physics](#physics) · [per-desktop physics](#per-desktop-physics) ·
 [decor](#decor) · [glass](#glass) · [input](#input) · [focus](#focus) · [idle](#idle) ·
 [clipboard](#clipboard) · [battery](#battery) · [effects](#effects) ·
 [session](#session) · [binds](#binds) · [modes](#modes) · [mouse](#mouse) ·
-[gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_picker](#wallpaper_picker) ·
+[gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_gen](#wallpaper_gen) ·
+[wallpaper_picker](#wallpaper_picker) ·
 [cava](#cava) · [grass](#grass) · [sound](#sound) · [volume](#volume) ·
 [mixer](#mixer) · [output](#output)
 
@@ -1115,6 +1116,52 @@ actually showing, so an accent lifted from a bright picture never lands on the
 dark one next door. What is not tied to a screen — the launcher, the ring, the
 OSD, and what `fwmctl theme` prints — opens where the hand is and takes the
 palette of the monitor the pointer is on.
+
+## wallpaper_gen
+
+```toml
+[wallpaper_gen]
+enabled = true
+```
+
+What the desktop looks like when nothing else has said. fwm draws itself a
+layered horizon — a sky, a glow where `[sun]` puts the light, and two to four
+ranges receding into haze — sized to each screen and panning over the desktops
+like any other wallpaper. It exists because a compositor whose first frame is
+black looks broken rather than empty.
+
+The seed decides the composition and not merely the palette: how many ranges
+there are, how much of the frame is sky, how they are spaced under the horizon,
+whether the land is rolling dunes or jagged alps and how tall it stands, how
+far the distance is lost to haze, what the sky is doing, whether the sun's own
+disc is above the skyline, and whether the nearest layer is land or a sheet of
+water with the light broken up on it. At night — which is the sun's call, not
+the seed's, so the wallpaper never contradicts the shadows the windows cast —
+there are stars.
+
+fwm's badge is always in the picture. Where a seed put a body in the sky, the
+badge is that body: it stands where the light is, glows, and is cut by the
+skyline like anything else at that distance. Where a seed left the sky empty,
+the badge is drawn small and faint in the top corner instead. The corner one is
+part of the picture rather than pinned to the glass, so it travels with the sky
+as the desktops go by — the sky layer has the least parallax of any of them, so
+the drift is slight.
+
+It is a floor, not a default: one `[[wallpaper]]` layer, or one image chosen in
+the picker, and the generator never runs. `enabled = false` goes back to black.
+
+Everything about the picture comes from one 64-bit seed drawn at every start
+and never written down — the same seed for every monitor, so two screens side
+by side show one landscape, and the same seed after a hotplug, so plugging a
+screen in does not silently redraw the desktop. It cannot be pinned to the
+config. What it can be is rerolled: the `wallpaper_reroll` action draws a new
+one and cross-fades into it over `[decor] wallpaper_fade_ms`, which is the
+answer to a landscape you do not like, since there is no way back to one you
+did. The seed is logged at start if you want to know which one you had.
+
+With `color_source = "wallpaper"` the palette follows the generated picture, so
+the accent is somewhere new at every login. Nothing is sampled here — the
+generator hands the theme the colours it chose out of its own table.
 
 ## wallpaper_picker
 

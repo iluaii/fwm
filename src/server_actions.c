@@ -563,6 +563,8 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         launcher_toggle_wallpapers(server->launcher);
         launcher_grab_sync(server, was_open);
         ipc_emit_ui(server->ipc, "wallpaper_picker", launcher_is_open(server->launcher));
+    } else if (strcmp(action, "wallpaper_reroll") == 0) {
+        server_reroll_wallpaper(server);
     } else if (strcmp(action, "reload_config") == 0) {
         server_reload_config(server);
     } else if (strcmp(action, "show_errors") == 0) {

@@ -931,7 +931,8 @@ tap = true
 #                 calm_all, cycle_gravity, toggle_tray,
 #                 spin_window, spin_all,
 #                 show_hints, show_errors, modes_menu, reload_config,
-#                 wallpaper_picker, launcher, expo, toggle_wrap, EXIT
+#                 wallpaper_picker, wallpaper_reroll, launcher, expo,
+#                 toggle_wrap, EXIT
 # screenshots:    screenshot, screenshot_region
 # monitors:       output_off, toggle_internal_output, outputs_on,
 #                 focus_output:1 .. focus_output:9
@@ -1372,6 +1373,36 @@ tap = true
 #"swipe4+left"  = "move_to_view:prev"
 #"swipe4+right" = "move_to_view:next"
 #"pinch3+in"    = "calm_all"
+
+# The wallpaper fwm draws for itself when nothing else has said what the desktop
+# looks like: a layered horizon, generated from a seed drawn fresh at every
+# start and panning over the desktops like any other wallpaper.
+#
+# The seed decides the whole picture and not just its colours — how many ranges
+# there are (two to four), how high the horizon sits and how the ranges are
+# spaced under it, whether the land is dunes or alps and how tall it stands,
+# how far the distance is buried in haze, what the sky is doing, whether the
+# sun's own disc is up, and whether the nearest layer is land or water.
+#
+# fwm's badge is always somewhere in it: standing in the sky as the light where
+# the seed put a body there, and small and faint in the top corner where it
+# did not.
+#
+# It is a floor, not a default. One [[wallpaper]] layer, or one image chosen in
+# the picker, and this never runs. `enabled = false` goes back to a black
+# background.
+#
+# The seed is never written down and cannot be pinned: a landscape lasts for a
+# session and the next login is somewhere else. It IS logged at start, and the
+# `wallpaper_reroll` action draws a new one and cross-fades into it (see
+# [decor] wallpaper_fade_ms) — which is the answer to a picture you do not
+# like, since there is no way to go back to one you did.
+#
+# With `color_source = "wallpaper"` the palette follows it, so the accent moves
+# with every login. Nothing is sampled: the generator hands over the colours it
+# chose.
+[wallpaper_gen]
+enabled = true
 
 # Built-in wallpaper picker: which folder to browse (flat, no recursion).
 # The pick is remembered in ~/.local/state/fwm/wallpaper and overrides the

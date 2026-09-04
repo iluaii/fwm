@@ -83,6 +83,10 @@ static const ConfigOption config_option_table[] = {
     { "decor.inactive_opacity",         CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.inactive_opacity),          0.0,     1.0,    "how much of itself an unfocused window keeps" },
     { "decor.dim_ms",                   CFG_OPT_DOUBLE, offsetof(FwmConfig, decor.dim_ms),                    0.0, 10000.0,    "how long the unfocused dim takes, ms" },
 
+    /* The generated wallpaper. Live, and worth being live: turning it off is
+     * how you see what your own desktop looks like with nothing on it. */
+    { "wallpaper_gen.enabled",          CFG_OPT_INT,    offsetof(FwmConfig, wallpaper_gen),                   0.0,     1.0,    "1 = draw a landscape when no wallpaper is configured" },
+
     /* The frost under fwm's own panels. `fill` takes over from the two decor
      * opacities above while the glass is on — see [glass] in config.h. */
     { "glass.enabled",                  CFG_OPT_INT,    offsetof(FwmConfig, glass.enabled),                   0.0,     1.0,    "1 = fwm's panels stand on frosted glass" },

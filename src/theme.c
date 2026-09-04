@@ -13,6 +13,7 @@
  */
 
 #include "theme.h"
+#include "wpgen.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -361,21 +362,13 @@ static int sample_wallpaper(const char *path, struct Sampled *out) {
 
 /* ── build ───────────────────────────────────────────────────────────── */
 
-/* One wallpaper's palette: `base` tinted by what the image is made of. Falls
- * back to `base` untouched — and says so through the config diagnostics —
- * when there is no colour in the file to derive from. */
-static void theme_derive(FwmConfig *cfg, const FwmTheme *base, const char *path,
-                         FwmTheme *out) {
-    *out = *base;
-
-    struct Sampled s = {0};
-    if (!sample_wallpaper(path, &s)) {
-        config_report_error(cfg, "[decor] color_source = \"wallpaper\": \"%s\" has no "
-                                 "colour to derive from (unreadable or greyscale) — "
-                                 "keeping config colours",
-                            path);
-        return;
-    }
+/* Turn what was sampled — a cast to tint toward, and maybe an accent — into a
+ * palette, over whatever `out` already holds. Split out of theme_derive so the
+ * generated wallpaper can reach the same arithmetic without a file to sample:
+ * the two differ only in where the numbers came from, and that difference has
+ * no business being duplicated down here. */
+static void theme_apply_sampled(FwmConfig *cfg, const struct Sampled *sp, FwmTheme *out) {
+    const struct Sampled s = *sp;
 
     /* Tint: pull the near-black islands toward the wallpaper's cast. Value is
      * pinned low and saturation capped, so the fill stays dark whatever the
@@ -408,6 +401,54 @@ static void theme_derive(FwmConfig *cfg, const FwmTheme *base, const char *path,
     }
 }
 
+/* One wallpaper's palette: `base` tinted by what the image is made of. Falls
+ * back to `base` untouched — and says so through the config diagnostics —
+ * when there is no colour in the file to derive from. */
+static void theme_derive(FwmConfig *cfg, const FwmTheme *base, const char *path,
+                         FwmTheme *out) {
+    *out = *base;
+
+    struct Sampled s = {0};
+    if (!sample_wallpaper(path, &s)) {
+        config_report_error(cfg, "[decor] color_source = \"wallpaper\": \"%s\" has no "
+                                 "colour to derive from (unreadable or greyscale) — "
+                                 "keeping config colours",
+                            path);
+        return;
+    }
+    theme_apply_sampled(cfg, &s, out);
+}
+
+/* The same palette, for the wallpaper fwm generated for itself.
+ *
+ * Nothing is sampled: the generator picked these colours out of a table and
+ * still has them, so reading them back out of its own pixels with gdk-pixbuf
+ * would be a slower way to learn a number we were told. What does have to
+ * happen here is the normalisation — an accent has to clear a band to stay
+ * legible against a dark island — because that is theme.c's policy, and the
+ * hue-binning path above applies exactly the same clamps to a photograph. */
+static void theme_derive_generated(FwmConfig *cfg, const FwmTheme *base, FwmTheme *out) {
+    *out = *base;
+
+    WpgenWorld world;
+    wpgen_world(cfg, &world);
+
+    double cast[2], accent[3];
+    wpgen_palette(&world, cast, accent);
+
+    struct Sampled s = {0};
+    s.mean_h = cast[0];
+    s.mean_s = cast[1];
+    if (accent[1] < 0.55) accent[1] = 0.55;
+    if (accent[1] > 0.92) accent[1] = 0.92;
+    if (accent[2] < 0.78) accent[2] = 0.78;
+    if (accent[2] > 1.00) accent[2] = 1.00;
+    hsv_to_rgb(accent[0], accent[1], accent[2], s.accent);
+    s.have_accent = 1;
+
+    theme_apply_sampled(cfg, &s, out);
+}
+
 void theme_build(FwmConfig *cfg) {
     FwmTheme t = theme_base;
 
@@ -426,6 +467,17 @@ void theme_build(FwmConfig *cfg) {
     }
 
     if (cfg->wallpaper_count <= 0) {
+        /* There is still a wallpaper — fwm drew it — and it is one landscape
+         * across every monitor, so it fills the un-named slot that a screen
+         * with nothing of its own already falls back to. */
+        if (cfg->wallpaper_gen) {
+            struct ThemeSlot *slot = &theme_slots[theme_slot_count++];
+            slot->output[0] = '\0';
+            theme_derive_generated(cfg, &t, &slot->theme);
+            theme_live = theme_for_output(cfg->palette_output);
+            theme_gen++;
+            return;
+        }
         config_report_error(cfg, "[decor] color_source = \"wallpaper\" but no "
                                  "[[wallpaper]] is configured — keeping config colours");
         theme_live = &theme_fallback;

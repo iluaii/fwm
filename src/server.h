@@ -1103,6 +1103,11 @@ int server_knob_step(FwmServer *server, int dir);
  * further parallax layers keep their images. */
 void server_set_wallpaper(FwmServer *server, const char *path);
 
+/* Draw a new seed for the generated wallpaper and rebuild every screen from
+ * it, cross-fading as the picker does. Does nothing when a real wallpaper is
+ * configured — there is nothing generated to reroll. */
+void server_reroll_wallpaper(FwmServer *server);
+
 /* Run `cmd` detached, through a shell, and return the pid of the process that
  * will actually run it (-1 if it could not be started). The pid is what
  * launched_note() needs to put the resulting window where it was asked for; a

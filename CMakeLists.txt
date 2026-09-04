@@ -124,6 +124,7 @@ set(SOURCES
     src/blur.c
     src/glass.c
     src/wallpaper.c
+    src/wpgen.c
     src/video.c
     src/audio.c
     src/cava.c
@@ -434,7 +435,7 @@ if(FWM_TESTS)
     # reaches ffmpeg and wlroots only because a video wallpaper is sampled the
     # same way a picture is; nothing here needs a display.
     add_executable(test_theme tests/test_theme.c
-        src/theme.c src/video.c src/ui/cairo_overlay.c
+        src/theme.c src/wpgen.c src/sun.c src/video.c src/ui/cairo_overlay.c
         src/config.c src/config_binds.c src/config_set.c src/toml.c)
     target_include_directories(test_theme PRIVATE src tests
         ${GDK_PIXBUF_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS} ${CAIRO_INCLUDE_DIRS}
