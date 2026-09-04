@@ -287,6 +287,39 @@ void server_pointer_resync(FwmServer *server) {
     pointer_update_focus(server, server->cursor->x, server->cursor->y, msec);
 }
 
+/* A point inside `view` that `view` itself answers for.
+ *
+ * The middle is where a hand belongs and is almost always the window's own —
+ * but a window is not necessarily the topmost thing over its own centre. A
+ * dialog kept above its parent sits exactly there, and the hand put down on it
+ * is standing on the dialog: focus follows the pointer, so the keyboard the
+ * keybind had just moved to the parent came straight back to the dialog, and
+ * the border flicked between the two on every try. So the centre is offered
+ * first and then a ring just inside the edges and corners, which is where a
+ * window whose middle is covered is still its own.
+ *
+ * False when there is nowhere on it the hand could stand — something covers it
+ * whole — and then the pointer is better left where it is than moved onto
+ * another window. */
+static bool warp_point(FwmServer *server, FwmView *view, double sx, double sy,
+                       double *wx, double *wy) {
+    static const double ring[][2] = {
+        {0.50, 0.50},
+        {0.50, 0.06}, {0.50, 0.94}, {0.06, 0.50}, {0.94, 0.50},
+        {0.06, 0.06}, {0.94, 0.06}, {0.06, 0.94}, {0.94, 0.94},
+    };
+    for (size_t i = 0; i < sizeof(ring) / sizeof(ring[0]); i++) {
+        double x = sx + view->width  * ring[i][0];
+        double y = sy + view->height * ring[i][1];
+        struct wlr_surface *surface = NULL;
+        double ox, oy;
+        if (view_at(server, x, y, &surface, &ox, &oy) != view) continue;
+        *wx = x; *wy = y;
+        return true;
+    }
+    return false;
+}
+
 /* Put the pointer inside a window the keyboard was just handed to.
  *
  * Under focus-follows-pointer a focus the pointer disagrees with lasts exactly
@@ -296,8 +329,10 @@ void server_pointer_resync(FwmServer *server) {
  * "which window am I in" is answered by where the pointer stands, so moving
  * the focus IS moving the pointer.
  *
- * Not when the pointer is already inside the window: a focus that lands where
- * the hand already is must not shove it to the middle of anything. */
+ * Not when the pointer is already on the window: a focus that lands where the
+ * hand already is must not shove it to the middle of anything. On the window,
+ * not merely in its rectangle — the two differ exactly where this matters, a
+ * dialog over its parent being inside the parent and not the parent. */
 void server_warp_to_view(FwmServer *server, struct FwmView *view) {
     if (!server->cursor || !view || !view->scene_tree) return;
     if (view->width <= 0 || view->height <= 0) return;
@@ -305,11 +340,14 @@ void server_warp_to_view(FwmServer *server, struct FwmView *view) {
     double sx, sy;
     if (!server_world_to_screen(server, view->x, view->y, view->width, &sx, &sy)) return;
 
-    double cx = server->cursor->x, cy = server->cursor->y;
-    if (cx >= sx && cx < sx + view->width && cy >= sy && cy < sy + view->height) return;
+    struct wlr_surface *surface = NULL;
+    double ox, oy;
+    if (view_at(server, server->cursor->x, server->cursor->y, &surface, &ox, &oy) == view) return;
 
-    wlr_cursor_warp(server->cursor, NULL,
-                    sx + view->width / 2.0, sy + view->height / 2.0);
+    double wx, wy;
+    if (!warp_point(server, view, sx, sy, &wx, &wy)) return;
+
+    wlr_cursor_warp(server->cursor, NULL, wx, wy);
     /* A warp is not a motion event, so nothing else would tell the window it
      * now has the cursor. */
     server_pointer_resync(server);
