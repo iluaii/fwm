@@ -97,6 +97,10 @@ struct FwmWallpaper {
     struct WallpaperRT *layers;
     int count;
     int pan_range; /* camera_x span mapped to a full-slack traversal (all desktops) */
+    /* The monitor this set belongs to. Kept because a panning layer's buffer is
+     * WIDER than that, and the difference is what has to be cropped away rather
+     * than left hanging over the neighbouring screen — see wallpaper_update. */
+    int screen_w, screen_h;
     /* Where this set sits in layout coordinates. A wallpaper belongs to one
      * monitor, and the layers are built from 0,0 like everything screen-sized,
      * so the monitor's own position is added here on the way to the scene. */
@@ -220,6 +224,8 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
     // span to a full-slack pan so a pan layer scrolls from its left edge on
     // desktop 0 to its right edge on the last desktop.
     wp->pan_range = 9 * screen_w;
+    wp->screen_w  = screen_w;
+    wp->screen_h  = screen_h;
 
     for (int i = 0; i < cfg->wallpaper_count; i++) {
         const WallpaperLayer *layer = &cfg->wallpapers[i];
@@ -346,6 +352,8 @@ FwmWallpaper *wallpaper_create(struct wlr_scene_tree *parent, const FwmConfig *c
             int idx = wp->count++;
             wp->layers[idx].buffer = buf;
             wp->layers[idx].slack  = buf_w - screen_w;
+            if (buf_w > screen_w)
+                wlr_scene_buffer_set_dest_size(buf, screen_w, screen_h);
 
             /* The strip's copy, drawn from the image still in hand — decoding
              * it again later would cost a stall on the frame the strip opens. */
@@ -398,8 +406,35 @@ void wallpaper_update(FwmWallpaper *wp, int camera_x) {
     for (int i = 0; i < wp->count; i++) {
         struct WallpaperRT *l = &wp->layers[i];
         int shift = (int)lround(l->slack * t);
-        wlr_scene_node_set_position(&l->buffer->node,
-                                    wp->origin_x - shift, wp->origin_y);
+
+        /* Panned by CROPPING, not by sliding the node left.
+         *
+         * Sliding was right on one monitor and quietly wrong on two. A pan
+         * layer's buffer is wider than the screen by its slack, the scene
+         * clips a node to nothing but the layout, and a monitor draws whatever
+         * overlaps its box — so the left screen's layers reached across the
+         * seam and were painted on the right screen too, over the top of the
+         * wallpaper that screen had built for itself. Which of the two won the
+         * overlap was down to which set had been built last.
+         *
+         * It stayed hidden for as long as every layer happened to be
+         * screen-width: `cover` and `contain` have no slack, and an image
+         * picked for a monitor with no [[wallpaper]] block of its own is
+         * created as `cover`.
+         *
+         * The node now stays on its own screen at its own size (dest_size, set
+         * when the layer was built) and this picks which screenful of the
+         * buffer is sampled. Same picture, same travel, nothing over the
+         * seam — and less overdraw, since each output samples one screen
+         * instead of the whole width. */
+        if (l->slack > 0 && wp->screen_w > 0 && wp->screen_h > 0) {
+            struct wlr_fbox src = {
+                .x = shift, .y = 0,
+                .width = wp->screen_w, .height = wp->screen_h,
+            };
+            wlr_scene_buffer_set_source_box(l->buffer, &src);
+        }
+        wlr_scene_node_set_position(&l->buffer->node, wp->origin_x, wp->origin_y);
     }
 }
 
