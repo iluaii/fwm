@@ -1833,6 +1833,8 @@ static void load_outputs(toml_table_t *root, FwmConfig *cfg) {
         o->desktop = -1;
         o->enabled = 1;
         o->transform = -1;
+        o->adaptive_sync = -1;
+        o->allow_tearing = -1;
 
         toml_datum_t name = toml_string_in(tbl, "name");
         if (!name.ok) {
@@ -1903,6 +1905,15 @@ static void load_outputs(toml_table_t *root, FwmConfig *cfg) {
             else
                 o->scale = scale.u.d;
         }
+
+        /* Both are asked of the hardware rather than of fwm, so like `mode`
+         * they cannot be checked here: no monitor has been seen yet. A screen
+         * that cannot do either says so when the compositor tries. */
+        toml_datum_t vrr = toml_bool_in(tbl, "adaptive_sync");
+        if (vrr.ok) o->adaptive_sync = vrr.u.b ? 1 : 0;
+
+        toml_datum_t tear = toml_bool_in(tbl, "allow_tearing");
+        if (tear.ok) o->allow_tearing = tear.u.b ? 1 : 0;
 
         toml_datum_t tr = toml_string_in(tbl, "transform");
         if (tr.ok) {

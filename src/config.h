@@ -1262,6 +1262,20 @@ typedef struct {
     int    mode_refresh;   /* mHz; 0 = any refresh at that size */
     double scale;          /* 0 = leave alone */
     int    transform;      /* -1 = leave alone; else a wl_output_transform */
+
+    /* Variable refresh rate, and whether a fullscreen client may tear. Both
+     * -1 for "leave alone", which is not the same as 0: a monitor the backend
+     * brought up with adaptive sync already on is left that way by an entry
+     * that only moves it.
+     *
+     * They are two halves of the same question — how a frame reaches this
+     * screen — and they answer it in opposite directions. VRR holds the frame
+     * back until the display is ready for it and shows it whole. Tearing gives
+     * up on whole frames and swaps mid-scanout, so the newest one is on the
+     * glass a refresh sooner. A monitor that can do VRR wants VRR; tearing is
+     * for the fixed-refresh panel that cannot. */
+    int    adaptive_sync;  /* -1 leave alone, 0 off, 1 on */
+    int    allow_tearing;  /* -1 leave alone, 0 off, 1 on */
 } ConfigOutput;
 
 /* "1920x1080" or "1920x1080@59.94", the wlr-randr spelling. The refresh is

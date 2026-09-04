@@ -458,9 +458,38 @@ back_and_forth = true
 #   scale     = 1.5             # HiDPI factor
 #   transform = "90"            # normal, 90, 180, 270, flipped, flipped-90, ...
 #
+# `adaptive_sync` and `allow_tearing` are the other half of how a monitor is
+# driven: not what it shows, but when. They answer the same question — a frame
+# is ready before the display wants it, now what — in opposite directions, and
+# which one is yours depends on the panel in front of you.
+#
+#   adaptive_sync = true    # VRR / FreeSync / G-Sync: the DISPLAY waits for the
+#                           # frame instead of the frame waiting for the display.
+#                           # Whole frames, no seam, and the latency goes anyway.
+#                           # This is the right answer when the monitor has it;
+#                           # a screen that does not is told so and left alone,
+#                           # without taking the rest of the entry down with it.
+#
+#   allow_tearing = true    # for the fixed-refresh panel that does not. A
+#                           # fullscreen client may then have its frame put on
+#                           # the glass the moment it is drawn, mid-scanout: the
+#                           # top of the screen is still the old frame, the
+#                           # bottom is the new one, and the seam between them
+#                           # is visible whenever the image moves. Worth it to a
+#                           # competitive player and to nobody else, which is
+#                           # why it is off until asked for.
+#
+# Tearing is never taken, only permitted. Three things have to agree: this
+# monitor allows it, the window is REALLY fullscreen (fake fullscreen keeps the
+# tray, and the seam would run through it), and the client itself asked through
+# tearing-control-v1 — which games do through Mesa when they are run without
+# vsync. Nothing else on the desktop can tear, ever. If the driver cannot do an
+# async flip it simply refuses, and that frame arrives whole at the next refresh.
+#
 # At runtime: `fwmctl outputs` shows every screen and every mode it offers, and
 # `fwmctl output <name> mode=... scale=... transform=... position=X,Y
-# desktop=N enabled=on|off` changes one — the same settings as here, applied
+# desktop=N enabled=on|off adaptive_sync=on|off|toggle
+# allow_tearing=on|off|toggle` changes one — the same settings as here, applied
 # through the same code, and undone by the next reload. `output_off` puts out
 # the screen the pointer is on, `toggle_internal_output` the built-in panel, and
 # `outputs_on` brings them all back. Closing the lid turns the panel off by
@@ -480,6 +509,12 @@ back_and_forth = true
 #   x       = 1366
 #   y       = 0
 #   desktop = 1
+#
+#   [[output]]
+#   name          = "DP-1"   # the one games are played on
+#   mode          = "2560x1440@165"
+#   adaptive_sync = true     # if the panel has it, this is the whole answer
+#   allow_tearing = true     # and if it has not, this is the other one
 
 # What an app is allowed to do when it asks to be raised (xdg-activation):
 # a link opening in an already-running browser, a chat client jumping to a

@@ -208,10 +208,34 @@ $ fwmctl output HDMI-A-1 mode=2560x1440@144 scale=1.25 position=0,0 desktop=3
 ```
 
 Keys: `mode=WxH[@Hz]`, `scale=`, `transform=normal|90|180|270|flipped|flipped-90|…`,
-`position=X,Y`, `desktop=0-9`, `enabled=on|off`. Every token is parsed before any
-of them is applied — a typo in the third setting must not leave a screen halfway
-through the other two, which matters most here because a monitor mid-change may be
-showing nothing readable. The last lit screen cannot be turned off.
+`position=X,Y`, `desktop=0-9`, `enabled=on|off`, `adaptive_sync=on|off|toggle`
+(also spelled `vrr=`), `allow_tearing=on|off|toggle`. Every token is parsed before
+any of them is applied — a typo in the third setting must not leave a screen
+halfway through the other two, which matters most here because a monitor
+mid-change may be showing nothing readable. The last lit screen cannot be turned
+off.
+
+### Adaptive sync and tearing
+
+The two of them are the same question — a frame is ready before the display
+wants it — answered in opposite directions. See
+[Configuration](configuration.md#when-a-frame-reaches-the-screen) for which one
+belongs to which panel.
+
+```console
+$ fwmctl outputs | jq -r '.outputs[] | "\(.name) vrr=\(.adaptive_sync) can=\(.adaptive_sync_supported) tear=\(.allow_tearing)"'
+eDP-1 vrr=false can=false tear=false
+DP-1 vrr=true can=true tear=false
+
+$ fwmctl output DP-1 adaptive_sync=on      # if the panel has it, this is the answer
+$ fwmctl output HDMI-A-1 allow_tearing=on  # and this is the other one, if it has not
+```
+
+`adaptive_sync` is asked of the driver and can be refused; the reply says so in
+those words rather than as a generic rejection, and `adaptive_sync_supported`
+in `outputs` is how a script tells "off" from "cannot". `allow_tearing` is fwm's
+own and always takes — it is permission, not an instruction, and a frame only
+tears when a real-fullscreen client asks for one through `tearing-control-v1`.
 
 Like `set`, this is for the session: `[[output]]` in the config file has the last
 word on reload.

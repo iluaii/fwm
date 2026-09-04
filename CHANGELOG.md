@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+### When a frame reaches the screen
+
+Two settings, both per monitor, answering the same question in opposite
+directions: a frame is finished before the display is ready for it, now what.
+
+- **Adaptive sync.** `[[output]] adaptive_sync = true`, or `fwmctl output DP-1
+  adaptive_sync=on`. The display waits for the frame rather than the frame
+  waiting for the display, so it arrives early and arrives whole; where a panel
+  has this, there is nothing else to think about.
+
+  It is asked of the driver and can be refused, so `fwmctl outputs` now reports
+  both what a screen is doing and whether it could do anything else —
+  `adaptive_sync` beside `adaptive_sync_supported`, which is how a script tells
+  "off" from "cannot". A config entry asking for it on a screen without it loses
+  that line and keeps the rest of itself: a file written for a desktop is
+  carried to a laptop, and one line about VRR must not cost that laptop its
+  resolution as well. `fwmctl` still refuses the whole command — one typed at a
+  screen that is right there should refuse rather than half-obey.
+
+- **Tearing, for the fixed-refresh panels that have no VRR.** `[[output]]
+  allow_tearing = true`, and fwm serves `tearing-control-v1` so that a client
+  can ask in the first place. A frame then goes on the glass the moment it is
+  drawn, in the middle of the display drawing the one before it: the top of the
+  screen is the old frame, the bottom is the new one, and up to a whole refresh
+  of latency is gone. So is the guarantee that a moving image holds together,
+  which is the trade, and it is one competitive players make and nobody else
+  does.
+
+  Permission, never an instruction. Three things have to agree before anything
+  tears: the monitor allows it, the window is **really** fullscreen rather than
+  fake — the seam would otherwise run through fwm's own strip — and the client
+  requested it itself, which is what a game does by way of Mesa when it is run
+  without vsync. Nothing else on the desktop can tear, ever. A driver that
+  cannot do an async page flip refuses the commit, and that frame arrives whole
+  one refresh later, which is the picture everyone was getting before.
+
 ## 0.6.0
 
 Two days on top of 0.5.0, cut for the last thing in it: a window closing beside

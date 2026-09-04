@@ -1359,17 +1359,52 @@ the screens already there, and takes the lowest free desktop.
 
 ```toml
 [[output]]
-name      = "HDMI-A-1"      # as fwm logs it at startup
-mode      = "1920x1080@60"  # refresh optional
-scale     = 1.5
-transform = "90"            # normal|90|180|270|flipped|flipped-90|...
-x         = 1366            # top-left in layout coordinates; both or neither
-y         = 0
-desktop   = 3
-enabled   = true
+name          = "HDMI-A-1"      # as fwm logs it at startup
+mode          = "1920x1080@60"  # refresh optional
+scale         = 1.5
+transform     = "90"            # normal|90|180|270|flipped|flipped-90|...
+x             = 1366            # top-left in layout coordinates; both or neither
+y             = 0
+desktop       = 3
+enabled       = true
+adaptive_sync = true            # VRR, if the panel has it
+allow_tearing = true            # and this if it has not
 ```
 
 Every field except `name` is optional, and leaving one out means "as the backend
 brought it up" rather than any value fwm could pick — an entry that only moves a
 screen must not also force a resolution on it. `fwmctl outputs` lists the names
 and every mode each screen offers; `fwmctl output` changes one live.
+
+### When a frame reaches the screen
+
+The last two fields are not about what a monitor shows but about when, and they
+answer the same question in opposite directions: a frame is finished before the
+display is ready for it, now what.
+
+**`adaptive_sync`** — VRR, sold as FreeSync and G-Sync. The display waits for
+the frame rather than the frame waiting for the display, so it arrives early and
+arrives whole. When a monitor has this, it is the entire answer and the other
+field is not needed. A screen that does not have it says so in the log and keeps
+the rest of its entry: a file written for a desktop is carried to a laptop, and
+a line about VRR must not cost that laptop its resolution.
+
+**`allow_tearing`** — for the fixed-refresh panel that has no VRR. It permits a
+fullscreen client's frame to be put on the glass the moment it is drawn, in the
+middle of the display drawing the previous one: above the seam is the old frame,
+below it the new one. Up to a full refresh of latency goes, and a horizontal
+tear appears whenever the image moves. Competitive players want this trade and
+nobody else does, which is why it is off until asked for.
+
+Tearing is permitted, never taken. Three things have to agree before a frame
+tears:
+
+1. the monitor allows it,
+2. the window is **really** fullscreen — fake fullscreen stops at the tray, and
+   the seam would run through fwm's own panel,
+3. the client asked for it itself, through `tearing-control-v1`. Games do, by
+   way of Mesa, when they are run without vsync.
+
+Nothing else on the desktop can ever tear. If the driver cannot do an async page
+flip it refuses the commit, and that frame arrives whole one refresh later —
+there is nothing to configure for that and nothing to notice.

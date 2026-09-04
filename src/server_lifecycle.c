@@ -77,6 +77,7 @@
 #include <wlr/types/wlr_output_power_management_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_tearing_control_v1.h>
 #include <wlr/render/color.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
 #include <wlr/types/wlr_relative_pointer_v1.h>
@@ -701,6 +702,13 @@ bool server_init(FwmServer *server, bool debug) {
         wlr_scene_set_gamma_control_manager_v1(server->scene, server->gamma_control);
     }
     server->cursor_shape = wlr_cursor_shape_manager_v1_create(server->wl_display, 1);
+
+    /* Lets a client — in practice a game, through Mesa's Vulkan WSI when it is
+     * running without vsync — ask for its frames to be shown the instant they
+     * are ready rather than at the next refresh. Advertising the global costs
+     * nothing and promises nothing: the hint is only ever acted on for a
+     * real-fullscreen window on a monitor whose allow_tearing is set. */
+    server->tearing_control = wlr_tearing_control_manager_v1_create(server->wl_display, 1);
 
     server->idle_notifier = wlr_idle_notifier_v1_create(server->wl_display);
     server->idle_inhibit  = wlr_idle_inhibit_v1_create(server->wl_display);

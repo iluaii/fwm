@@ -196,6 +196,19 @@ typedef struct FwmOutput {
      * one screen leaves the other one working. */
     int hide_world;
 
+    /* This screen may show a fullscreen client a torn frame — half the old
+     * buffer above the seam, half the new one below — when that client has
+     * asked for one through tearing-control-v1.
+     *
+     * Off by default and per monitor, because it is a trade nobody should be
+     * signed up to without asking: a frame that does not wait for the display
+     * arrives up to a whole refresh sooner, which is what a competitive player
+     * is after, and the price is a visible horizontal seam whenever the image
+     * moves. Only a real-fullscreen window is ever allowed it — the seam would
+     * otherwise cross the tray, the wallpaper and every other window on the
+     * desktop, none of which asked for anything. */
+    int allow_tearing;
+
     struct wl_listener frame;
     struct wl_listener destroy;
 } FwmOutput;
@@ -564,6 +577,14 @@ typedef struct FwmServer {
     struct wlr_gamma_control_manager_v1 *gamma_control;
     struct wlr_cursor_shape_manager_v1 *cursor_shape;
     struct wl_listener cursor_shape_request;
+
+    /* tearing-control-v1: how a client says it would rather have the frame
+     * early and torn than whole and late. Holding the manager is all fwm needs
+     * — the hint is asked of it per frame, per surface, in
+     * handle_output_frame, and only a monitor with allow_tearing set listens
+     * to the answer. NULL if the global could not be created, which is not
+     * fatal: every client then gets what it gets today. */
+    struct wlr_tearing_control_manager_v1 *tearing_control;
 
     /* Which clients arrived through a sandbox, and thus never see the
      * privileged globals; see sandbox.h. */
@@ -951,6 +972,14 @@ typedef struct {
     int    transform;       /* enum wl_output_transform */
     int    have_pos;
     int    x, y;            /* top-left in layout coordinates */
+    /* How frames reach this screen. adaptive_sync is committed to the hardware
+     * alongside the mode; allow_tearing is fwm's own policy and touches no
+     * commit — it only says whether a fullscreen client asking to tear is
+     * believed. See FwmOutput.allow_tearing. */
+    int    have_adaptive_sync;
+    int    adaptive_sync;   /* 0 off, 1 on */
+    int    have_allow_tearing;
+    int    allow_tearing;   /* 0 off, 1 on */
 } FwmOutputSetup;
 
 /* Apply a setup to one monitor, atomically: the whole thing is tested against

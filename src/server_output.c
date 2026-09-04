@@ -75,6 +75,7 @@
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_tearing_control_v1.h>
 #include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -385,6 +386,37 @@ static void server_animate(FwmServer *server) {
 
 }
 
+/* Whether this monitor's next frame may tear.
+ *
+ * Three things have to agree, and the order is the cheapest test first: the
+ * screen was told it may (allow_tearing, off by default), there is a REAL
+ * fullscreen window on the desktop it is showing, and that window's own surface
+ * has asked for it through tearing-control-v1.
+ *
+ * Real fullscreen and not fake, because fake stops short of the tray and the
+ * seam would run through fwm's own panel. And the window's own request rather
+ * than the focused window's, because the hint belongs to a surface: a game
+ * running without vsync says so itself through Mesa, and nothing else on the
+ * desktop has agreed to be cut in half. */
+static bool output_wants_tearing(FwmOutput *out) {
+    FwmServer *server = out->server;
+    if (!out->allow_tearing || !server->tearing_control) return false;
+
+    FwmView *v;
+    wl_list_for_each(v, &server->views, link) {
+        if (!v->fs_real) continue;
+        PhysicsBody *b = physics_find_body(&server->physics, v->id);
+        if (!b || !b->fullscreen || b->desktop_id != out->desktop) continue;
+
+        struct wlr_surface *surface = view_surface(v);
+        if (!surface) return false;
+        return wlr_tearing_control_manager_v1_surface_hint_from_surface(
+                   server->tearing_control, surface) ==
+               WP_TEARING_CONTROL_V1_PRESENTATION_HINT_ASYNC;
+    }
+    return false;
+}
+
 static void handle_output_frame(struct wl_listener *listener, void *data) {
     FwmOutput *output = wl_container_of(listener, output, frame);
     struct wlr_scene_output *scene_output = wlr_scene_get_scene_output(output->server->scene, output->wlr_output);
@@ -402,7 +434,31 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
     /* And the frost under fwm's own panels, last of all: it photographs the
      * desktop, so everything that moves this frame has to have moved. */
     glass_tick(output);
-    wlr_scene_output_commit(scene_output, NULL);
+
+    if (!output_wants_tearing(output)) {
+        wlr_scene_output_commit(scene_output, NULL);
+    } else if (wlr_scene_output_needs_frame(scene_output)) {
+        /* The scene's own commit has nowhere to put "and tear this one", so
+         * for this case alone the state is built and committed by hand. The
+         * guard above is what wlr_scene_output_commit does for itself: with
+         * nothing to draw there is nothing to flip, torn or otherwise.
+         *
+         * The backend is allowed to say no — an atomic driver without async
+         * flips, a commit carrying more than a buffer, a mode change in the
+         * same breath — and it says so by failing the commit rather than by
+         * asking first. So the fallback is the same frame everyone else gets,
+         * one refresh later. */
+        struct wlr_output_state state;
+        wlr_output_state_init(&state);
+        if (wlr_scene_output_build_state(scene_output, &state, NULL)) {
+            state.tearing_page_flip = true;
+            if (!wlr_output_commit_state(output->wlr_output, &state)) {
+                state.tearing_page_flip = false;
+                wlr_output_commit_state(output->wlr_output, &state);
+            }
+        }
+        wlr_output_state_finish(&state);
+    }
 
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -1691,6 +1747,14 @@ FwmOutputSetup server_output_setup_from_config(const ConfigOutput *cfg) {
     if (cfg->scale > 0.0)    { s.have_scale = 1;     s.scale = cfg->scale; }
     if (cfg->transform >= 0) { s.have_transform = 1; s.transform = cfg->transform; }
     if (cfg->have_pos)       { s.have_pos = 1;       s.x = cfg->x; s.y = cfg->y; }
+    if (cfg->adaptive_sync >= 0) {
+        s.have_adaptive_sync = 1;
+        s.adaptive_sync = cfg->adaptive_sync;
+    }
+    if (cfg->allow_tearing >= 0) {
+        s.have_allow_tearing = 1;
+        s.allow_tearing = cfg->allow_tearing;
+    }
     return s;
 }
 
@@ -1703,13 +1767,22 @@ bool server_output_apply_setup(FwmServer *server, FwmOutput *out,
     if (!out || !s) FAIL("no such monitor");
 
     struct wlr_output *wlr_output = out->wlr_output;
-    bool commit = s->have_mode || s->have_scale || s->have_transform;
+    bool commit = s->have_mode || s->have_scale || s->have_transform ||
+                  s->have_adaptive_sync;
 
     /* A dark monitor is out of the layout and running no mode at all; the
      * commit below would either fail or quietly light it back up, and neither
      * is what the caller asked for. */
     if (commit && !out->enabled)
-        FAIL("%s is off — turn it on before setting a mode", wlr_output->name);
+        FAIL("%s is off — turn it on first", wlr_output->name);
+
+    /* Adaptive sync is asked of the driver and the panel, and a screen without
+     * it should say so in those words. Left to the commit it would come back as
+     * the generic "rejected the change", which reads like a bad value rather
+     * than hardware that simply cannot. Only turning it ON can fail this way:
+     * off is what a screen that has never heard of it is already doing. */
+    if (s->have_adaptive_sync && s->adaptive_sync && !wlr_output->adaptive_sync_supported)
+        FAIL("%s does not support adaptive sync", wlr_output->name);
 
     if (commit) {
         struct wlr_output_state state;
@@ -1734,6 +1807,8 @@ bool server_output_apply_setup(FwmServer *server, FwmOutput *out,
         if (s->have_scale)     wlr_output_state_set_scale(&state, (float)s->scale);
         if (s->have_transform) wlr_output_state_set_transform(&state,
                                    (enum wl_output_transform)s->transform);
+        if (s->have_adaptive_sync)
+            wlr_output_state_set_adaptive_sync_enabled(&state, s->adaptive_sync != 0);
 
         bool ok = wlr_output_test_state(wlr_output, &state) &&
                   wlr_output_commit_state(wlr_output, &state);
@@ -1747,11 +1822,20 @@ bool server_output_apply_setup(FwmServer *server, FwmOutput *out,
             return false;
         }
 
-        wlr_log(WLR_INFO, "output %s: now %dx%d@%.2f%s, scale %.2f, transform %s",
+        wlr_log(WLR_INFO, "output %s: now %dx%d@%.2f%s, scale %.2f, transform %s, "
+                          "adaptive sync %s",
                 wlr_output->name, wlr_output->width, wlr_output->height,
                 wlr_output->refresh / 1000.0, custom ? " (custom mode)" : "",
-                wlr_output->scale, config_transform_name(wlr_output->transform));
+                wlr_output->scale, config_transform_name(wlr_output->transform),
+                wlr_output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED
+                    ? "on" : "off");
     }
+
+    /* Not a commit and not the hardware's business: fwm keeps this one and
+     * reads it when it builds a frame. A monitor that is off can still be told
+     * it, which is why it sits outside the block above — the answer is the same
+     * whenever it comes back on. */
+    if (s->have_allow_tearing) out->allow_tearing = s->allow_tearing;
 
     /* Moving a screen is layout work, not a commit: the monitor draws exactly
      * what it drew, it is the world around it that shifts. */
@@ -1774,7 +1858,24 @@ static void output_apply_mode_config(FwmServer *server, FwmOutput *out) {
     const ConfigOutput *cfg = config_find_output(&server->config, out->wlr_output->name);
     if (!cfg) return;
     FwmOutputSetup setup = server_output_setup_from_config(cfg);
-    if (!setup.have_mode && !setup.have_scale && !setup.have_transform) return;
+
+    /* A file is written once and carried between machines, so an entry asking
+     * for VRR must not take the rest of itself down on a screen that has none:
+     * apply_setup is all-or-nothing by design, and without this the laptop
+     * panel would silently lose the mode, the scale and the position too, for
+     * a line about adaptive sync. Dropped and reported, the way load_outputs
+     * treats every other value it cannot use. `fwmctl` keeps the strict
+     * behaviour — a command typed at a screen that is right there should
+     * refuse rather than half-obey. */
+    if (setup.have_adaptive_sync && setup.adaptive_sync &&
+        !out->wlr_output->adaptive_sync_supported) {
+        wlr_log(WLR_INFO, "[[output]] %s: adaptive_sync ignored — this screen does not "
+                          "support it", cfg->name);
+        setup.have_adaptive_sync = 0;
+    }
+
+    if (!setup.have_mode && !setup.have_scale && !setup.have_transform &&
+        !setup.have_adaptive_sync && !setup.have_allow_tearing) return;
     /* Position is output_join_layout's job on this path — it runs for monitors
      * with no mode to set too, so letting it own x/y keeps one answer. */
     setup.have_pos = 0;

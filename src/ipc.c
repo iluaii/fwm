@@ -975,6 +975,16 @@ static void buf_output(struct Buf *b, FwmOutput *o) {
     buf_puts(b, ",\"transform\":");
     buf_json_string(b, config_transform_name(wlr->transform));
 
+    /* How a frame reaches this screen, both halves of it. adaptive_sync is what
+     * the hardware is doing right now — asking for it can fail, so the answer
+     * is read back rather than remembered — and `_supported` is there so a
+     * script can tell "off" from "cannot". allow_tearing is fwm's own, and no
+     * monitor was consulted about it. */
+    buf_printf(b, ",\"adaptive_sync\":%s,\"adaptive_sync_supported\":%s,\"allow_tearing\":%s",
+               wlr->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED ? "true" : "false",
+               wlr->adaptive_sync_supported ? "true" : "false",
+               o->allow_tearing ? "true" : "false");
+
     if (wlr->width > 0 && wlr->height > 0) {
         /* Spelled so it can be handed straight back to `mode=`. The nested and
          * headless backends report no refresh at all, and "@0.00" there would
@@ -1105,6 +1115,18 @@ static void cmd_output(FwmServer *server, const char *arg, struct Buf *b) {
             setup.have_pos = 1;
             setup.x = (int)x;
             setup.y = (int)y;
+        } else if (strcmp(key, "adaptive_sync") == 0 || strcmp(key, "vrr") == 0) {
+            int now = out->wlr_output->adaptive_sync_status ==
+                      WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED;
+            int v = parse_switch(val, now);
+            if (v < 0) { reply_error(b, "adaptive_sync must be on, off or toggle"); return; }
+            setup.have_adaptive_sync = 1;
+            setup.adaptive_sync = v;
+        } else if (strcmp(key, "allow_tearing") == 0) {
+            int v = parse_switch(val, out->allow_tearing);
+            if (v < 0) { reply_error(b, "allow_tearing must be on, off or toggle"); return; }
+            setup.have_allow_tearing = 1;
+            setup.allow_tearing = v;
         } else if (strcmp(key, "desktop") == 0) {
             char *end;
             long d = strtol(val, &end, 10);
@@ -1122,7 +1144,8 @@ static void cmd_output(FwmServer *server, const char *arg, struct Buf *b) {
             else { reply_error(b, "enabled must be on or off"); return; }
         } else {
             snprintf(err, sizeof err, "unknown key \"%s\" (mode, scale, transform, "
-                                      "position, desktop, enabled)", key);
+                                      "position, desktop, enabled, adaptive_sync, "
+                                      "allow_tearing)", key);
             reply_error(b, err);
             return;
         }
@@ -1135,7 +1158,8 @@ static void cmd_output(FwmServer *server, const char *arg, struct Buf *b) {
      * something sane and nothing is applied to a screen that is already gone. */
     if (want_enabled == 1) server_output_set_enabled(server, out, 1);
 
-    if ((setup.have_mode || setup.have_scale || setup.have_transform || setup.have_pos) &&
+    if ((setup.have_mode || setup.have_scale || setup.have_transform || setup.have_pos ||
+         setup.have_adaptive_sync || setup.have_allow_tearing) &&
         !server_output_apply_setup(server, out, &setup, err, sizeof err)) {
         reply_error(b, err);
         return;
