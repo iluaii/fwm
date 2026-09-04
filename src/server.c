@@ -163,28 +163,43 @@ struct wlr_surface *server_keyboard_target(FwmServer *server) {
     return server->focused_view ? view_surface(server->focused_view) : NULL;
 }
 
-/* Is `v` a dialog of `anc` — its child, or its child's child? A fullscreen
- * window's own windows are the one thing entitled to sit over it: the Steam
- * overlay, a game's launcher dialog, a file chooser. The chain is walked with a
- * guard rather than trusted, because a client is free to hand us a parent loop
- * and the answer here must not be an infinite one. */
-static bool view_descends_from(FwmServer *server, FwmView *v, FwmView *anc) {
-    for (int guard = 0; v && guard < 16; guard++) {
-        FwmView *parent = NULL, *it;
-        if (v->type == FWM_VIEW_XDG) {
-            struct wlr_xdg_toplevel *pt = v->xdg_toplevel ? v->xdg_toplevel->parent : NULL;
-            if (pt) wl_list_for_each(it, &server->views, link)
-                if (it->type == FWM_VIEW_XDG && it->xdg_toplevel == pt) { parent = it; break; }
-        } else {
-            struct wlr_xwayland_surface *px = v->xwl_surface ? v->xwl_surface->parent : NULL;
-            if (px) wl_list_for_each(it, &server->views, link)
-                if (it->type == FWM_VIEW_XWAYLAND && it->xwl_surface == px) { parent = it; break; }
-        }
-        if (!parent) return false;
-        if (parent == anc) return true;
-        v = parent;
+/* How far `v` hangs under `anc` in the parent chain: 0 for the window itself,
+ * 1 for its dialog, 2 for a dialog of that dialog, and -1 for a window that is
+ * no relation of it at all. The chain is walked with a guard rather than
+ * trusted, because a client is free to hand us a parent loop and the answer
+ * here must not be an infinite one. */
+static int view_depth_from(FwmView *v, FwmView *anc) {
+    for (int depth = 0; v && depth < 16; depth++) {
+        if (v == anc) return depth;
+        v = view_parent(v);
     }
-    return false;
+    return -1;
+}
+
+/* A window's dialogs belong over the window: the "are you sure" that cannot be
+ * answered around, the file chooser the save is waiting on. Raising the window
+ * buries them, and every focus raises the window — so taking a window with a
+ * dialog open into focus hid the dialog behind it, and clicking the window
+ * again only did it a second time.
+ *
+ * So a raise is followed by this: the dialogs going back on top of what was
+ * just raised. Depth by depth outward, because a dialog of a dialog has to end
+ * up over its own parent too, and the window list is in no order of kinship.
+ * The pass stops at the first depth with nobody in it, so the common window
+ * without dialogs costs one walk of the list. */
+void server_restack_children(FwmServer *server, FwmView *view) {
+    if (!view) return;
+    for (int depth = 1; depth < 16; depth++) {
+        bool any = false;
+        FwmView *v;
+        wl_list_for_each(v, &server->views, link) {
+            if (v == view || !v->scene_tree) continue;
+            if (view_depth_from(v, view) != depth) continue;
+            wlr_scene_node_raise_to_top(&v->scene_tree->node);
+            any = true;
+        }
+        if (!any) break;
+    }
 }
 
 /* A real fullscreen window owns the glass its desktop is shown on: nothing
@@ -213,12 +228,7 @@ void server_restack_fullscreen(FwmServer *server) {
 
         /* Its own dialogs go back over it afterwards — raising the fullscreen
          * window has just buried them. */
-        FwmView *v;
-        wl_list_for_each(v, &server->views, link) {
-            if (v == fs || !v->scene_tree) continue;
-            if (view_descends_from(server, v, fs))
-                wlr_scene_node_raise_to_top(&v->scene_tree->node);
-        }
+        server_restack_children(server, fs);
     }
     /* And the menus of X clients, which are not views at all. */
     server_xwl_unmanaged_raise(server);
@@ -247,7 +257,11 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
     constraints_drop_unless(server, view ? view_surface(view) : NULL);
 
     if (view) {
-        if (view->scene_tree) wlr_scene_node_raise_to_top(&view->scene_tree->node);
+        if (view->scene_tree) {
+            wlr_scene_node_raise_to_top(&view->scene_tree->node);
+            /* Its dialogs stay over it: the raise just went over them. */
+            server_restack_children(server, view);
+        }
         
         server_keyboard_enter(server, view_surface(view));
         view_set_activated(view, true);
@@ -419,6 +433,10 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
         if (view->scene_tree) {
             server_place_view(server, view, view->x, view->y);
             wlr_scene_node_raise_to_top(&view->scene_tree->node);
+            /* Fake fullscreen has no other keeper — server_restack_fullscreen
+             * below speaks for the real kind only — so its dialogs come back
+             * over it here. */
+            server_restack_children(server, view);
         }
         view_set_border_enabled(view, 0); // borderless fullscreen
         view->fs_real = real ? 1 : 0;

@@ -870,6 +870,9 @@ void server_xwl_unmanaged_create(FwmServer *server, struct wlr_xwayland_surface 
 void server_xwl_unmanaged_place(FwmServer *server);
 /* And every one of them raised back over the window layer. */
 void server_xwl_unmanaged_raise(FwmServer *server);
+/* The dialogs of `view` raised back over it, deepest last. Every raise of a
+ * window goes over its own dialogs, so every raise is followed by this. */
+void server_restack_children(FwmServer *server, struct FwmView *view);
 /* A real fullscreen window put back on top of the ordinary windows sharing its
  * desktop, with its own dialogs kept above it. Called whenever something else
  * has been raised — a focus, a window opening — since the stack is otherwise
