@@ -246,6 +246,16 @@ void server_toggle_desktop_tiling(FwmServer *server, int d);
 void server_toggle_desktop_floating(FwmServer *server, int d);
 void server_move_view_to_desktop(FwmServer *server, FwmView *view, int target,
                                  int from_drag);
+/* Hand a window over to the rules of the desktop it is now standing on.
+ *
+ * A desktop's mode is remembered per desktop, but "floating" is worn per
+ * window — the flag physics.c reads to hold a window still and let the others
+ * through it. The two are put in step when the mode changes and when a window
+ * is SENT to another desktop; a window CARRIED there by hand crosses the seam
+ * on its coordinates alone, and nothing was telling it whose rules it had just
+ * walked under. On two monitors that is a whole screen of the strip you can
+ * drag into: drop a window on a floating desktop and it would keep falling. */
+void server_body_take_desktop_mode(FwmServer *server, PhysicsBody *b);
 
 /* ── server_input.c ───────────────────────────────────────────────────── */
 void server_input_register(FwmServer *server);

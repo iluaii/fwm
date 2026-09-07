@@ -158,6 +158,21 @@ static void desktop_set_floating(FwmServer *server, int d, int on) {
     }
 }
 
+/* The same thing the other way round: one window, whichever desktop it has
+ * ended up on. Written to match the assignment server_move_view_to_desktop
+ * makes — a carried window and a sent one land under the same rules, dialogs
+ * included, or "over its parent" would survive a trip onto a physics desktop
+ * that every other window makes as an ordinary body. */
+void server_body_take_desktop_mode(FwmServer *server, PhysicsBody *b) {
+    if (!b) return;
+    int d = b->desktop_id;
+    if (d < 0 || d >= FWM_DESKTOPS) return;
+    int on = server->desktop_mode[d] == DESKTOP_MODE_FLOATING;
+    if (b->floating == on) return;
+    b->floating = on;
+    if (on) { b->vx = 0; b->vy = 0; b->flying = 0; }
+}
+
 /* Scatter everything on the desktop, so switching back to physics reads as the
  * world waking up rather than as nothing having happened. */
 static void desktop_shove(FwmServer *server, int d) {

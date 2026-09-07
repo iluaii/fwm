@@ -1262,6 +1262,12 @@ void server_drag_release(FwmServer *server, double lx, double ly) {
             } else if (view) {
                 PhysicsBody *pb = physics_find_body(&server->physics, view->id);
                 if (pb) {
+                    /* Put down on whatever desktop the hand ended over — which
+                     * on two monitors need not be the one it was picked up
+                     * from, and need not run the same way. Before the branch,
+                     * so that the throw below is asked of a window that has
+                     * already been told whether it is allowed to move. */
+                    server_body_take_desktop_mode(server, pb);
                     if (server->desktop_mode[pb->desktop_id] == DESKTOP_MODE_TILING) {
                         /* Landed on a tiling desktop: join the layout where it
                          * was put down. Already in the tree means the drag never
@@ -1275,7 +1281,7 @@ void server_drag_release(FwmServer *server, double lx, double ly) {
                         } else {
                             server_apply_tiling(server, d);
                         }
-                    } else {
+                    } else if (!pb->floating) {
                         physics_push_overlapping(&server->physics, view->id, 280.0);
                         physics_throw_body(&server->physics, view->id, server->interactive.vx, server->interactive.vy);
                     }
