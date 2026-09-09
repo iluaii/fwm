@@ -154,8 +154,46 @@ chooser_type=none
 output_name=DVI-D-1   # a name from `fwmctl outputs`
 ```
 
-`none` shares `output_name` without asking. With two monitors you want the
-chooser instead, so that you can pick between them.
+`none` shares `output_name` without asking. With two monitors that is one
+monitor you can never share: the application shows a single source and no way
+to change it.
+
+To get the question back without installing anything, point the backend at a
+menu of your own. `chooser_type=dmenu` means "run `chooser_cmd`, and take the
+line it prints":
+
+```ini
+[screencast]
+chooser_type=dmenu
+chooser_cmd=~/.config/xdg-desktop-portal-wlr/chooser.sh
+```
+
+```sh
+#!/bin/sh
+# The backend writes one line per source on stdin — "Monitor: <name>
+# <description>" — and expects one of those lines back on stdout *verbatim*:
+# it parses the output name out of the line it gets, so a prettified answer is
+# a source it does not recognise. Print the chosen line unchanged.
+set --
+while IFS= read -r line; do
+	[ -n "$line" ] && set -- "$@" "$line"
+done
+[ $# -eq 0 ] && exit 1
+
+exec zenity --list --title="fwm — screen share" \
+	--text="What do you want to share?" \
+	--column="Source" --width=560 --height=260 "$@"
+```
+
+zenity comes with the GTK portal backend, which is already installed for the
+file chooser, so this costs no new package. Any picker that reads lines and
+prints one back does the job — swap the last command for it. Cancelling exits
+non-zero and prints nothing, and the backend reads that as "never mind" and
+does not start capturing.
+
+The config is read when the backend starts, and it is D-Bus activated:
+`pkill -f xdg-desktop-portal-wlr` is enough to pick up an edit, the next share
+starts it again.
 
 **The shared image is black, or nothing is offered at all.** Check that the
 backend is installed and reachable:
