@@ -20,6 +20,8 @@ A compositor written in C (wlroots) with its own built-in shell, ten desktops la
 
 Physics is the first thing you see, not the whole of it. The strip is scrolled across rather than switched between, and each desktop on it chooses for itself whether it is a physics desktop, a BSP tiling one, or plain floating. The launcher, the desktop strip, screenshots, the wallpaper picker, the sound panel and the spectrum visualiser are built in, so there is no `rofi`, `grim`, `slurp` or `cava` to install alongside. Multiple monitors, layer-shell and session lock work the way you already expect, and so does XWayland. `fwmctl` reads the state, changes any setting live without touching your config file, and streams events a script can react to — and where a keybind belongs to an external shell rather than to fwm, it can have it.
 
+It looks like a playground, but it is built to be lived in. fwm is my daily driver for everyday work, gaming, and developing fwm itself from inside fwm — because the fastest way to make a compositor stable is to have to rely on it.
+
 This is the primary, actively developed version. The legacy X11 version lives on the [`x11`](https://github.com/iluaii/fwm/tree/x11) branch and is no longer supported.
 
 ## 📚 Documentation
