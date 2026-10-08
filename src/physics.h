@@ -18,6 +18,25 @@
 #include <stdint.h>
 #include "defines.h"
 
+/* --- Architecture & Independence -------------------------------------------
+ * A foundational principle: the physics subsystem must remain strictly
+ * independent and decoupled from the rest of the compositor.
+ *
+ * It must never include wlroots, Wayland protocol headers, or know about
+ * surfaces, views, rendering pipelines, or seat input details. The engine deals
+ * purely with abstract geometry, masses, bounding boxes, velocities, and
+ * contact impulses.
+ *
+ * The compositor communicates with physics exclusively through the authoritative
+ * PhysicsWorld mirror struct and the functions declared in this header. The
+ * simulation engine (Box2D or any future solver) is fully encapsulated behind
+ * an opaque pointer: the compositor never speaks Box2D directly, and the
+ * physics backend never knows what an application or a window actually is.
+ *
+ * Preserving this boundary ensures the engine can be tested in isolation,
+ * benchmarked headless, stepped deterministically, or extended (state history,
+ * replay, alternative backends) without coupling to Wayland state. */
+
 /* How wide the world is, in px, from a screen width. The strip is one screen
  * per desktop and the stride is what turns a world x into a desktop number
  * (desktop_w below), so the two cannot be set independently — a world wider
