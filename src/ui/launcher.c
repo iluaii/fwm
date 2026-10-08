@@ -727,6 +727,30 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
         double text_x = x + TILE_H / 2.0 + 4.0;
         double art_w = ICON_SZ;
         if (l->mode == LMODE_WALLPAPERS) {
+            /* Distinct glyph in the tile's left chevron nose to tell motion
+             * clips apart from static stills without cluttering the preview. */
+            double bx = x + 13.0;
+            double by = y + TILE_H / 2.0;
+            if (selected) {
+                cairo_set_source_rgb(cr, thm->text[0], thm->text[1], thm->text[2]);
+            } else {
+                cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
+            }
+            if (app->is_video) {
+                /* Play triangle (▶): motion video */
+                cairo_new_path(cr);
+                cairo_move_to(cr, bx - 3.5, by - 4.5);
+                cairo_line_to(cr, bx + 4.5, by);
+                cairo_line_to(cr, bx - 3.5, by + 4.5);
+                cairo_close_path(cr);
+                cairo_fill(cr);
+            } else {
+                /* Frame (▢): static still */
+                cairo_set_line_width(cr, 1.3);
+                cairo_rectangle(cr, bx - 4.5, by - 3.5, 9.0, 7.0);
+                cairo_stroke(cr);
+            }
+
             /* No decoding here — a wallpaper thumbnail costs 15-200ms and the
              * whole panel would freeze on its first frame. launcher_tick loads
              * them one per frame; until then the slot shows a placeholder. */
