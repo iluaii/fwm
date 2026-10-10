@@ -1477,6 +1477,10 @@ dir = "~/Pictures"
 # These four are absolute settings, not toggles: they layer over the desktop's
 # profile, so a heavy window stays heavy wherever it is dragged.
 #
+#   opacity   0..1, how much of itself the whole window shows — text and
+#             pictures too, unlike foot, which draws only its background
+#             translucent. Multiplies [decor] inactive_opacity.
+#
 # There is no per-window "float" on purpose: tiling here is a property of the
 # DESKTOP, not of the window, so such a rule could not be honoured. Use
 # toggle_tiling on the desktop instead.
@@ -1493,6 +1497,10 @@ dir = "~/Pictures"
 #[[rule]]
 #title = "^Picture-in-Picture$"
 #pin   = true
+#
+#[[rule]]
+#app_id  = "^firefox$"
+#opacity = 0.9             # the wallpaper shows through the whole window
 #
 #[[rule]]
 #app_id = "^mpv$"

@@ -555,6 +555,11 @@ static void dim_iter(struct wlr_scene_buffer *buffer, int sx, int sy, void *data
     wlr_scene_buffer_set_opacity(buffer, ctx->opacity);
 }
 
+/* What the window is drawn at: the dim, and a rule's opacity on top of it. */
+static double view_alpha(FwmView *view) {
+    return view->has_opacity ? view->dim * view->opacity : view->dim;
+}
+
 void view_dim_apply(FwmView *view) {
     if (!view->scene_tree) return;
     /* While the window is opening it is covered by our own fade rect and must
@@ -562,7 +567,7 @@ void view_dim_apply(FwmView *view) {
      * exactly what the open animation exists to avoid. The dim lands when the
      * animation lets go. */
     if (view->open_anim) return;
-    struct dim_ctx ctx = { .view = view, .opacity = (float)view->dim };
+    struct dim_ctx ctx = { .view = view, .opacity = (float)view_alpha(view) };
     wlr_scene_node_for_each_buffer(&view->scene_tree->node, dim_iter, &ctx);
 }
 
@@ -625,13 +630,13 @@ bool view_dim_tick(FwmView *view, double dt) {
 }
 
 void view_dim_suspend(FwmView *view) {
-    if (!view->scene_tree || view->dim >= 1.0) return;
+    if (!view->scene_tree || view_alpha(view) >= 1.0) return;
     struct dim_ctx ctx = { .view = view, .opacity = 1.0f };
     wlr_scene_node_for_each_buffer(&view->scene_tree->node, dim_iter, &ctx);
 }
 
 void view_dim_restore(FwmView *view) {
-    if (!view->scene_tree || view->dim >= 1.0) return;
+    if (!view->scene_tree || view_alpha(view) >= 1.0) return;
     view_dim_apply(view);
 }
 
@@ -1052,6 +1057,11 @@ void view_map(FwmView *view) {
     ConfigRule rule;
     int have_rule = config_match_rules(&view->server->config,
                                        view_app_id(view), view_title(view), &rule);
+    /* On the view, not the body: it is how the window is drawn, and the dim it
+     * multiplies already lives here. Applied by view_dim_apply, which every
+     * commit and the end of the open fade both call. */
+    view->has_opacity = have_rule && !isnan(rule.opacity);
+    if (view->has_opacity) view->opacity = rule.opacity;
 
     int current_desktop = server_active_desktop(view->server);
     int placed = 0;   /* somebody has already said where this window goes */

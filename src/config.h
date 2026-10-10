@@ -1338,6 +1338,13 @@ typedef struct {
     double friction;
     double toughness;
     double hardness;
+
+    /* How much of itself the window shows, 0..1, the whole window at once —
+     * text and pictures included, which is what sets it apart from a client
+     * that draws its own background translucent (foot). Multiplies [decor]
+     * inactive_opacity rather than replacing it, so an unfocused translucent
+     * window still steps back like the rest. NAN says nothing. */
+    double opacity;
 } ConfigRule;
 
 /* ── runtime-settable options ────────────────────────────────────────── */

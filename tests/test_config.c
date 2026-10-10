@@ -456,6 +456,31 @@ static void test_rule_material(void) {
     /* A window no rule matches carries no material at all. */
     CHECK_INT(config_match_rules(&cfg, "kitty", NULL, &out), 0);
     CHECK(isnan(out.mass) && isnan(out.gravity) && isnan(out.bounce) && isnan(out.friction));
+    CHECK(isnan(out.opacity));
+    config_free(&cfg);
+    drop_config();
+
+    CASE("[[rule]] opacity");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[[rule]]\n"
+        "app_id  = \"^firefox$\"\n"
+        "opacity = 0.85\n"
+        "[[rule]]\n"
+        "app_id  = \"^ghost$\"\n"
+        "opacity = 0\n"            /* fully see-through is a value too */
+        "[[rule]]\n"
+        "app_id  = \"^bad$\"\n"
+        "opacity = 1.5\n");
+    config_load(&cfg, p);
+    CHECK_INT(config_match_rules(&cfg, "firefox", NULL, &out), 1);
+    CHECK_DBL(out.opacity, 0.85, 1e-9);
+    CHECK(isnan(out.mass));
+    CHECK_INT(config_match_rules(&cfg, "ghost", NULL, &out), 1);
+    CHECK_DBL(out.opacity, 0.0, 1e-9);
+    CHECK(cfg.error_count >= 1);    /* 1.5 is reported ... */
+    config_match_rules(&cfg, "bad", NULL, &out);
+    CHECK(isnan(out.opacity));      /* ... and not obeyed */
     config_free(&cfg);
     drop_config();
 

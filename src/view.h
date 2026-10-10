@@ -186,6 +186,9 @@ typedef struct FwmView {
      * followed by a tail and not a fade. */
     double dim, dim_target;
     double dim_from, dim_t;
+    /* [[rule]] opacity, multiplied into the dim; only when has_opacity. */
+    int    has_opacity;
+    double opacity;
 
     /* Open animation.
      *

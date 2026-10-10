@@ -201,6 +201,7 @@ hardness  = 3.0        # ... but hits like a brick
 | `friction` | Per-tick velocity retention, absolute 0..1. |
 | `toughness` | Multiplies this window's hit points. 0 = glass, broken by any hit at all; 10 = a safe. Only means anything while `[physics] hp` is on. |
 | `hardness` | Multiplies the damage this window **deals**. Separate from `toughness` so a heavy soft thing does not have to be a hammer. |
+| `opacity` | 0..1, how much of itself the whole window shows — text and pictures too, unlike a terminal that draws only its background translucent. Multiplies `[decor] inactive_opacity`, so an unfocused window still steps back. |
 | `nocollide` | Other windows pass through it; it still cannot leave the play area. |
 | `pin` | Immovable: physics never moves it. |
 | `desktop` | 0..9, where the window opens. Applies to the application's own windows; a dialog opens on its parent's desktop instead, wherever the parent has been moved to since. |

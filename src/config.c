@@ -2005,10 +2005,12 @@ static void load_rules(toml_table_t *root, FwmConfig *cfg) {
          * all — so the floor is 0 and not the 0.001 mass needs. */
         r->toughness = rule_number(cfg, tbl, "toughness", i, 0.0, 1000.0);
         r->hardness  = rule_number(cfg, tbl, "hardness",  i, 0.0, 1000.0);
+        r->opacity   = rule_number(cfg, tbl, "opacity",   i, 0.0, 1.0);
 
         if (r->nocollide < 0 && r->pin < 0 && r->desktop < 0 &&
             isnan(r->mass) && isnan(r->gravity) && isnan(r->bounce) &&
-            isnan(r->friction) && isnan(r->toughness) && isnan(r->hardness))
+            isnan(r->friction) && isnan(r->toughness) && isnan(r->hardness) &&
+            isnan(r->opacity))
             config_report_error(cfg, "[[rule]] #%d: matches but sets nothing", i + 1);
 
         idx++;
@@ -2023,6 +2025,7 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
     out->desktop   = -1;
     out->mass = out->gravity = out->bounce = out->friction = NAN;
     out->toughness = out->hardness = NAN;
+    out->opacity = NAN;
 
     int matched = 0;
     for (int i = 0; i < cfg->rule_count; i++) {
@@ -2047,6 +2050,7 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
         if (!isnan(r->friction)) out->friction = r->friction;
         if (!isnan(r->toughness)) out->toughness = r->toughness;
         if (!isnan(r->hardness))  out->hardness  = r->hardness;
+        if (!isnan(r->opacity))   out->opacity   = r->opacity;
         matched = 1;
     }
     return matched;
