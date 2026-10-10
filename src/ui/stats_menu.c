@@ -66,9 +66,12 @@ bool stats_menu_animating(void) {
     return g_anim.live && (g_anim.moving || g_anim.open < 1.0 - ANIM_EPS);
 }
 
-/* Rows come in from the top, each a little after the one above it. */
-static double row_reveal(int row) {
-    double p = (g_anim.open - row * 0.10) / 0.55;
+/* Rows come in from the top, each a little after the one above it — no more
+ * after it than lets the last of `rows` land as the clock reaches 1 (see
+ * ui/modes.c). */
+static double row_reveal(int row, int rows) {
+    double stagger = rows > 1 ? fmin(0.10, (1.0 - 0.55) / (rows - 1)) : 0.0;
+    double p = (g_anim.open - row * stagger) / 0.55;
     if (p < 0.0) p = 0.0;
     if (p > 1.0) p = 1.0;
     double inv = 1.0 - p;
@@ -121,7 +124,7 @@ static void draw_menu(cairo_t *cr, int w, int h, void *user) {
         if (!it) continue;
         double ry = row_y(r);
 
-        double rev = g_anim.live ? row_reveal(r) : 1.0;
+        double rev = g_anim.live ? row_reveal(r, n) : 1.0;
         if (rev <= 0.001) continue;
         /* One group per row, so the row's icon, name, value and switch share a
          * single alpha instead of each fading on its own schedule. */

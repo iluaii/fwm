@@ -83,9 +83,12 @@ bool liquids_menu_animating(void) {
 }
 
 /* Rows come in from the top, each a little after the one above it — the
- * modes menu's stagger, so the page that replaces it arrives the same way. */
-static double row_reveal(int row) {
-    double p = (g_anim.open - row * 0.10) / 0.55;
+ * modes menu's stagger, so the page that replaces it arrives the same way,
+ * and no more after it than lets the last of `rows` land as the clock
+ * reaches 1: with more than five liquids the last ones never came in. */
+static double row_reveal(int row, int rows) {
+    double stagger = rows > 1 ? fmin(0.10, (1.0 - 0.55) / (rows - 1)) : 0.0;
+    double p = (g_anim.open - row * stagger) / 0.55;
     if (p < 0.0) p = 0.0;
     if (p > 1.0) p = 1.0;
     double inv = 1.0 - p;
@@ -194,7 +197,7 @@ static void draw_menu(cairo_t *cr, int w, int h, void *user) {
     for (int r = 0; r < st->count; r++) {
         const LiquidsMenuItem *it = &st->item[r];
         double ry = row_y(r);
-        double rev = g_anim.live ? row_reveal(r) : 1.0;
+        double rev = g_anim.live ? row_reveal(r, st->count) : 1.0;
         if (rev <= 0.001) continue;
         cairo_push_group(cr);
         cairo_save(cr);

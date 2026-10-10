@@ -373,9 +373,15 @@ bool modes_menu_animating(void) {
 }
 
 /* Reveal progress for one row: rows come in from the top, each a little after
- * the one above it. */
+ * the one above it. The delay is a share of what is left after one row's own
+ * reveal, so the last row lands exactly as the clock reaches 1 — a fixed 0.10
+ * a row was written for fewer rows, and by eleven the last of them never came
+ * in at all and the two above it stopped half-faded, leaving a blank at the
+ * bottom of the menu. */
+#define ROW_REVEAL 0.55
 static double row_reveal(int row) {
-    double p = (g_anim.open - row * 0.10) / 0.55;
+    double stagger = fmin(0.10, (1.0 - ROW_REVEAL) / (MODES_ROW_COUNT - 1));
+    double p = (g_anim.open - row * stagger) / ROW_REVEAL;
     if (p < 0.0) p = 0.0;
     if (p > 1.0) p = 1.0;
     /* Ease-out cubic: fast in, settling — the shape a menu should have. */
