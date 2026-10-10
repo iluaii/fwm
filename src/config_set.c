@@ -162,7 +162,8 @@ static const ConfigOption config_option_table[] = {
      * particles of another, so a new spacing empties the liquid, and a knob
      * that drained the desktop the moment it was nudged is not a knob. */
     { "liquids.enabled",                CFG_OPT_INT,    offsetof(FwmConfig, liquids.enabled),                 0.0,     1.0,    "1 = liquid can be poured (fwmctl liquid pour)" },
-    { "liquids.particles",              CFG_OPT_INT,    offsetof(FwmConfig, liquids.particles),               0.0, 40000.0,    "the most one desktop may hold" },
+    { "liquids.particles",              CFG_OPT_INT,    offsetof(FwmConfig, liquids.particles),               0.0, 200000.0,   "the most one desktop may hold" },
+    { "liquids.threads",                CFG_OPT_INT,    offsetof(FwmConfig, liquids.threads),                 0.0,    16.0,    "threads a step is split across; 0 = one per core" },
     { "liquids.viscosity",              CFG_OPT_DOUBLE, offsetof(FwmConfig, liquids.viscosity),               0.0, 100000.0,   "px^2/s; hundreds is oil, thousands honey" },
     { "liquids.tension",                CFG_OPT_DOUBLE, offsetof(FwmConfig, liquids.tension),                 0.0,   500.0,    "px; how strongly its surface pulls" },
     { "liquids.color",                  CFG_OPT_COLOR,  offsetof(FwmConfig, liquids.color),                   0.0,     0.0,    "the liquid's colour; alpha is how see-through" },

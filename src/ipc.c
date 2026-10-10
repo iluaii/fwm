@@ -1263,9 +1263,10 @@ static void cmd_liquid_state(FwmServer *server, struct Buf *b) {
     if (st.desktop >= 0) buf_json_string(b, st.kind);
     else                 buf_puts(b, "null");
     buf_printf(b, ",\"particles\":%d,\"pending\":%d,\"budget\":%d,"
-                  "\"asleep\":%s,\"substeps\":%d,\"step_ms\":%.2f,\"drawn\":%s}\n",
+                  "\"asleep\":%s,\"substeps\":%d,\"step_ms\":%.2f,\"threads\":%d,"
+                  "\"drawn\":%s}\n",
                st.particles, st.pending, st.budget, st.asleep ? "true" : "false",
-               st.substeps, st.step_ms, st.drawn ? "true" : "false");
+               st.substeps, st.step_ms, st.threads, st.drawn ? "true" : "false");
 }
 
 static void cmd_liquid(FwmServer *server, const char *arg, struct Buf *b) {

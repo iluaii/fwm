@@ -54,7 +54,9 @@
  * liquid's own motion allows: two or three a frame.
  *
  * Like physics.c it knows nothing of the compositor — no wlroots, no windows,
- * no desktops, no threads. The world is one box, `w` x `h` px, y-down with the
+ * no desktops. Where and when a step runs is the caller's; what it does with
+ * threads of its own is split its loops across them (liquid_set_threads), and
+ * a step still starts and ends inside the one call. The world is one box, `w` x `h` px, y-down with the
  * origin at its top-left; its floor is exactly the box's bottom edge, and the
  * other walls stand at most a grid cell outside it. The caller decides what
  * the box is (a desktop), what the gravity is (that desktop's), and when time
@@ -94,6 +96,14 @@ void liquid_set_material(FwmLiquid *l, const LiquidMaterial *m);
 /* Change the most the liquid may hold. Lowering it below what is already
  * poured keeps what is there and refuses more. */
 void liquid_set_budget(FwmLiquid *l, int budget);
+
+/* Split each step across `n` threads, the caller's among them, so n - 1 are
+ * started; 1, the default, starts none. Clamped to 1 .. LIQUID_MAX_THREADS.
+ * Not while a step is running. The liquid moves the same whatever n is, to
+ * the rounding of the sums — n parts of a sum are added in another order. */
+#define LIQUID_MAX_THREADS 16
+void liquid_set_threads(FwmLiquid *l, int n);
+int liquid_threads(const FwmLiquid *l);
 
 /* Pour up to `count` particles as one round blob centred on (cx, cy), moving
  * at (vx, vy) px/s. The blob is pulled inside the walls if it would cross

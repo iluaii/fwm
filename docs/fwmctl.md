@@ -312,9 +312,9 @@ bind one if you want one: `fwmctl liquid pour` pours under the pointer.
 
 ```console
 $ fwmctl liquid pour
-{"ok":true,"desktop":0,"pouring":3000}
+{"ok":true,"desktop":0,"pouring":7500}
 $ fwmctl liquid
-{"ok":true,"enabled":true,"desktop":0,"particles":2990,"pending":0,"budget":12000,"asleep":false,"substeps":2,"step_ms":1.64,"drawn":true}
+{"ok":true,"enabled":true,"desktop":0,"liquid":"Water","particles":7490,"pending":0,"budget":30000,"asleep":false,"substeps":2,"step_ms":1.21,"threads":6,"drawn":true}
 $ fwmctl liquid clear
 ```
 

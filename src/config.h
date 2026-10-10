@@ -1410,14 +1410,15 @@ typedef struct {
  *
  *   [liquids]
  *   enabled   = true
- *   particles = 12000    # the most one desktop may hold
+ *   particles = 30000    # the most one desktop may hold
  *   spacing   = 6        # px between particles at rest: the finest detail
  *   viscosity = 60       # px²/s; hundreds is oil, thousands honey
  *   tension   = 30       # px; how strongly its surface pulls
  *   color     = "#3a8be0cc"
+ *   threads   = 0        # how many a step is split across; 0 = one per core
  *
- * Off by default and experimental: it is a toy, and its simulation runs on a
- * CPU core of its own for as long as anything in it is moving.
+ * Off by default and experimental: it is a toy, and its simulation takes the
+ * CPU's cores for as long as anything in it is moving.
  *
  * `particles` is the budget, and the cost: a step is proportional to it.
  * `spacing` decides how much screen that budget covers — the same particles at
@@ -1434,6 +1435,7 @@ typedef struct {
     /* RGBA as parse_hex_color leaves it: premultiplied. The alpha is how
      * opaque the body of the liquid is. */
     float  color[4];
+    int    threads;    /* a step split across this many; 0 = one per core */
 } LiquidsConfig;
 
 typedef struct {

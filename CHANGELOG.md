@@ -21,8 +21,11 @@ incompressible pressure solve, viscosity and surface tension — and no rule
 anywhere about what a splash or a ball should look like: a blob falls and
 splashes and sloshes because of gravity, and with gravity switched off it keeps
 flying and its own surface gathers it into balls. On screen it is one smooth
-body, behind the windows; they do not feel it yet. It runs on a worker thread,
-only while somebody can see it and only until it settles.
+body, behind the windows; they do not feel it yet. It runs beside the
+compositor, split across the CPU's cores (`[liquids] threads`), only while
+somebody can see it and only until it settles — six cores keep a whole 1080p
+screen of it moving in real time. A desktop holds 30000 particles by default,
+about half a 1080p screen, and never more than its own area.
 
 ### When a frame reaches the screen
 

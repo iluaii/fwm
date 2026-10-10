@@ -944,6 +944,7 @@ typedef struct {
     bool asleep;
     int substeps;      /* in the last step */
     double step_ms;    /* what the last step cost the worker */
+    int threads;       /* the step is split across */
     bool drawn;        /* there is a picture of it */
     char kind[LIQUID_NAME_MAX];   /* which liquid it is */
 } FwmLiquidState;

@@ -13,6 +13,7 @@
  */
 
 #include "liquid.h"
+#include "crew.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -156,10 +157,16 @@ struct FwmLiquid {
     float *txx, *tyy, *txy;
     unsigned char *type;
 
-    /* The pressure solve, over the fluid cells only, in grid order — which is
-     * also the order the preconditioner's sweeps need. */
+    /* The pressure solve, over the fluid cells only, strip by strip (see
+     * "the pressure solve"): strip k is fluid[strip_at[k] .. strip_at[k + 1])
+     * and the columns strip_col[k] .. strip_col[k + 1], in grid order inside
+     * it, which is the order the preconditioner's sweeps need. Beside each
+     * cell, which of its neighbours count and how many are not wall. */
     int   *fluid;
     int    nfluid;
+    unsigned char *nbits, *ndiag;
+    int    strip_at[LIQUID_MAX_THREADS + 1];
+    int    strip_col[LIQUID_MAX_THREADS + 1];
     unsigned char *ring;   /* per wall cell, for release_walls */
     float *pres, *rhs, *res, *aux, *dir, *prec, *q;
     double last_h;         /* the step `pres` was solved for */
@@ -174,6 +181,18 @@ struct FwmLiquid {
     double vmax, vrms;
 
     unsigned rng;
+
+    /* The step split across a crew (liquid_set_threads). Each member but the
+     * first gathers its particles into a grid of its own — u, um, v, vm and
+     * mass, back to back, `pstride` floats — and every member marks the
+     * cells its particles stand in, `cn` bytes each; then they are added up.
+     * One sum per member per slot, a cache line each, for the reductions. */
+    FwmCrew *crew;
+    int parts;
+    float *pgrid;
+    size_t pstride;
+    unsigned char *pocc;
+    struct { _Alignas(64) double v[8]; } psum[LIQUID_MAX_THREADS];
 };
 
 #define UIX(l, i, j) ((size_t)((j) + PAD) * (l)->uw + (size_t)((i) + PAD))
@@ -209,6 +228,13 @@ static inline int stencil(float g, float w[3], float *f) {
     return b;
 }
 
+/* What every job of a step is handed: the liquid and the step. */
+struct step_job {
+    FwmLiquid *l;
+    float h;
+    bool lists;      /* the pressure job: the strips are new */
+};
+
 static void wake(FwmLiquid *l) {
     l->asleep = false;
     l->calm_s = 0.0;
@@ -230,6 +256,7 @@ FwmLiquid *liquid_create(double spacing, int budget) {
     l->budget = budget;
     l->mat = (LiquidMaterial){ .viscosity = 0.0, .tension = 0.0 };
     l->rng = 0x2545f491u;
+    l->parts = 1;
     return l;
 }
 
@@ -238,8 +265,9 @@ static void grid_free(FwmLiquid *l) {
     free(l->uok);  free(l->vok);  free(l->okb);  free(l->ftmp);
     free(l->mass); free(l->colour);
     free(l->txx);  free(l->tyy);  free(l->txy);  free(l->type);
-    free(l->fluid);
+    free(l->fluid); free(l->nbits); free(l->ndiag);
     free(l->ring);
+    free(l->pgrid); free(l->pocc);
     free(l->pres); free(l->rhs);  free(l->res);  free(l->aux);
     free(l->dir);  free(l->prec); free(l->q);
     l->u = l->um = l->v = l->vm = l->ftmp = NULL;
@@ -247,15 +275,59 @@ static void grid_free(FwmLiquid *l) {
     l->mass = l->colour = l->txx = l->tyy = l->txy = NULL;
     l->type = NULL;
     l->fluid = NULL;
+    l->nbits = l->ndiag = NULL;
     l->ring = NULL;
+    l->pgrid = NULL;
+    l->pocc = NULL;
     l->pres = l->rhs = l->res = l->aux = l->dir = l->prec = l->q = NULL;
 }
 
 void liquid_destroy(FwmLiquid *l) {
     if (!l) return;
+    crew_destroy(l->crew);
     free(l->p);
     grid_free(l);
     free(l);
+}
+
+/* What each member of the crew gathers into, for the grid as it now is. */
+static bool parts_alloc(FwmLiquid *l) {
+    free(l->pgrid);
+    free(l->pocc);
+    l->pgrid = NULL;
+    l->pocc = NULL;
+    l->pstride = 2 * l->un + 2 * l->vn + l->cn;
+    if (l->parts > 1) {
+        l->pgrid = malloc((size_t)(l->parts - 1) * l->pstride * sizeof(float));
+        if (!l->pgrid) return false;
+    }
+    l->pocc = malloc((size_t)l->parts * l->cn);
+    return l->pocc != NULL;
+}
+
+void liquid_set_threads(FwmLiquid *l, int n) {
+    if (!l) return;
+    if (n < 1) n = 1;
+    if (n > LIQUID_MAX_THREADS) n = LIQUID_MAX_THREADS;
+    if (n == l->parts) return;
+    crew_destroy(l->crew);
+    l->crew = crew_create(n);
+    /* No threads to be had is one thread, not no liquid. */
+    l->parts = crew_size(l->crew);
+    if (l->u && !parts_alloc(l)) {
+        crew_destroy(l->crew);
+        l->crew = NULL;
+        l->parts = 1;
+        if (!parts_alloc(l)) {
+            grid_free(l);
+            l->w = l->h = 0.0;
+            l->nx = l->ny = 0;
+        }
+    }
+}
+
+int liquid_threads(const FwmLiquid *l) {
+    return l ? l->parts : 1;
 }
 
 static int capacity(const FwmLiquid *l) {
@@ -301,12 +373,14 @@ void liquid_set_box(FwmLiquid *l, double w, double h) {
     GRAB(l->txx, l->cn, sizeof(float)); GRAB(l->tyy, l->cn, sizeof(float));
     GRAB(l->txy, l->cn, sizeof(float)); GRAB(l->type, l->cn, 1);
     GRAB(l->fluid, l->cn, sizeof(int));
+    GRAB(l->nbits, l->cn, 1);           GRAB(l->ndiag, l->cn, 1);
     GRAB(l->ring, (size_t)(2 * (l->nx + l->ny)), 1);
     GRAB(l->pres, l->cn, sizeof(float)); GRAB(l->rhs, l->cn, sizeof(float));
     GRAB(l->res, l->cn, sizeof(float));  GRAB(l->aux, l->cn, sizeof(float));
     GRAB(l->dir, l->cn, sizeof(float));  GRAB(l->prec, l->cn, sizeof(float));
     GRAB(l->q, l->cn, sizeof(float));
 #undef GRAB
+    ok = ok && parts_alloc(l);
     if (!ok) {
         /* No grid is a liquid that cannot step, which every call handles;
          * half a grid is not. */
@@ -454,135 +528,278 @@ int liquid_drain(FwmLiquid *l, double cx, double cy, double r, int max) {
  * the equation. Conjugate gradients with an incomplete-Cholesky
  * preconditioner (MIC(0), as in Bridson's book), because the matrix is
  * symmetric and positive definite and this converges in tens of iterations
- * where plain relaxation takes thousands. */
+ * where plain relaxation takes thousands.
+ *
+ * Split across the crew in strips of whole columns, each holding about as
+ * many fluid cells as the next — columns, because liquid gathers on the floor
+ * and strips of rows would leave most of the crew with the sky. CG splits
+ * the way any sum does: each member multiplies its own cells, and every dot
+ * product is added up from one partial sum per member. The preconditioner
+ * does not split that way — a Cholesky sweep walks the cells in order, each
+ * waiting on the ones before it — so each strip gets its own, as if nothing
+ * coupled it to the strips beside it (block Jacobi, MIC(0) in each block).
+ * That is still symmetric and positive definite, which is all CG asks; what
+ * it costs is a few iterations, as a pressure difference across a strip's
+ * side is now seen an iteration later. With one member there is one strip,
+ * and this is the plain MIC(0) it always was. */
 
-static inline int nonsolid_around(const FwmLiquid *l, int c) {
-    return (l->type[c - 1] != SOLID) + (l->type[c + 1] != SOLID)
-         + (l->type[c - l->cw] != SOLID) + (l->type[c + l->cw] != SOLID);
-}
+/* Which neighbours of a fluid cell count, worked out once per step and kept
+ * beside it in the list: the matrix wants the four that are liquid, the
+ * preconditioner only those in its own strip, and two diagonal ones for the
+ * modified part of MIC. */
+enum {
+    NB_L  = 1,     /* the cell to the left is liquid */
+    NB_R  = 2,     /* ...to the right */
+    NB_U  = 4,     /* ...above */
+    NB_D  = 8,     /* ...below */
+    NB_LS = 16,    /* left, and in the same strip */
+    NB_RS = 32,    /* right, and in the same strip */
+    NB_LD = 64,    /* left and one down is liquid */
+    NB_UR = 128,   /* up and one right is liquid, and in the same strip */
+};
 
-static void apply_matrix(const FwmLiquid *l, const float *x, float *y) {
-    const int cw = l->cw;
-    const unsigned char *t = l->type;
-    for (int k = 0; k < l->nfluid; k++) {
-        int c = l->fluid[k];
-        float s = 0.0f;
-        if (t[c - 1] == FLUID)  s += x[c - 1];
-        if (t[c + 1] == FLUID)  s += x[c + 1];
-        if (t[c - cw] == FLUID) s += x[c - cw];
-        if (t[c + cw] == FLUID) s += x[c + cw];
-        y[c] = (float)nonsolid_around(l, c) * x[c] - s;
+/* The strips: the columns cut where the running count of fluid cells passes
+ * each member's share. */
+static void cut_strips(FwmLiquid *l) {
+    const int nx = l->nx, ny = l->ny, parts = l->parts;
+    /* The list is rebuilt from scratch right after this, so the first nx
+     * places in it hold the column counts until then. */
+    int *count = l->fluid;
+    memset(count, 0, (size_t)nx * sizeof(int));
+    for (int j = 0; j < ny; j++)
+        for (int i = 0; i < nx; i++)
+            count[i] += l->type[CIX(l, i, j)] == FLUID;
+    int total = 0;
+    for (int i = 0; i < nx; i++) total += count[i];
+
+    int i = 0, sum = 0;
+    l->strip_col[0] = 0;
+    l->strip_at[0] = 0;
+    for (int k = 1; k < parts; k++) {
+        long long want = (long long)total * k / parts;
+        while (i < nx && sum + count[i] <= want) sum += count[i++];
+        l->strip_col[k] = i;
+        l->strip_at[k] = sum;
     }
+    l->strip_col[parts] = nx;
+    l->strip_at[parts] = total;
+    l->nfluid = total;
 }
 
-static void build_preconditioner(FwmLiquid *l) {
+/* Strip k's cells into the list, in grid order, with their neighbours. */
+static void strip_list(FwmLiquid *l, int k) {
+    const int i0 = l->strip_col[k], i1 = l->strip_col[k + 1], cw = l->cw;
+    const unsigned char *t = l->type;
+    int n = l->strip_at[k];
+    for (int j = 0; j < l->ny; j++)
+        for (int i = i0; i < i1; i++) {
+            size_t c = CIX(l, i, j);
+            if (t[c] != FLUID) continue;
+            unsigned b = 0;
+            if (t[c - 1] == FLUID)      b |= NB_L | (i - 1 >= i0 ? NB_LS : 0);
+            if (t[c + 1] == FLUID)      b |= NB_R | (i + 1 < i1 ? NB_RS : 0);
+            if (t[c - cw] == FLUID)     b |= NB_U;
+            if (t[c + cw] == FLUID)     b |= NB_D;
+            if (t[c - 1 + cw] == FLUID) b |= NB_LD;
+            if (t[c + 1 - cw] == FLUID && i + 1 < i1) b |= NB_UR;
+            l->fluid[n] = (int)c;
+            l->nbits[n] = (unsigned char)b;
+            l->ndiag[n] = (unsigned char)((t[c - 1] != SOLID) + (t[c + 1] != SOLID)
+                                        + (t[c - cw] != SOLID) + (t[c + cw] != SOLID));
+            n++;
+        }
+}
+
+static void strip_preconditioner(FwmLiquid *l, int k0, int k1) {
     const float tau = 0.97f, sigma = 0.25f;
     const int cw = l->cw;
-    const unsigned char *t = l->type;
     float *pc = l->prec;
-    for (int k = 0; k < l->nfluid; k++) {
+    for (int k = k0; k < k1; k++) {
         int c = l->fluid[k];
-        float diag = (float)nonsolid_around(l, c);
+        unsigned b = l->nbits[k];
+        float diag = (float)l->ndiag[k];
         float e = diag;
-        int a = c - 1, b = c - cw;
-        if (t[a] == FLUID) {
-            e -= pc[a] * pc[a];
-            if (t[a + cw] == FLUID) e -= tau * pc[a] * pc[a];
+        if (b & NB_LS) {
+            float a = pc[c - 1] * pc[c - 1];
+            e -= a;
+            if (b & NB_LD) e -= tau * a;
         }
-        if (t[b] == FLUID) {
-            e -= pc[b] * pc[b];
-            if (t[b + 1] == FLUID) e -= tau * pc[b] * pc[b];
+        if (b & NB_U) {
+            float a = pc[c - cw] * pc[c - cw];
+            e -= a;
+            if (b & NB_UR) e -= tau * a;
         }
         if (e < sigma * diag) e = diag;
         pc[c] = 1.0f / sqrtf(e);
     }
 }
 
-static void apply_preconditioner(FwmLiquid *l, const float *r, float *z) {
+/* What the pressure has to cancel in each fluid cell: the flow into or out of
+ * it — plus a little, where the particles have drifted, so the cell evens
+ * them out again (DRIFT_RATE). The unknown is pressure times h (density is 1),
+ * which makes the update after the solve a plain difference. Returns the
+ * largest of them. */
+static float strip_rhs(FwmLiquid *l, int k0, int k1, float h) {
+    const float idx = l->inv_dx, dx = l->dx, full = 4.0f * l->pmass;
     const int cw = l->cw;
-    const unsigned char *t = l->type;
-    const float *pc = l->prec;
-    float *q = l->q;
-    for (int k = 0; k < l->nfluid; k++) {
+    float most = 0.0f;
+    for (int k = k0; k < k1; k++) {
         int c = l->fluid[k];
-        float s = r[c];
-        if (t[c - 1] == FLUID)  s += pc[c - 1] * q[c - 1];
-        if (t[c - cw] == FLUID) s += pc[c - cw] * q[c - cw];
-        q[c] = s * pc[c];
+        /* A cell's left edge in u is its own index plus its row, u's rows
+         * being one longer; in v it is its own index. */
+        int row = c / cw;
+        float div = (l->u[c + row + 1] - l->u[c + row] + l->v[c + cw] - l->v[c]) * idx;
+        float over = l->mass[c] / full - 1.0f;
+        bool inside = (l->nbits[k] & (NB_L | NB_R | NB_U | NB_D)) == (NB_L | NB_R | NB_U | NB_D);
+        float spread = 0.0f;
+        if (over > 0.0f || inside)
+            spread = fmaxf(fminf(DRIFT_RATE * h * over, 0.5f), -0.5f) / h;
+        float b = -(div - spread) * dx * dx;
+        l->rhs[c] = b;
+        if (fabsf(b) > most) most = fabsf(b);
     }
-    for (int k = l->nfluid - 1; k >= 0; k--) {
-        int c = l->fluid[k];
-        float s = q[c];
-        if (t[c + 1] == FLUID)  s += pc[c] * z[c + 1];
-        if (t[c + cw] == FLUID) s += pc[c] * z[c + cw];
-        z[c] = s * pc[c];
-    }
+    return most;
 }
 
-static double dot(const FwmLiquid *l, const float *a, const float *b) {
-    double s = 0.0;
-    for (int k = 0; k < l->nfluid; k++) {
+/* y = A x over the strip, and the dot of y with `x` for it. */
+static double strip_multiply(const FwmLiquid *l, int k0, int k1, const float *x, float *y) {
+    const int cw = l->cw;
+    double dot = 0.0;
+    for (int k = k0; k < k1; k++) {
         int c = l->fluid[k];
-        s += (double)a[c] * (double)b[c];
+        unsigned b = l->nbits[k];
+        float s = 0.0f;
+        if (b & NB_L) s += x[c - 1];
+        if (b & NB_R) s += x[c + 1];
+        if (b & NB_U) s += x[c - cw];
+        if (b & NB_D) s += x[c + cw];
+        float v = (float)l->ndiag[k] * x[c] - s;
+        y[c] = v;
+        dot += (double)v * (double)x[c];
     }
+    return dot;
+}
+
+/* z = M^-1 r over the strip, and the dot of z with r for it. */
+static double strip_precondition(FwmLiquid *l, int k0, int k1, const float *r, float *z) {
+    const int cw = l->cw;
+    const float *pc = l->prec;
+    float *q = l->q;
+    for (int k = k0; k < k1; k++) {
+        int c = l->fluid[k];
+        unsigned b = l->nbits[k];
+        float s = r[c];
+        if (b & NB_LS) s += pc[c - 1] * q[c - 1];
+        if (b & NB_U)  s += pc[c - cw] * q[c - cw];
+        q[c] = s * pc[c];
+    }
+    double dot = 0.0;
+    for (int k = k1 - 1; k >= k0; k--) {
+        int c = l->fluid[k];
+        unsigned b = l->nbits[k];
+        float s = q[c];
+        if (b & NB_RS) s += pc[c] * z[c + 1];
+        if (b & NB_D)  s += pc[c] * z[c + cw];
+        z[c] = s * pc[c];
+        dot += (double)z[c] * (double)r[c];
+    }
+    return dot;
+}
+
+/* The member sums of one slot, added up — in member order, so that every
+ * member gets the same number and takes the same turn. */
+static double summed(const FwmLiquid *l, int slot) {
+    double s = 0.0;
+    for (int q = 0; q < l->parts; q++) s += l->psum[q].v[slot];
     return s;
+}
+static double largest(const FwmLiquid *l, int slot) {
+    double m = 0.0;
+    for (int q = 0; q < l->parts; q++) if (l->psum[q].v[slot] > m) m = l->psum[q].v[slot];
+    return m;
 }
 
 /* Solve for `pres` (which holds the last step's answer, scaled to this one,
- * as the first guess) against `rhs`. */
-static void solve_pressure(FwmLiquid *l) {
+ * as the first guess): each member its own strip, in step with the rest. */
+static void job_pressure(void *ctx, int part, int parts) {
+    const struct step_job *job = ctx;
+    FwmLiquid *l = job->l;
+    (void)parts;
+    const int k0 = l->strip_at[part], k1 = l->strip_at[part + 1];
+    double *mine = l->psum[part].v;
     float *x = l->pres, *r = l->res, *z = l->aux, *s = l->dir;
-    l->iters = 0;
-    if (l->nfluid == 0) return;
 
-    float scale = 0.0f;
-    for (int k = 0; k < l->nfluid; k++) {
-        float b = fabsf(l->rhs[l->fluid[k]]);
-        if (b > scale) scale = b;
+    if (job->lists) {
+        strip_list(l, part);
+        strip_preconditioner(l, k0, k1);
     }
+    mine[0] = strip_rhs(l, k0, k1, job->h);
+    crew_sync(l->crew);
+
+    float scale = (float)largest(l, 0);
     if (scale < 1e-9f) {
-        for (int k = 0; k < l->nfluid; k++) x[l->fluid[k]] = 0.0f;
+        for (int k = k0; k < k1; k++) x[l->fluid[k]] = 0.0f;
+        if (part == 0) l->iters = 0;
         return;
     }
     const float tol = SOLVE_TOL * scale;
 
-    apply_matrix(l, x, z);
+    strip_multiply(l, k0, k1, x, z);
     float worst = 0.0f;
-    for (int k = 0; k < l->nfluid; k++) {
+    for (int k = k0; k < k1; k++) {
         int c = l->fluid[k];
         r[c] = l->rhs[c] - z[c];
         if (fabsf(r[c]) > worst) worst = fabsf(r[c]);
     }
-    if (worst < tol) return;
+    mine[1] = worst;
+    crew_sync(l->crew);
+    if (largest(l, 1) < tol) {
+        if (part == 0) l->iters = 0;
+        return;
+    }
 
-    build_preconditioner(l);
-    apply_preconditioner(l, r, z);
-    for (int k = 0; k < l->nfluid; k++) s[l->fluid[k]] = z[l->fluid[k]];
-    double sigma = dot(l, z, r);
+    mine[2] = strip_precondition(l, k0, k1, r, z);
+    for (int k = k0; k < k1; k++) s[l->fluid[k]] = z[l->fluid[k]];
+    crew_sync(l->crew);
+    double sigma = summed(l, 2);
 
-    for (int it = 1; it <= SOLVE_MAX_ITERS; it++) {
-        l->iters = it;
-        apply_matrix(l, s, z);
-        double ds = dot(l, z, s);
+    int it;
+    for (it = 1; it <= SOLVE_MAX_ITERS; it++) {
+        mine[3] = strip_multiply(l, k0, k1, s, z);
+        crew_sync(l->crew);
+        double ds = summed(l, 3);
         if (!(ds > 0.0)) break;
         float alpha = (float)(sigma / ds);
         worst = 0.0f;
-        for (int k = 0; k < l->nfluid; k++) {
+        for (int k = k0; k < k1; k++) {
             int c = l->fluid[k];
             x[c] += alpha * s[c];
             r[c] -= alpha * z[c];
             if (fabsf(r[c]) > worst) worst = fabsf(r[c]);
         }
-        if (worst < tol) break;
-        apply_preconditioner(l, r, z);
-        double sigma_new = dot(l, z, r);
+        mine[4] = worst;
+        mine[5] = strip_precondition(l, k0, k1, r, z);
+        crew_sync(l->crew);
+        if (largest(l, 4) < tol) break;
+        double sigma_new = summed(l, 5);
         float beta = (float)(sigma_new / sigma);
-        for (int k = 0; k < l->nfluid; k++) {
+        for (int k = k0; k < k1; k++) {
             int c = l->fluid[k];
             s[c] = z[c] + beta * s[c];
         }
         sigma = sigma_new;
+        /* Every strip's s in place before anyone multiplies by it. */
+        crew_sync(l->crew);
     }
+    if (part == 0) l->iters = it > SOLVE_MAX_ITERS ? SOLVE_MAX_ITERS : it;
+}
+
+/* The pressure for this step: the strips cut afresh when the cells did
+ * change, and the solve. */
+static void solve_pressure(FwmLiquid *l, float h, bool lists) {
+    if (lists) cut_strips(l);
+    struct step_job job = { .l = l, .h = h, .lists = lists };
+    crew_run(l->crew, job_pressure, &job);
 }
 
 /* ── the step ────────────────────────────────────────────────────────── */
@@ -616,88 +833,153 @@ static double stable_dt(const FwmLiquid *l) {
     return h;
 }
 
-/* Particles to the grid: momentum and mass on the edges, mass in the cells.
- * The momentum includes the affine part, which is the A in APIC. */
-static void transfer_to_grid(FwmLiquid *l) {
+/* Particles to the grid: momentum and mass on the edges, mass in the cells,
+ * and which cells a particle stands in — for particles lo .. hi, into the
+ * grid given, which is the liquid's own for the first member of the crew and
+ * a private one for the rest.
+ *
+ * The momentum includes the affine part, which is the A in APIC, and the
+ * viscosity. Viscosity is the stress each particle carries: twice the strain
+ * rate, and C is the velocity gradient. It reaches the grid the way a stress
+ * always does in MLS-MPM — the force a stress exerts on a node is its
+ * divergence there, which for this kernel works out to the stress times the
+ * node's offset — and the offset is the one the affine part is already
+ * multiplied by, so the two go in as one term and one pass over the
+ * particles. */
+struct grid_view {
+    float *u, *um, *v, *vm, *mass;
+    unsigned char *occ;
+};
+
+static void gather(const FwmLiquid *l, int lo, int hi, float h, const struct grid_view *g) {
     const float dx = l->dx, idx = l->inv_dx, m = l->pmass;
-    for (int k = 0; k < l->n; k++) {
+    const float nu = (float)l->mat.viscosity;
+    /* -dt * volume * D^-1, with D^-1 = 4/dx^2 for the quadratic kernel. */
+    const float ks = -h * m * 4.0f * idx * idx * nu;
+    const int nx = l->nx, ny = l->ny;
+    for (int k = lo; k < hi; k++) {
         const Particle *p = &l->p[k];
         float gx = (p->x - l->ox) * idx, gy = (p->y - l->oy) * idx;
         float wx[3], wy[3], fx, fy;
+        float s00 = ks * 2.0f * p->c00, s11 = ks * 2.0f * p->c11;
+        float s01 = ks * (p->c01 + p->c10);
 
         /* Horizontal velocity lives on vertical edges: integer x, half y. */
-        int bx = stencil(gx, wx, &fx), by = stencil(gy - 0.5f, wy, &fy);
+        float a = m * p->vx, bx = m * p->c00 + s00, by = m * p->c01 + s01;
+        int ix = stencil(gx, wx, &fx), iy = stencil(gy - 0.5f, wy, &fy);
         for (int j = 0; j < 3; j++) {
             float dpy = ((float)j - fy) * dx;
-            size_t row = UIX(l, bx, by + j);
+            size_t row = UIX(l, ix, iy + j);
             for (int i = 0; i < 3; i++) {
-                float w = wx[i] * wy[j] * m;
+                float w = wx[i] * wy[j];
                 float dpx = ((float)i - fx) * dx;
-                l->um[row + i] += w;
-                l->u[row + i]  += w * (p->vx + p->c00 * dpx + p->c01 * dpy);
+                g->um[row + i] += w * m;
+                g->u[row + i]  += w * (a + bx * dpx + by * dpy);
             }
         }
         /* Vertical velocity on horizontal edges: half x, integer y. */
-        bx = stencil(gx - 0.5f, wx, &fx);
-        by = stencil(gy, wy, &fy);
+        a = m * p->vy; bx = m * p->c10 + s01; by = m * p->c11 + s11;
+        ix = stencil(gx - 0.5f, wx, &fx);
+        iy = stencil(gy, wy, &fy);
         for (int j = 0; j < 3; j++) {
             float dpy = ((float)j - fy) * dx;
-            size_t row = VIX(l, bx, by + j);
+            size_t row = VIX(l, ix, iy + j);
             for (int i = 0; i < 3; i++) {
-                float w = wx[i] * wy[j] * m;
+                float w = wx[i] * wy[j];
                 float dpx = ((float)i - fx) * dx;
-                l->vm[row + i] += w;
-                l->v[row + i]  += w * (p->vy + p->c10 * dpx + p->c11 * dpy);
+                g->vm[row + i] += w * m;
+                g->v[row + i]  += w * (a + bx * dpx + by * dpy);
             }
         }
         /* Mass at cell centres: half x, half y. */
-        bx = stencil(gx - 0.5f, wx, &fx);
-        by = stencil(gy - 0.5f, wy, &fy);
+        ix = stencil(gx - 0.5f, wx, &fx);
+        iy = stencil(gy - 0.5f, wy, &fy);
         for (int j = 0; j < 3; j++) {
-            size_t row = CIX(l, bx, by + j);
+            size_t row = CIX(l, ix, iy + j);
             for (int i = 0; i < 3; i++)
-                l->mass[row + i] += wx[i] * wy[j] * m;
+                g->mass[row + i] += wx[i] * wy[j] * m;
         }
+
+        int ci = (int)gx, cj = (int)gy;
+        if (ci < 0) ci = 0;
+        if (ci >= nx) ci = nx - 1;
+        if (cj < 0) cj = 0;
+        if (cj >= ny) cj = ny - 1;
+        g->occ[CIX(l, ci, cj)] = 1;
     }
 }
 
-/* Viscosity, as the stress each particle carries: twice the strain rate, and
- * C is the velocity gradient. Handed to the grid as momentum the same way a
- * stress always is in MLS-MPM — the force a stress exerts on a node is its
- * divergence there, which for this kernel works out to the stress times the
- * node's offset. */
-static void transfer_viscosity(FwmLiquid *l, float h) {
-    const float nu = (float)l->mat.viscosity;
-    const float dx = l->dx, idx = l->inv_dx, m = l->pmass;
-    /* -dt * volume * D^-1, with D^-1 = 4/dx^2 for the quadratic kernel. */
-    const float ks = -h * m * 4.0f * idx * idx;
-    for (int k = 0; k < l->n; k++) {
-        const Particle *p = &l->p[k];
-        float s00 = ks * 2.0f * nu * p->c00;
-        float s11 = ks * 2.0f * nu * p->c11;
-        float s01 = ks * nu * (p->c01 + p->c10);
-        float gx = (p->x - l->ox) * idx, gy = (p->y - l->oy) * idx;
-        float wx[3], wy[3], fx, fy;
+/* Every member gathers its share of the particles; then, a share of the grid
+ * each, the members' grids are added up, momentum becomes velocity, gravity
+ * goes in, and each cell is told whether it is liquid. An edge no particle
+ * reached has no velocity yet; the extrapolation after the pressure gives it
+ * one. A cell counts as liquid when the particles around it fill it enough
+ * (FILL), or when one stands in it. */
+static void job_to_grid(void *ctx, int part, int parts) {
+    const struct step_job *job = ctx;
+    FwmLiquid *l = job->l;
+    const size_t un = l->un, vn = l->vn, cn = l->cn;
 
-        int bx = stencil(gx, wx, &fx), by = stencil(gy - 0.5f, wy, &fy);
-        for (int j = 0; j < 3; j++) {
-            float dpy = ((float)j - fy) * dx;
-            size_t row = UIX(l, bx, by + j);
-            for (int i = 0; i < 3; i++) {
-                float dpx = ((float)i - fx) * dx;
-                l->u[row + i] += wx[i] * wy[j] * (s00 * dpx + s01 * dpy);
-            }
+    struct grid_view g;
+    if (part == 0) {
+        g = (struct grid_view){ l->u, l->um, l->v, l->vm, l->mass, NULL };
+    } else {
+        float *base = l->pgrid + (size_t)(part - 1) * l->pstride;
+        g = (struct grid_view){ base, base + un, base + 2 * un, base + 2 * un + vn,
+                                base + 2 * un + 2 * vn, NULL };
+    }
+    g.occ = l->pocc + (size_t)part * cn;
+    memset(g.u, 0, un * sizeof(float));
+    memset(g.um, 0, un * sizeof(float));
+    memset(g.v, 0, vn * sizeof(float));
+    memset(g.vm, 0, vn * sizeof(float));
+    memset(g.mass, 0, cn * sizeof(float));
+    memset(g.occ, 0, cn);
+
+    int lo, hi;
+    crew_share(l->n, part, parts, &lo, &hi);
+    gather(l, lo, hi, job->h, &g);
+    crew_sync(l->crew);
+
+    const float hgx = (float)(job->h * l->gx), hgy = (float)(job->h * l->gy);
+    const float *other = l->pgrid;
+    const size_t ps = l->pstride;
+
+    crew_share((int)un, part, parts, &lo, &hi);
+    for (size_t f = (size_t)lo; f < (size_t)hi; f++) {
+        float u = l->u[f], um = l->um[f];
+        for (int q = 1; q < parts; q++) {
+            u  += other[(size_t)(q - 1) * ps + f];
+            um += other[(size_t)(q - 1) * ps + un + f];
         }
-        bx = stencil(gx - 0.5f, wx, &fx);
-        by = stencil(gy, wy, &fy);
-        for (int j = 0; j < 3; j++) {
-            float dpy = ((float)j - fy) * dx;
-            size_t row = VIX(l, bx, by + j);
-            for (int i = 0; i < 3; i++) {
-                float dpx = ((float)i - fx) * dx;
-                l->v[row + i] += wx[i] * wy[j] * (s01 * dpx + s11 * dpy);
-            }
+        l->um[f] = um;
+        l->uok[f] = um > 0.0f;
+        l->u[f] = um > 0.0f ? u / um + hgx : 0.0f;
+    }
+    crew_share((int)vn, part, parts, &lo, &hi);
+    for (size_t f = (size_t)lo; f < (size_t)hi; f++) {
+        float v = l->v[f], vm = l->vm[f];
+        for (int q = 1; q < parts; q++) {
+            v  += other[(size_t)(q - 1) * ps + 2 * un + f];
+            vm += other[(size_t)(q - 1) * ps + 2 * un + vn + f];
         }
+        l->vm[f] = vm;
+        l->vok[f] = vm > 0.0f;
+        l->v[f] = vm > 0.0f ? v / vm + hgy : 0.0f;
+    }
+    const float full = FILL * 4.0f * l->pmass;
+    crew_share((int)cn, part, parts, &lo, &hi);
+    for (size_t c = (size_t)lo; c < (size_t)hi; c++) {
+        float mass = l->mass[c];
+        unsigned char occ = l->pocc[c];
+        for (int q = 1; q < parts; q++) {
+            mass += other[(size_t)(q - 1) * ps + 2 * un + 2 * vn + c];
+            occ |= l->pocc[(size_t)q * cn + c];
+        }
+        l->mass[c] = mass;
+        int i = (int)(c % (size_t)l->cw) - PAD, j = (int)(c / (size_t)l->cw) - PAD;
+        if (i < 0 || i >= l->nx || j < 0 || j >= l->ny) l->type[c] = SOLID;
+        else l->type[c] = (occ || mass >= full) ? FLUID : AIR;
     }
 }
 
@@ -716,14 +998,35 @@ static void transfer_viscosity(FwmLiquid *l, float h) {
  * does not care how the particles happen to lie. Only the first derivative of
  * the fullness is needed, where a curvature force would need the second and
  * be mostly noise at this resolution. */
-static void apply_tension(FwmLiquid *l, float h) {
+static void job_tension(void *ctx, int part, int parts) {
+    const struct step_job *job = ctx;
+    FwmLiquid *l = job->l;
     const float gamma = (float)(l->mat.tension * l->mat.tension * EARTH_G);
     const int nx = l->nx, ny = l->ny, cw = l->cw;
-    const float idx = l->inv_dx;
-    const float *c = l->colour;
+    const float idx = l->inv_dx, h = job->h;
+    const float fill = 4.0f * l->pmass * SURFACE_FULL;
+    float *c = l->colour;
+    int lo, hi;
+
+    /* How full each cell is, a ring past the walls included. A wall reads as
+     * neither liquid nor air — the fullness past it is a copy of the
+     * fullness against it — so a drop on the floor meets it at a right
+     * angle, neither beading up off it as if it were air nor creeping along
+     * it. */
+    crew_share(ny + 2, part, parts, &lo, &hi);
+    for (int j = lo - 1; j < hi - 1; j++) {
+        int sj = j < 0 ? 0 : j >= ny ? ny - 1 : j;
+        for (int i = -1; i <= nx; i++) {
+            int si = i < 0 ? 0 : i >= nx ? nx - 1 : i;
+            float r = l->mass[CIX(l, si, sj)] / fill;
+            c[CIX(l, i, j)] = r > 1.0f ? 1.0f : r;
+        }
+    }
+    crew_sync(l->crew);
 
     /* Normal stresses at the cell centres... */
-    for (int j = 0; j < ny; j++)
+    crew_share(ny, part, parts, &lo, &hi);
+    for (int j = lo; j < hi; j++)
         for (int i = 0; i < nx; i++) {
             size_t q = CIX(l, i, j);
             float gx = (c[q + 1] - c[q - 1]) * 0.5f * idx;
@@ -734,7 +1037,8 @@ static void apply_tension(FwmLiquid *l, float h) {
         }
     /* ...and the shear one at the corners, where the staggered grid needs it:
      * corner (i, j) is the top-left of cell (i, j). */
-    for (int j = 0; j <= ny; j++)
+    crew_share(ny + 1, part, parts, &lo, &hi);
+    for (int j = lo; j < hi; j++)
         for (int i = 0; i <= nx; i++) {
             size_t q = CIX(l, i, j);
             float a = c[q], b = c[q - 1], d = c[q - cw], e = c[q - 1 - cw];
@@ -743,8 +1047,10 @@ static void apply_tension(FwmLiquid *l, float h) {
             float g = sqrtf(gx * gx + gy * gy);
             l->txy[q] = g > 1e-6f ? -gamma * gx * gy / g : 0.0f;
         }
+    crew_sync(l->crew);
 
-    for (int j = 0; j < ny; j++)
+    crew_share(ny, part, parts, &lo, &hi);
+    for (int j = lo; j < hi; j++)
         for (int i = 1; i < nx; i++) {
             size_t f = UIX(l, i, j);
             if (!l->uok[f]) continue;
@@ -752,7 +1058,7 @@ static void apply_tension(FwmLiquid *l, float h) {
                       + l->txy[CIX(l, i, j + 1)] - l->txy[CIX(l, i, j)]) * idx;
             l->u[f] += h * fx;
         }
-    for (int j = 1; j < ny; j++)
+    for (int j = lo > 1 ? lo : 1; j < hi; j++)
         for (int i = 0; i < nx; i++) {
             size_t f = VIX(l, i, j);
             if (!l->vok[f]) continue;
@@ -906,44 +1212,22 @@ static bool release_walls(FwmLiquid *l) {
     return any;
 }
 
-/* What the pressure has to cancel in each fluid cell: the flow into or out of
- * it — plus a little, where the particles have drifted, so the cell evens
- * them out again (DRIFT_RATE). The unknown is pressure times h (density is 1),
- * which makes the update after the solve a plain difference. */
-static void build_rhs(FwmLiquid *l, float h) {
-    const int nx = l->nx, ny = l->ny;
-    const float idx = l->inv_dx, dx = l->dx, full = 4.0f * l->pmass;
-    l->nfluid = 0;
-    for (int j = 0; j < ny; j++)
-        for (int i = 0; i < nx; i++) {
-            size_t c = CIX(l, i, j);
-            if (l->type[c] != FLUID) continue;
-            l->fluid[l->nfluid++] = (int)c;
-            float div = (l->u[UIX(l, i + 1, j)] - l->u[UIX(l, i, j)]
-                       + l->v[VIX(l, i, j + 1)] - l->v[VIX(l, i, j)]) * idx;
-            float over = l->mass[c] / full - 1.0f;
-            bool inside = l->type[c - 1] == FLUID && l->type[c + 1] == FLUID
-                       && l->type[c - l->cw] == FLUID && l->type[c + l->cw] == FLUID;
-            float spread = 0.0f;
-            if (over > 0.0f || inside)
-                spread = fmaxf(fminf(DRIFT_RATE * h * over, 0.5f), -0.5f) / h;
-            l->rhs[c] = -(div - spread) * dx * dx;
-        }
-}
-
 /* Give every edge that has no value of its own the average of the neighbours
  * that do, a few rings out. A particle at the surface reads edges that lie
  * partly in the air, and without this it would read zero there and be held
  * back by nothing at all. */
 static void extrapolate(FwmLiquid *l, float *f, unsigned char *ok, size_t len,
-                        int stride, int rings) {
+                        int stride, int rings, int part, int parts, int slot) {
     unsigned char *next = l->okb;
     float *val = l->ftmp;
+    const size_t first = (size_t)stride + 1, last = len - (size_t)stride - 1;
+    int lo, hi;
+    crew_share((int)len, part, parts, &lo, &hi);
     for (int r = 0; r < rings; r++) {
-        memcpy(next, ok, len);
         bool any = false;
-        for (size_t c = (size_t)stride + 1; c + (size_t)stride + 1 < len; c++) {
-            if (ok[c]) continue;
+        for (size_t c = (size_t)lo; c < (size_t)hi; c++) {
+            next[c] = ok[c];
+            if (ok[c] || c < first || c >= last) continue;
             float s = 0.0f;
             int n = 0;
             if (ok[c - 1])      { s += f[c - 1];      n++; }
@@ -952,93 +1236,30 @@ static void extrapolate(FwmLiquid *l, float *f, unsigned char *ok, size_t len,
             if (ok[c + stride]) { s += f[c + stride]; n++; }
             if (n) { val[c] = s / (float)n; next[c] = 1; any = true; }
         }
-        if (!any) break;
-        for (size_t c = 0; c < len; c++)
+        /* Its own slot: u is done with one when v starts on the other,
+         * without a sync between, and a member still reading u's would see
+         * v's. */
+        l->psum[part].v[slot] = any;
+        crew_sync(l->crew);
+        if (summed(l, slot) == 0.0) break;
+        for (size_t c = (size_t)lo; c < (size_t)hi; c++) {
             if (next[c] && !ok[c]) f[c] = val[c];
-        memcpy(ok, next, len);
+            ok[c] = next[c];
+        }
+        crew_sync(l->crew);
     }
 }
 
-static void substep(FwmLiquid *l, float h) {
+/* The pressure onto the edges between liquid cells and the ones beside
+ * them, and every edge left without a value given one. */
+static void job_finish(void *ctx, int part, int parts) {
+    const struct step_job *job = ctx;
+    FwmLiquid *l = job->l;
     const int nx = l->nx, ny = l->ny;
-    const float idx = l->inv_dx, dx = l->dx;
-    const float full = 4.0f * l->pmass;
-
-    memset(l->u, 0, l->un * sizeof(float));
-    memset(l->um, 0, l->un * sizeof(float));
-    memset(l->v, 0, l->vn * sizeof(float));
-    memset(l->vm, 0, l->vn * sizeof(float));
-    memset(l->mass, 0, l->cn * sizeof(float));
-
-    /* 1. Particles to the grid, and which cells are liquid. */
-    transfer_to_grid(l);
-    memset(l->type, SOLID, l->cn);
-    for (int j = 0; j < ny; j++)
-        for (int i = 0; i < nx; i++) {
-            size_t c = CIX(l, i, j);
-            l->type[c] = l->mass[c] >= FILL * full ? FLUID : AIR;
-        }
-    for (int k = 0; k < l->n; k++) {
-        int i = (int)((l->p[k].x - l->ox) * idx), j = (int)((l->p[k].y - l->oy) * idx);
-        if (i < 0) i = 0;
-        if (i >= nx) i = nx - 1;
-        if (j < 0) j = 0;
-        if (j >= ny) j = ny - 1;
-        l->type[CIX(l, i, j)] = FLUID;
-    }
-
-    /* 2. Forces that come from the particles' own stress. */
-    if (l->mat.viscosity > 0.0) transfer_viscosity(l, h);
-
-    /* 3. Momentum to velocity, and gravity. An edge no particle reached has
-     * no velocity yet; the extrapolation below gives it one. */
-    const float hgx = (float)(h * l->gx), hgy = (float)(h * l->gy);
-    for (size_t f = 0; f < l->un; f++) {
-        l->uok[f] = l->um[f] > 0.0f;
-        l->u[f] = l->uok[f] ? l->u[f] / l->um[f] + hgx : 0.0f;
-    }
-    for (size_t f = 0; f < l->vn; f++) {
-        l->vok[f] = l->vm[f] > 0.0f;
-        l->v[f] = l->vok[f] ? l->v[f] / l->vm[f] + hgy : 0.0f;
-    }
-
-    /* 4. Surface tension. A wall reads as neither liquid nor air — the
-     * fullness past it is a copy of the fullness against it — so a drop on
-     * the floor meets it at a right angle, neither beading up off it as if it
-     * were air nor creeping along it. */
-    if (l->mat.tension > 0.0) {
-        for (size_t c = 0; c < l->cn; c++) {
-            float r = l->mass[c] / (full * SURFACE_FULL);
-            l->colour[c] = r > 1.0f ? 1.0f : r;
-        }
-        for (int j = 0; j < ny; j++) {
-            l->colour[CIX(l, -1, j)] = l->colour[CIX(l, 0, j)];
-            l->colour[CIX(l, nx, j)] = l->colour[CIX(l, nx - 1, j)];
-        }
-        for (int i = -1; i <= nx; i++) {
-            l->colour[CIX(l, i, -1)] = l->colour[CIX(l, i, 0)];
-            l->colour[CIX(l, i, ny)] = l->colour[CIX(l, i, ny - 1)];
-        }
-        apply_tension(l, h);
-    }
-
-    close_walls(l);
-
-    /* 5. The pressure, starting from last step's: a pool at rest needs the
-     * same pressure every step, and from there the solve has almost nothing
-     * left to do. It is pressure times h, hence the rescale. */
-    float rescale = l->last_h > 0.0 ? (float)(h / l->last_h) : 0.0f;
-    for (size_t c = 0; c < l->cn; c++)
-        l->pres[c] = l->type[c] == FLUID ? l->pres[c] * rescale : 0.0f;
-    build_rhs(l, h);
-    solve_pressure(l);
-    if (release_walls(l)) {
-        build_rhs(l, h);
-        solve_pressure(l);
-    }
-    l->last_h = h;
-
-    for (int j = 0; j < ny; j++)
+    const float idx = l->inv_dx;
+    int lo, hi;
+    crew_share(ny, part, parts, &lo, &hi);
+    for (int j = lo; j < hi; j++)
         for (int i = 1; i < nx; i++) {
             size_t a = CIX(l, i - 1, j), b = CIX(l, i, j);
             if (l->type[a] != FLUID && l->type[b] != FLUID) continue;
@@ -1046,7 +1267,7 @@ static void substep(FwmLiquid *l, float h) {
             l->u[f] -= (l->pres[b] - l->pres[a]) * idx;
             l->uok[f] = 1;
         }
-    for (int j = 1; j < ny; j++)
+    for (int j = lo > 1 ? lo : 1; j < hi; j++)
         for (int i = 0; i < nx; i++) {
             size_t a = CIX(l, i, j - 1), b = CIX(l, i, j);
             if (l->type[a] != FLUID && l->type[b] != FLUID) continue;
@@ -1054,18 +1275,26 @@ static void substep(FwmLiquid *l, float h) {
             l->v[f] -= (l->pres[b] - l->pres[a]) * idx;
             l->vok[f] = 1;
         }
+    crew_sync(l->crew);
+    extrapolate(l, l->u, l->uok, l->un, l->uw, 3, part, parts, 6);
+    extrapolate(l, l->v, l->vok, l->vn, l->vw, 3, part, parts, 7);
+}
 
-    extrapolate(l, l->u, l->uok, l->un, l->uw, 3);
-    extrapolate(l, l->v, l->vok, l->vn, l->vw, 3);
-
-    /* 6. Back to the particles: a velocity, the gradient around it, a move. */
+/* Back to the particles: a velocity, the gradient around it, a move — each
+ * member its share, and how fast its fastest went. */
+static void job_to_particles(void *ctx, int part, int parts) {
+    const struct step_job *job = ctx;
+    FwmLiquid *l = job->l;
+    const float h = job->h, idx = l->inv_dx, dx = l->dx;
+    const int nx = l->nx, ny = l->ny;
     const float x0 = l->ox + 0.1f * dx, x1 = l->ox + nx * dx - 0.1f * dx;
     const float y0 = l->oy + 0.1f * dx, y1 = l->oy + ny * dx - 0.1f * dx;
     const float dinv = 4.0f * idx;   /* D^-1 times the dx in each offset */
     float vmax2 = 0.0f;
     double vsum2 = 0.0;
-    int bad = 0;
-    for (int k = 0; k < l->n; k++) {
+    int bad = 0, lo, hi;
+    crew_share(l->n, part, parts, &lo, &hi);
+    for (int k = lo; k < hi; k++) {
         Particle *p = &l->p[k];
         float gx = (p->x - l->ox) * idx, gy = (p->y - l->oy) * idx;
         float wx[3], wy[3], fx, fy;
@@ -1111,6 +1340,42 @@ static void substep(FwmLiquid *l, float h) {
         if (v2 > vmax2) vmax2 = v2;
         vsum2 += v2;
     }
+
+    l->psum[part].v[0] = vmax2;
+    l->psum[part].v[1] = vsum2;
+    l->psum[part].v[2] = bad;
+}
+
+static void substep(FwmLiquid *l, float h) {
+    struct step_job job = { .l = l, .h = h };
+
+    /* 1. Particles to the grid — their momentum, the viscosity among it —
+     * gravity, and which cells are liquid. */
+    crew_run(l->crew, job_to_grid, &job);
+
+    /* 2. Surface tension. */
+    if (l->mat.tension > 0.0) crew_run(l->crew, job_tension, &job);
+
+    close_walls(l);
+
+    /* 3. The pressure, starting from last step's: a pool at rest needs the
+     * same pressure every step, and from there the solve has almost nothing
+     * left to do. It is pressure times h, hence the rescale. A wall that lets
+     * go changes what flows, not which cells are liquid, so the second solve
+     * keeps the strips and their preconditioners. */
+    float rescale = l->last_h > 0.0 ? (float)(h / l->last_h) : 0.0f;
+    for (size_t c = 0; c < l->cn; c++)
+        l->pres[c] = l->type[c] == FLUID ? l->pres[c] * rescale : 0.0f;
+    solve_pressure(l, h, true);
+    if (release_walls(l)) solve_pressure(l, h, false);
+    l->last_h = h;
+    crew_run(l->crew, job_finish, &job);
+
+    /* 4. Back to the particles. */
+    crew_run(l->crew, job_to_particles, &job);
+    float vmax2 = (float)largest(l, 0);
+    double vsum2 = summed(l, 1);
+    int bad = (int)summed(l, 2);
 
     /* A particle gone to NaN would poison the grid for every neighbour on the
      * next step and the whole body after that. It cannot happen inside the

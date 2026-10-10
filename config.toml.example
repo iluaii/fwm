@@ -864,15 +864,15 @@ fps        = 24
 # stands on the desktop you poured it on, behind the windows, and they do not
 # feel it yet.
 #
-# Its own CPU core while anything in it moves (about 2ms a step for 3000
-# particles, 5ms for 12000), nothing once it has settled or while nobody can
-# see it. Needs the GLES2 renderer to be drawn.
+# The CPU's cores while anything in it moves (on six, about 1.5ms a step for
+# 12000 particles, 4ms for 30000), nothing once it has settled or while nobody
+# can see it. Needs the GLES2 renderer to be drawn.
 [liquids]
 enabled   = false
 # The most one desktop may hold, and the cost: a step touches every particle.
-# The default fills about a fifth of a 1080p screen; a desktop never takes
-# more than its own area holds, whatever this says.
-particles = 12000
+# The default fills about half a 1080p screen; a desktop never takes more than
+# its own area holds, whatever this says.
+particles = 30000
 # Px between particles at rest — the finest drop there can be. 8 covers nearly
 # twice the screen with the same particles, in coarser drops. Reload-only, and
 # changing it empties the liquid.
@@ -886,6 +886,9 @@ viscosity = 60
 tension   = 30
 # #RRGGBB[AA]. The alpha is how much of the desktop shows through it.
 color     = "#3a8be0cc"
+# How many threads a step is split across. 0 is one per core — SMT's second
+# thread on a core adds little here and takes it from everything else.
+threads   = 0
 
 # When a restarted fwm should put your applications back. fwm records what is
 # running and on which desktop, and relaunches it — the applications restart,

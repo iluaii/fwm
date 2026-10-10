@@ -1081,8 +1081,8 @@ static void load_grass(toml_table_t *root, FwmConfig *cfg) {
 static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
     LiquidsConfig *q = &cfg->liquids;
 
-    q->enabled   = 0;      /* experimental, and a CPU core while it moves */
-    q->particles = 12000;
+    q->enabled   = 0;      /* experimental, and the CPU's cores while it moves */
+    q->particles = 30000;
     q->spacing   = 6.0;
     /* Thin enough to splash and run like water, thick enough that a pool
      * settles in under a minute rather than sloshing on for several. */
@@ -1091,6 +1091,7 @@ static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
      * gathers into a ball in a few seconds rather than a few tens. */
     q->tension   = 30.0;
     parse_hex_color("#3a8be0cc", q->color);   /* clear blue, a little see-through */
+    q->threads   = 0;      /* one per core */
 
     if (!root) return;
     toml_table_t *tbl = toml_table_in(root, "liquids");
@@ -1103,6 +1104,8 @@ static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
     LOAD_DOUBLE(tbl, "spacing",   q->spacing);
     LOAD_DOUBLE(tbl, "viscosity", q->viscosity);
     LOAD_DOUBLE(tbl, "tension",   q->tension);
+    toml_datum_t th = toml_int_in(tbl, "threads");
+    if (th.ok) q->threads = (int)th.u.i;
 
     toml_datum_t c = toml_string_in(tbl, "color");
     if (c.ok) {
@@ -1111,10 +1114,14 @@ static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
         free(c.u.s);
     }
 
-    /* The budget is the cost: every step touches every particle. Past ~40000
-     * one core cannot keep a splash in real time. */
+    /* The budget is the cost: every step touches every particle. The ceiling
+     * is a 4K screen filled at the default spacing; what keeps up in real
+     * time is the CPU's business — six cores hold a 1080p screen of it. */
     if (q->particles < 0)      q->particles = 0;
-    if (q->particles > 40000)  q->particles = 40000;
+    if (q->particles > 200000) q->particles = 200000;
+    /* 16 is the most liquid.c splits a step into. */
+    if (q->threads < 0)        q->threads = 0;
+    if (q->threads > 16)       q->threads = 16;
     /* Under 3 px the grid is a million cells for a screen; over 20 a drop is a
      * thumbnail-sized blob and the surface reads as lumps. */
     if (q->spacing < 3.0)      q->spacing = 3.0;

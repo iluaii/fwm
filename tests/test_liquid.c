@@ -87,8 +87,12 @@ static double height_below(const FwmLiquid *l, double frac) {
     return y;
 }
 
+/* How many threads every liquid here steps on: see main. */
+static int threads = 1;
+
 static FwmLiquid *make(double w, double h, double viscosity, double tension) {
     FwmLiquid *l = liquid_create(SPACING, 20000);
+    liquid_set_threads(l, threads);
     liquid_set_box(l, w, h);
     LiquidMaterial m = { .viscosity = viscosity, .tension = tension };
     liquid_set_material(l, &m);
@@ -197,6 +201,7 @@ static void test_pour(void) {
     /* Liquid past the box's area has nowhere to be: poured 5% over, a full
      * desktop once thrashed at the ceiling of steps for good. */
     l = liquid_create(SPACING, 100000);
+    liquid_set_threads(l, threads);
     liquid_set_box(l, 600, 400);
     liquid_set_material(l, &(LiquidMaterial){ .viscosity = 60, .tension = 30 });
     int brim = (int)(600 * 400 / (SPACING * SPACING));
@@ -377,13 +382,67 @@ static void test_walls(void) {
     liquid_destroy(l);
 }
 
+/* ── threads ─────────────────────────────────────────────────────────── */
+
+static void test_threads(void) {
+    CASE("a crew of threads is what it was asked to be, within bounds");
+    FwmLiquid *l = liquid_create(SPACING, 100);
+    CHECK_INT(liquid_threads(l), 1);
+    liquid_set_threads(l, 3);
+    CHECK_INT(liquid_threads(l), 3);
+    liquid_set_threads(l, 0);
+    CHECK_INT(liquid_threads(l), 1);
+    liquid_set_threads(l, 1000);
+    CHECK_INT(liquid_threads(l), LIQUID_MAX_THREADS);
+    liquid_destroy(l);
+
+    CASE("split across threads, a splash comes down where it does on one");
+    /* Not to the bit: the strips change the preconditioner, and sums of n
+     * parts are added in another order. To well under a particle. */
+    Shape s[2];
+    for (int k = 0; k < 2; k++) {
+        FwmLiquid *b = liquid_create(SPACING, 20000);
+        liquid_set_box(b, 1200, 700);
+        liquid_set_material(b, &(LiquidMaterial){ .viscosity = 60, .tension = 30 });
+        liquid_set_threads(b, k ? 4 : 1);
+        liquid_pour(b, 400, 250, 4000, 300, 0);
+        run(b, 1.5, 0, G);
+        s[k] = shape_of(b, 1200, 700);
+        liquid_destroy(b);
+    }
+    CHECK_INT(s[0].bad, 0);
+    CHECK_INT(s[1].bad, 0);
+    CHECK_INT(s[1].n, s[0].n);
+    CHECK_DBL(s[1].cx, s[0].cx, 0.5 * SPACING);
+    CHECK_DBL(s[1].cy, s[0].cy, 0.5 * SPACING);
+
+    CASE("a liquid can be moved onto more threads and back between steps");
+    l = make(1000, 600, 60, 30);
+    liquid_pour(l, 500, 200, 2000, 0, 0);
+    run(l, 0.3, 0, G);
+    liquid_set_threads(l, 5);
+    run(l, 0.3, 0, G);
+    liquid_set_threads(l, 2);
+    run(l, 0.3, 0, G);
+    Shape m = shape_of(l, 1000, 600);
+    CHECK_INT(m.bad, 0);
+    CHECK_INT(m.n, liquid_count(l));
+    liquid_destroy(l);
+}
+
 int main(void) {
-    test_pour();
-    test_free_fall();
-    test_inertia();
-    test_pool();
-    test_tension();
-    test_viscosity();
-    test_walls();
+    test_threads();
+    /* Everything twice: on the caller alone, and split across a crew. The
+     * laws must not notice the difference. */
+    for (threads = 1; threads <= 4; threads += 3) {
+        printf("test_liquid: on %d thread%s\n", threads, threads > 1 ? "s" : "");
+        test_pour();
+        test_free_fall();
+        test_inertia();
+        test_pool();
+        test_tension();
+        test_viscosity();
+        test_walls();
+    }
     return t_report("test_liquid");
 }

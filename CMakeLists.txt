@@ -110,6 +110,7 @@ find_package(Threads REQUIRED)
 set(SOURCES
     main.c
     src/physics.c
+    src/crew.c
     src/liquid.c
     src/liquid_kinds.c
     src/liquid_draw.c
@@ -357,10 +358,10 @@ if(FWM_TESTS)
     # The liquid is laws and nothing else, and none of them can be checked by
     # looking: a pool that has lost a tenth of its volume, or a ball drifting
     # with nothing pushing it, still looks like liquid. liquid.c reaches libm
-    # and nothing more.
-    add_executable(test_liquid tests/test_liquid.c src/liquid.c)
+    # and the threads it splits its step across, and nothing more.
+    add_executable(test_liquid tests/test_liquid.c src/liquid.c src/crew.c)
     target_include_directories(test_liquid PRIVATE src tests)
-    target_link_libraries(test_liquid PRIVATE m)
+    target_link_libraries(test_liquid PRIVATE m Threads::Threads)
 
     # The liquids made in the menu, through the file they are kept in and back.
     add_executable(test_liquid_kinds tests/test_liquid_kinds.c src/liquid_kinds.c src/toml.c)

@@ -69,7 +69,8 @@ atomic.
 | Video wallpaper decode (`src/video.c`) | libav decode of a clip, into a queue the compositor drains |
 | Audio capture (`src/audio.c`) | `pw_context_new()` **deadlocks** with no sound server running — measured, still stuck after 90s. Everything PipeWire happens off the main thread, setup included |
 | Sound mixer (`src/sound.c`) | `pa_simple_write` parks until the device has room |
-| Liquid (`src/server_liquid.c`) | a step of 12000 particles is 5ms calm and 20ms when a splash lands. One step in flight, handed over by an atomic `busy`; the tick never waits for it, it just shows the last picture. Joined on teardown — a step is bounded and waits on nothing |
+| Liquid (`src/server_liquid.c`) | a step of 30000 particles is 4ms on six cores, more when a splash lands. One step in flight, handed over by an atomic `busy`; the tick never waits for it, it just shows the last picture. Joined on teardown — a step is bounded and waits on nothing |
+| Liquid crew (`src/crew.c`) | the liquid worker splits each step across one thread per core, itself among them (`[liquids] threads`). They spin between the dozens of jobs in a step and sleep between steps; none of them sees anything but the `FwmLiquid` the worker hands them, and only inside a step. Destroyed with the liquid |
 
 Both audio threads are **never joined**. They are told to stop and ownership is
 refcounted, so whichever of the two lets go last frees the handle. Joining cost
@@ -80,7 +81,7 @@ price to pay for turning a feature *off*.
 
 | Area | Files |
 |---|---|
-| Simulation | `physics.c` (the mirror + Box2D), `wobble.c` (drag lattice), `liquid.c` (particles and a pressure solve — no wlroots, no threads) |
+| Simulation | `physics.c` (the mirror + Box2D), `wobble.c` (drag lattice), `liquid.c` (particles and a pressure solve — no wlroots; its loops split across `crew.c`'s threads) |
 | Liquid on screen | `server_liquid.c` (the worker, the pour, the bucket, where it stands), `liquid_draw.c` (particles to one smooth body, GLES2), `liquid_kinds.c` (the liquids to pick from, and their state file) |
 | Compositor core | `server.c`, `server_lifecycle.c`, `server_tick.c`, `server_output.c`, `server_shell.c`, `server_seat.c` |
 | Input | `server_input.c` (keyboard, binds, modes), `server_pointer.c`, `server_drag.c`, `gestures.c` + `server_gestures.c` |
@@ -181,7 +182,7 @@ exists because its subject cannot be checked by hand in a running session.
 | `test_physics` | the ends of the world: throws, walls, the ring join, mass scaling |
 | `test_physics_speed` | what has to keep working at speed — the drag that used to pass through windows, the world ceiling, walls under absurd throws |
 | `test_liquid_kinds` | the liquids made in the menu, through their state file and back |
-| `test_liquid` | the liquid's laws: free fall, inertia, a pool as deep as its volume that then goes still, gravity turned round, tension rounding a strip, viscosity, walls |
+| `test_liquid` | the liquid's laws: free fall, inertia, a pool as deep as its volume that then goes still, gravity turned round, tension rounding a strip, viscosity, walls, a box that holds no more than its area — all of it once on one thread and again split across four |
 | `test_ipc_events` | the event name/bit vocabulary |
 | `test_wobble` | the drag lattice, which only runs while a button is held |
 | `test_gestures` | what a swipe means, without a touchpad |

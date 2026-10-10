@@ -58,6 +58,7 @@
 #include <wlr/types/wlr_seat.h>
 #include <wlr/util/log.h>
 
+#include "crew.h"
 #include "expo.h"
 #include "glass.h"
 #include "liquid.h"
@@ -147,6 +148,16 @@ static double now_s(void) {
 
 /* ── the worker ──────────────────────────────────────────────────────── */
 
+/* How many threads the worker splits a step across, itself one of them:
+ * [liquids] threads, or one per core. The cores are asked about once — they
+ * do not change under a running compositor. */
+static int threads_wanted(const LiquidsConfig *cfg) {
+    static int per_core;
+    if (cfg->threads > 0) return cfg->threads;
+    if (!per_core) per_core = crew_default_size(LIQUID_MAX_THREADS);
+    return per_core;
+}
+
 static void *liquid_worker(void *data) {
     struct FwmLiquidRun *run = data;
     pthread_mutex_lock(&run->lock);
@@ -200,6 +211,7 @@ static struct FwmLiquidRun *run_create(FwmServer *server, int desktop) {
     if (!run) return NULL;
     run->sim = liquid_create(cfg->spacing, cfg->particles);
     if (!run->sim) { free(run); return NULL; }
+    liquid_set_threads(run->sim, threads_wanted(cfg));
     run->desktop = desktop;
     atomic_init(&run->busy, false);
     pthread_mutex_init(&run->lock, NULL);
@@ -400,6 +412,7 @@ void server_liquid_state(FwmServer *server, FwmLiquidState *st) {
     memset(st, 0, sizeof(*st));
     st->enabled = server->config.liquids.enabled;
     st->budget = server->config.liquids.particles;
+    st->threads = threads_wanted(&server->config.liquids);
     st->desktop = -1;
     struct FwmLiquidRun *run = server->liquid;
     if (!run) { st->asleep = true; return; }
@@ -409,6 +422,7 @@ void server_liquid_state(FwmServer *server, FwmLiquidState *st) {
     st->asleep = run->asleep && run->pour == 0 && !run->clear;
     st->substeps = run->substeps;
     st->step_ms = run->step_ms;
+    st->threads = liquid_threads(run->sim);
     st->drawn = run->paint && liquid_paint_current(run->paint);
     snprintf(st->kind, sizeof(st->kind), "%s", kind_of(server, run->kind)->name);
 }
@@ -1141,6 +1155,7 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
             }
         }
         liquid_set_budget(run->sim, cfg->particles);
+        liquid_set_threads(run->sim, threads_wanted(cfg));
         /* The liquid's own thickness; the surface is still [liquids]' for
          * every liquid, until there is a form row for it. */
         kinds_sync_water(server);
@@ -1255,10 +1270,10 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
         double t = now_s();
         if (t - run->dbg_at >= 1.0) {
             wlr_log(WLR_INFO, "liquid: %d particles, %s, %d steps/s at %.2f ms avg "
-                    "%.2f worst, %d substeps, %d iterations, fastest %.0f px/s",
+                    "%.2f worst on %d threads, %d substeps, %d iterations, fastest %.0f px/s",
                     run->snap_n, run->asleep ? "asleep" : "moving", run->dbg_steps,
                     run->dbg_steps ? run->dbg_ms / run->dbg_steps : 0.0, run->dbg_worst,
-                    run->substeps, run->iters, run->vmax);
+                    liquid_threads(run->sim), run->substeps, run->iters, run->vmax);
             run->dbg_at = t;
             run->dbg_ms = run->dbg_worst = 0.0;
             run->dbg_steps = 0;

@@ -1287,11 +1287,12 @@ $ fwmctl liquid clear
 ```toml
 [liquids]
 enabled   = false
-particles = 12000     # the most one desktop may hold — and the cost
+particles = 30000     # the most one desktop may hold — and the cost
 spacing   = 6.0       # px between particles at rest; reload-only
 viscosity = 60.0      # px²/s: tens is water, hundreds oil, thousands honey
 tension   = 30.0      # px: drops under this stay round; 0 is no surface
 color     = "#3a8be0cc"
+threads   = 0         # a step split across this many; 0 = one per core
 ```
 
 It is laws and nothing else: inertia, gravity, an incompressible pressure,
@@ -1309,17 +1310,19 @@ lone one is a drop. It stands behind the windows, which do not feel it yet.
 One desktop at a time: the liquid stands on the desktop it was first poured on
 until it is cleared. It is only stepped while a monitor shows that desktop and
 nothing fullscreen covers it, and it stops altogether once it has settled.
-While it moves it costs a CPU core of its own — about 2ms a step for 3000
-particles and 5ms for 12000 — on a worker thread, so the desktop stays smooth
-even when the liquid cannot keep up; a big pour sloshes for a while before it
-settles, like a big pool would. Drawing it needs the GLES2 renderer.
+While it moves it takes the CPU's cores: a step is split across `threads` of
+them, one per core unless that says otherwise — on six, about 1.5ms a step for
+12000 particles, 4ms for 30000, and a whole 1080p screen of it keeps up at
+60Hz. It runs beside the compositor, never in its way, so the desktop stays
+smooth even when the liquid cannot keep up; a big pour sloshes for a while
+before it settles, like a big pool would. Drawing it needs the GLES2 renderer.
 
 A desktop holds no more than its own area of liquid, whatever `particles` says:
 it cannot be squeezed, so a full desktop refuses more, and a monitor swapped
 for a smaller one spills what no longer fits over the top.
 
-Live: `viscosity`, `tension`, `color`, `particles` and `enabled` are all
-`fwmctl set liquids.*`; switching it off empties it. Picking up a bucket switches
+Live: `viscosity`, `tension`, `color`, `particles`, `threads` and `enabled` are
+all `fwmctl set liquids.*`; switching it off empties it. Picking up a bucket switches
 it on for the session. A bucket pours a fifth of `particles` a second. `spacing` is reload-only,
 because particles of one size do not become particles of another, and a new one
 empties the liquid. `FWM_DEBUG_LIQUID=1` logs what a step costs, once a second.
