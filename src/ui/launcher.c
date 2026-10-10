@@ -1079,7 +1079,12 @@ static void launch_selected(Launcher *l) {
 
     char cmd[600];
     if (app->terminal) {
-        snprintf(cmd, sizeof(cmd), "kitty -e %s", app->exec);
+        /* The same terminal the terminal bind opens, not one named here: a
+         * hard-coded kitty did nothing at all on a machine without it. `-e`
+         * is what nearly every terminal takes to run a command. */
+        const char *term = server_terminal_command(l->server);
+        if (!term) return;
+        snprintf(cmd, sizeof(cmd), "%s -e %s", term, app->exec);
     } else {
         snprintf(cmd, sizeof(cmd), "%s", app->exec);
     }
