@@ -103,6 +103,11 @@ int liquid_pour(FwmLiquid *l, double cx, double cy, int count,
                 double vx, double vy);
 void liquid_clear(FwmLiquid *l);
 
+/* Take out up to `max` particles standing within `r` px of (cx, cy) — a drain
+ * opened there, which the liquid around it then runs into. Returns how many
+ * went. */
+int liquid_drain(FwmLiquid *l, double cx, double cy, double r, int max);
+
 /* Advance by `dt` seconds under gravity (gx, gy) px/s², y-down.
  *
  * As many internal steps as the fastest particle and the surface tension

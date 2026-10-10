@@ -4,7 +4,9 @@
 
 ### A liquid on the desktop (experimental)
 
-`[liquids] enabled = true`, then `fwmctl liquid pour`. Particles, an
+Modes menu → Liquids → Water, and a bucket of it is in your hand: hold the
+left button to pour, the right to drain, Escape to put it down. Or `fwmctl
+liquid pour`. Particles, an
 incompressible pressure solve, viscosity and surface tension — and no rule
 anywhere about what a splash or a ball should look like: a blob falls and
 splashes and sloshes because of gravity, and with gravity switched off it keeps

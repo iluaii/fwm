@@ -112,6 +112,8 @@ action is reported when the config loads rather than doing nothing when pressed.
 | *(inside expo)* `star_collapse` | takes that star one step down the road — burning → ember → pulsar → black hole |
 | `star_spawn` / `star_off` | light a star under the pointer, on the desktop on screen / put it out |
 | `star_collapse` | collapse the `[star]` on its desktop now — dwarf, pulsar or hole, by the mass thrown into it |
+| `liquids_menu` | the [liquids menu](interface.md#the-liquids-menu-and-the-bucket), the same one the modes menu's Liquids row opens |
+| `liquid_bucket` | a bucket of water in the hand, or put down the one there — left pours, right drains, Escape puts it down |
 
 ### World
 

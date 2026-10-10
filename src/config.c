@@ -88,6 +88,7 @@ int action_is_known(const char *a) {
         FWM_MIXER_ACTION,
         "toggle_sun", "sun_mode",
         "star_spawn", "star_off", "star_collapse",
+        "liquids_menu", "liquid_bucket",
         "screenshot", "screenshot_region",
         "output_off", "toggle_internal_output", "outputs_on", NULL
     };

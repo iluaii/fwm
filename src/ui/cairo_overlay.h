@@ -67,6 +67,14 @@ void cairo_overlay_blit_bgra(struct wlr_scene_buffer *scene_buffer,
  * for the desktop strip) must not be made static. */
 struct wlr_buffer *cairo_overlay_buffer(struct wlr_scene_buffer *scene_buffer);
 
+/* A picture drawn once by `draw_func`, as a buffer that belongs to no scene
+ * node: for the one picture fwm hands to something other than the scene, the
+ * cursor. Carries one lock, the caller's — wlr_buffer_unlock lets go of it.
+ * NULL if it cannot be had. */
+struct wlr_buffer *cairo_picture_create(int width, int height,
+                                        void (*draw_func)(cairo_t *cr, int w, int h, void *data),
+                                        void *user_data);
+
 /* For overlays that are drawn once and never updated again (wallpaper layers,
  * welcome, hints): free the CPU-side pixel copy and keep only the GPU texture.
  * Do not call cairo_overlay_update() on the overlay afterwards. */

@@ -44,6 +44,7 @@ enum {
     MODE_ICON_WIND,
     MODE_ICON_RING,
     MODE_ICON_HP,
+    MODE_ICON_LIQUID,
     MODE_ICON_COUNT,
 };
 
@@ -82,6 +83,7 @@ typedef struct ModesState {
     int wind;      /* grass.wind > 0: the gusts that bend it */
     int ring;      /* camera.wrap: the desktops are a ring */
     int hp;        /* physics.hp: a hard enough hit destroys a window */
+    int liquid;    /* there is liquid on a desktop, or a bucket in the hand */
     double opacity;
 } ModesState;
 
@@ -114,6 +116,10 @@ enum {
      * the grass on with it, since wind through a lawn nobody is drawing is a
      * thing the user cannot see. */
     MODES_ROW_WIND,
+    /* With the other things that live on the desktop. Not a switch: it opens
+     * the liquids menu (ui/liquids_menu.h), where a liquid is picked up, and
+     * a chevron says so — a switch would promise one thing to turn on. */
+    MODES_ROW_LIQUIDS,
     MODES_ROW_RING,
     /* Last on purpose: it is the only row that can destroy someone's unsaved
      * work, so it is not the one the hand lands on by accident. */
@@ -142,6 +148,10 @@ enum {
 
 /* Segments in row `row`, or 0 for the rows that carry a switch instead. */
 int modes_row_segs(int row);
+
+/* The rows that open something rather than set something: no switch, a
+ * chevron. */
+bool modes_row_opens(int row);
 
 /* Open the menu under the pill.
  *

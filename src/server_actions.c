@@ -920,6 +920,14 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         int desktop = resolve_desktop_ex(server, action + 5, &seam);
         desktop = back_and_forth(server, desktop, desktop_arg_is_number(action + 5));
         if (desktop >= 0) server_goto_desktop(server, desktop, seam);
+    } else if (strcmp(action, "liquids_menu") == 0) {
+        server_close_modes_menu(server);
+        server_toggle_liquids_menu(server);
+    } else if (strcmp(action, "liquid_bucket") == 0) {
+        /* A bucket of the first liquid, or put down the one in hand: the
+         * liquids menu's row, for a key. */
+        if (server_liquid_hand_held(server)) server_liquid_put_down(server);
+        else server_liquid_take(server, 0);
     } else if (strcmp(action, "star_spawn") == 0) {
         server_star_spawn(server);
     } else if (strcmp(action, "star_off") == 0) {
@@ -1067,6 +1075,7 @@ void server_modes_state(FwmServer *server, ModesState *out) {
     out->wind     = server->config.grass.wind > 0.0;
     out->ring     = server->config.camera.wrap;
     out->hp       = server->config.physics.hp;
+    out->liquid   = server_liquid_lit(server);
     out->opacity  = glass_fill(&server->config, server->config.decor.tray_opacity);
 }
 
@@ -1240,6 +1249,13 @@ int server_modes_menu_click(FwmServer *server, int row, int seg) {
         server_state_save_modes(server);
         changed = 1;
         break;
+    case MODES_ROW_LIQUIDS:
+        /* Not a setting: the next page. The modes menu steps aside and the
+         * liquids menu opens where it stood. */
+        server_close_modes_menu(server);
+        server_open_liquids_menu(server);
+        server_request_tray_redraw(server);
+        return 0;
     case MODES_ROW_CAVA: {
         if (seg < 0) break;
         /* The menu's "physical" is the config's "both": bars you can see AND

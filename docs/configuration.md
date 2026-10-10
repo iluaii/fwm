@@ -1270,7 +1270,11 @@ so the lawn is reshuffled; the rest are applied to the patch already there.
 
 ## liquids
 
-Experimental. A liquid on the desktop, poured from the command line:
+Experimental. A liquid on the desktop, poured from a bucket: the modes menu's
+**Liquids** row opens the list of liquids, and clicking one puts a bucket of it in
+your hand — left button pours, right drains, Escape puts it down (see
+[The interface](interface.md#the-liquids-menu-and-the-bucket)). Or from the
+command line:
 
 ```console
 $ fwmctl liquid pour          # a quarter of the budget, under the pointer
@@ -1309,7 +1313,8 @@ even when the liquid cannot keep up; a big pour sloshes for a while before it
 settles, like a big pool would. Drawing it needs the GLES2 renderer.
 
 Live: `viscosity`, `tension`, `color`, `particles` and `enabled` are all
-`fwmctl set liquids.*`; switching it off empties it. `spacing` is reload-only,
+`fwmctl set liquids.*`; switching it off empties it. Picking up a bucket switches
+it on for the session. A bucket pours a fifth of `particles` a second. `spacing` is reload-only,
 because particles of one size do not become particles of another, and a new one
 empties the liquid. `FWM_DEBUG_LIQUID=1` logs what a step costs, once a second.
 

@@ -229,6 +229,18 @@ static void icon_hp(cairo_t *cr, double x, double y, double s) {
     cairo_stroke(cr);
 }
 
+/* A drop: a point at the top swelling into a round bottom. Filled, like the
+ * grass — an outline drop at 16px is a guitar pick. */
+static void icon_liquid(cairo_t *cr, double x, double y, double s) {
+    double cx = x + s / 2.0, r = s * 0.34, cy = y + s - r - s * 0.02;
+    cairo_move_to(cr, cx, y);
+    cairo_curve_to(cr, cx + s * 0.10, y + s * 0.22, cx + r, cy - r * 0.55, cx + r, cy);
+    cairo_arc(cr, cx, cy, r, 0.0, M_PI);
+    cairo_curve_to(cr, cx - r, cy - r * 0.55, cx - s * 0.10, y + s * 0.22, cx, y);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+}
+
 void modes_icon(cairo_t *cr, int icon, double x, double y, double size) {
     cairo_save(cr);
     switch (icon) {
@@ -242,6 +254,7 @@ void modes_icon(cairo_t *cr, int icon, double x, double y, double size) {
     case MODE_ICON_WIND:     icon_wind(cr, x, y, size);     break;
     case MODE_ICON_RING:     icon_ring(cr, x, y, size);     break;
     case MODE_ICON_HP:       icon_hp(cr, x, y, size);       break;
+    case MODE_ICON_LIQUID:   icon_liquid(cr, x, y, size);   break;
     default: break;
     }
     cairo_restore(cr);
@@ -267,6 +280,10 @@ int modes_row_segs(int row) {
     case MODES_ROW_MASS: return MODES_MASS_SEGS;
     default:             return 0;   /* a switch row */
     }
+}
+
+bool modes_row_opens(int row) {
+    return row == MODES_ROW_LIQUIDS;
 }
 
 /* Row rect in menu-local coords. */
@@ -530,19 +547,19 @@ static void draw_menu(cairo_t *cr, int w, int h, void *user) {
 
     static const char *name[MODES_ROW_COUNT] = {
         "Tiling", "Floating", "Gravity", "Mass", "Sound", "Cava", "Grass", "Wind",
-        "Ring", "Breakable",
+        "Liquids", "Ring", "Breakable",
     };
     static const int   icon[MODES_ROW_COUNT] = {
         MODE_ICON_TILING, MODE_ICON_FLOATING, MODE_ICON_GRAVITY, MODE_ICON_MASS,
         MODE_ICON_SOUND, MODE_ICON_CAVA, MODE_ICON_GRASS, MODE_ICON_WIND,
-        MODE_ICON_RING, MODE_ICON_HP,
+        MODE_ICON_LIQUID, MODE_ICON_RING, MODE_ICON_HP,
     };
     /* Lights the icon. Mass is never off, so what lights it is the position
      * that is doing something beyond the default — the same reading the cava
      * row gets from `cava != 0`. */
     const int on[MODES_ROW_COUNT] = {
         st->tiling, st->floating, st->gravity, st->mass == MODES_MASS_RAM,
-        st->sound, st->cava != 0, st->grass, st->wind, st->ring, st->hp,
+        st->sound, st->cava != 0, st->grass, st->wind, st->liquid, st->ring, st->hp,
     };
     /* Segment labels, per row; NULL for the rows that carry a switch. */
     static const char *const cava_labels[MODES_CAVA_SEGS] = { "off", "visual", "physical" };
@@ -578,7 +595,16 @@ static void draw_menu(cairo_t *cr, int w, int h, void *user) {
         pango_cairo_show_layout(cr, layout);
 
         int segs = modes_row_segs(r);
-        if (segs > 0) {
+        if (modes_row_opens(r)) {
+            /* A chevron where the switch would be: this row goes somewhere. */
+            double cx = MENU_W - MENU_PAD - 8.0, cy = ry + MENU_ROW_H / 2.0;
+            cairo_set_source_rgba(cr, thm->muted[0], thm->muted[1], thm->muted[2], st->opacity);
+            cairo_set_line_width(cr, 2.0);
+            cairo_move_to(cr, cx - 4.0, cy - 6.0);
+            cairo_line_to(cr, cx + 2.0, cy);
+            cairo_line_to(cr, cx - 4.0, cy + 6.0);
+            cairo_stroke(cr);
+        } else if (segs > 0) {
             const char *const *labels = r == MODES_ROW_CAVA ? cava_labels : mass_labels;
             draw_segments(cr, layout, MENU_W - MENU_PAD - SEG_W,
                           ry + (MENU_ROW_H - SEG_H) / 2.0, labels, segs,
@@ -652,6 +678,7 @@ bool modes_menu_tick(struct wlr_scene_buffer *buf, const ModesState *st, double 
         0.0, /* cava: segmented, eased below */
         st->grass ? 1.0 : 0.0,
         st->wind ? 1.0 : 0.0,
+        0.0, /* liquids: a chevron, nothing to ease */
         st->ring ? 1.0 : 0.0,
         st->hp ? 1.0 : 0.0,
     };

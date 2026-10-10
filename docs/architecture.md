@@ -112,6 +112,7 @@ cannot express that (`ui/modes.c` is the example).
 |---|---|
 | `ui/tray.c` | the status strip, including the modes pill |
 | `ui/modes.c` | the modes menu: icons, rows, switches, segmented controls |
+| `ui/liquids_menu.c` | the liquids menu the modes menu's Liquids row opens; the bucket itself is `server_liquid.c` |
 | `ui/launcher.c` | the application launcher |
 | `ui/hints.c` | the key hints, read from the live config |
 | `ui/errors.c` | the config-problem panel |

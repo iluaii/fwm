@@ -149,6 +149,22 @@ static struct wlr_buffer *overlay_buffer_own(struct CairoOverlayBuffer *buffer) 
     return &buffer->base;
 }
 
+struct wlr_buffer *cairo_picture_create(int width, int height,
+                                        void (*draw_func)(cairo_t *cr, int w, int h, void *data),
+                                        void *user_data) {
+    if (width <= 0 || height <= 0 || !draw_func) return NULL;
+    struct CairoOverlayBuffer *buffer = overlay_buffer_alloc(width, height);
+    if (!buffer) return NULL;
+    cairo_t *cr = cairo_create(buffer->surface);
+    cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+    cairo_paint(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    draw_func(cr, width, height, user_data);
+    cairo_destroy(cr);
+    cairo_surface_flush(buffer->surface);
+    return overlay_buffer_own(buffer);
+}
+
 struct wlr_scene_buffer *cairo_overlay_create(struct wlr_scene_tree *parent, int width, int height) {
     struct CairoOverlayInfo *info = calloc(1, sizeof(*info));
     if (!info) return NULL;

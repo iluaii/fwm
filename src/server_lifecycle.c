@@ -872,6 +872,8 @@ void server_destroy(FwmServer *server) {
     server->errors_buffer = NULL;
     server_kill_modes_menu(server);
     server_kill_stats_menu(server);
+    /* With the other panels: it stands on the glass, which goes below. */
+    server_kill_liquids_menu(server);
     /* Before the wallpaper, whose tree the bars hang under — and while the
      * physics world is still alive, so the kinematic row is removed rather than
      * left pointing at freed levels. */

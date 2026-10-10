@@ -853,7 +853,11 @@ wind_speed = 260
 # while costing more than twice as much.
 fps        = 24
 
-# A liquid on the desktop, poured with `fwmctl liquid pour` — EXPERIMENTAL.
+# A liquid on the desktop — EXPERIMENTAL. Poured from a bucket: modes menu ->
+# Liquids -> pick one; left button pours, right drains, Escape puts it down.
+# Picking up a bucket switches this on for the session. `fwmctl liquid pour`
+# pours from the command line.
+#
 # It is particles under the hood and one smooth body on screen: it falls,
 # splashes, runs up the walls, sloshes and settles; with gravity off (super+g)
 # whatever was moving keeps moving and its surface gathers it into balls. It

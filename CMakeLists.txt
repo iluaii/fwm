@@ -186,6 +186,7 @@ set(SOURCES
     src/ui/tray.c
     src/ui/modes.c
     src/ui/stats_menu.c
+    src/ui/liquids_menu.c
     src/ui/hints.c
     src/ui/errors.c
     src/ui/welcome.c

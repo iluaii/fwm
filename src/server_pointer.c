@@ -278,7 +278,7 @@ void server_pointer_resync(FwmServer *server) {
     if (server->interactive.action != FWM_ACTION_NONE || server->star_drag) return;
     if (expo_active(server) || screenshot_selecting(server) ||
         launcher_is_open(server->launcher) || radial_is_open(server->radial) ||
-        mixer_is_open(server->mixer)) return;
+        mixer_is_open(server->mixer) || server_liquid_hand_held(server)) return;
 
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -450,6 +450,15 @@ static void process_cursor_motion(FwmServer *server, uint32_t time_msec) {
         wlr_seat_pointer_clear_focus(server->seat);
         return;
     }
+
+    /* A bucket in the hand is aiming too: no window hears the pointer while
+     * it pours (server_liquid.c follows it on the tick). */
+    if (server_liquid_hand_held(server)) {
+        wlr_seat_pointer_clear_focus(server->seat);
+        return;
+    }
+    /* The liquids menu lights the row under the pointer, and its bin. */
+    server_liquid_menu_motion(server);
 
     /* Same rule as the launcher below, for the same reason: while the desktop
      * strip is up the pointer is aiming at snapshots, not at the windows they
@@ -666,6 +675,20 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
      * and the release that takes the picture must reach nothing else. */
     if (screenshot_handle_button(server, event->state == WL_POINTER_BUTTON_STATE_PRESSED))
         return;
+
+    /* The bucket: every button is its while it is held. */
+    if (server_liquid_hand_button(server, event->button,
+                                  event->state == WL_POINTER_BUTTON_STATE_PRESSED))
+        return;
+
+    /* The liquids menu, while it is open: a row picks up a bucket, a bin
+     * drains, and a click anywhere else closes it and carries on. */
+    if (event->state == WL_POINTER_BUTTON_STATE_PRESSED && event->button == BTN_LEFT &&
+        server->interactive.action == FWM_ACTION_NONE && server->liquids_buffer &&
+        server_liquid_menu_click(server)) {
+        server->click_consumed = 1;
+        return;
+    }
 
     bool m_was_open = mixer_is_open(server->mixer);
     if (mixer_handle_button(server->mixer, server->cursor->x, server->cursor->y,

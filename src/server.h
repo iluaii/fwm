@@ -478,6 +478,12 @@ typedef struct FwmServer {
     /* The liquid, once something has been poured ([liquids], src/liquid.h).
      * NULL until then, and again once it is switched off. */
     struct FwmLiquidRun *liquid;
+    /* The liquids menu, while it is open, and the row under the pointer in
+     * it; and the bucket, while one is in the hand (server_liquid.c). */
+    struct wlr_scene_buffer *liquids_buffer;
+    int liquids_hover;
+    bool liquids_hover_bin;
+    struct FwmLiquidHand *liquid_hand;
     bool star_running;
     /* The pointer has hold of it. Kept here rather than in the interactive
      * struct because a star is not a view and none of that machinery — the
@@ -936,6 +942,30 @@ typedef struct {
     bool drawn;        /* there is a picture of it */
 } FwmLiquidState;
 void server_liquid_state(FwmServer *server, FwmLiquidState *st);
+
+/* The liquids menu, which the modes menu's Liquids row opens: a list of the
+ * liquids there are, each with a bin. */
+void server_open_liquids_menu(FwmServer *server);
+void server_close_liquids_menu(FwmServer *server);
+void server_toggle_liquids_menu(FwmServer *server);
+void server_kill_liquids_menu(FwmServer *server);
+/* A left click while it is open: true if it landed in it and was used. */
+bool server_liquid_menu_click(FwmServer *server);
+void server_liquid_menu_motion(FwmServer *server);
+
+/* A bucket of liquid `liquid` (a row of the liquids menu) in the hand: the
+ * pointer becomes it until it is put down. */
+void server_liquid_take(FwmServer *server, int liquid);
+void server_liquid_put_down(FwmServer *server);
+bool server_liquid_hand_held(FwmServer *server);
+/* A button with the bucket in the hand. True when it was the bucket's — which,
+ * while one is held, is every button. */
+bool server_liquid_hand_button(FwmServer *server, uint32_t button, bool pressed);
+/* Escape: puts the bucket down, or closes the liquids menu. True if it did. */
+bool server_liquid_escape(FwmServer *server);
+/* There is liquid somewhere, or a bucket in the hand: what lights the modes
+ * menu's drop. */
+bool server_liquid_lit(FwmServer *server);
 
 /* ── monitors ─────────────────────────────────────────────────────────────
  * The world is a strip of FWM_DESKTOPS columns of screen_width; each monitor

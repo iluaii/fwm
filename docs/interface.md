@@ -89,6 +89,7 @@ Click the modes pill (or bind `modes_menu`). Ten rows:
 | Cava | `off` / `visual` / `physical` | the audio visualiser |
 | Grass | switch | the [grass](configuration.md#grass) along the bottom of every screen |
 | Wind | switch | the gusts that bend it (`[grass] wind`) |
+| Liquids | › | opens the [liquids menu](#the-liquids-menu-and-the-bucket) |
 | Ring | switch | close the desktop strip into a ring (`[camera] wrap`) |
 | Breakable | switch | a hard enough collision destroys a window ([`[physics] hp`](configuration.md#breakable-windows)) |
 
@@ -118,6 +119,30 @@ click. Delete that file to go back to whatever the config says.
 Layout, gravity and the ring are *not* remembered either: they are per-session
 state that a keybind changes just as often as the menu does. Breakable is not
 remembered for a different reason — see above.
+
+## The liquids menu and the bucket
+
+Experimental ([liquids](configuration.md#liquids)). The **Liquids** row of the
+modes menu opens a list of the liquids there are — one, for now: water — with the
+desktop it has been poured on beside it. Hover a row and a bin appears at its
+right: clicking the bin drains that liquid off its desktop.
+
+Click the liquid itself and a bucket of it is in your hand: the pointer becomes
+the bucket, and
+
+- **left button, held** — pours a stream where the pointer is. Swing the mouse
+  while pouring and the stream leaves the bucket at the speed of your hand;
+- **right button, held** — drains what is under the pointer, slowly, and the
+  liquid around it runs into the drain;
+- **Escape** — puts the bucket down.
+
+While the bucket is in your hand no window hears the pointer, but the keyboard is
+untouched — switch gravity off with super+g in the middle of a pour and the
+stream carries on flying. Picking up a bucket switches `[liquids]` on for the
+session if the config had it off. The liquid stands on one desktop at a time, so
+pouring onto another one is refused until the first is drained.
+
+`liquids_menu` and `liquid_bucket` bind the same two things to keys.
 
 ## The stats menu
 

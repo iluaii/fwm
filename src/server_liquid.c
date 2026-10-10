@@ -42,6 +42,7 @@
 #include "server.h"
 #include "view.h"
 
+#include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -49,16 +50,26 @@
 #include <string.h>
 #include <time.h>
 
+#include <linux/input-event-codes.h>
 #include <pixman.h>
+#include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_seat.h>
 #include <wlr/util/log.h>
 
 #include "expo.h"
+#include "glass.h"
 #include "liquid.h"
 #include "liquid_draw.h"
 #include "physics.h"
 #include "server_internal.h"
+#include "theme.h"
+#include "ui/cairo_overlay.h"
+#include "ui/liquids_menu.h"
+#include "ui/modes.h"
+#include "ui/toast.h"
+#include "ui/tray.h"
 
 /* The most simulated time one step may cover. A step that fell behind — the
  * worker was still busy at the last tick, or the tick itself was late — is
@@ -93,6 +104,15 @@ struct FwmLiquidRun {
     int pour;               /* particles asked for and not yet poured */
     double pour_x, pour_y;
     bool clear;
+    /* What the bucket in the hand has poured and drained since the last step,
+     * handed over together between two steps, at where the hand last was. The
+     * stream leaves the bucket at the hand's own speed: swing it and the
+     * water flies. */
+    int stream;
+    double stream_x, stream_y, stream_vx, stream_vy;
+    int drain;
+    double drain_x, drain_y;
+    bool full;              /* the last stream found the budget spent */
 
     float *snap;            /* the particles as (x, y) pairs, for the picture */
     int snap_n, snap_cap;
@@ -110,6 +130,8 @@ struct FwmLiquidRun {
     double dbg_at, dbg_ms, dbg_worst;
     int dbg_steps;
 };
+
+static void hand_drop(FwmServer *server, bool quiet);
 
 static double now_s(void) {
     struct timespec ts;
@@ -212,6 +234,8 @@ static void run_destroy(FwmServer *server) {
 }
 
 void server_liquid_finish(FwmServer *server) {
+    hand_drop(server, true);
+    server_kill_liquids_menu(server);
     run_destroy(server);
     liquid_paint_finish();
 }
@@ -241,6 +265,49 @@ void server_liquid_raise(FwmOutput *out) {
 
 /* ── what the socket asks for ────────────────────────────────────────── */
 
+/* Where the pointer is pouring: the desktop under it, and the point on that
+ * desktop, in the liquid's own box. False when the pointer is on no screen. */
+static bool pointer_target(FwmServer *server, int *d, double *x, double *y) {
+    FwmOutput *out = server_output_at(server, server->cursor->x, server->cursor->y);
+    if (!out || !out->enabled || out->desktop < 0 || out->desktop >= FWM_DESKTOPS)
+        return false;
+    *d = out->desktop;
+    *x = server->cursor->x - (out->box.x + (double)*d * server->screen_width - out->camera_x);
+    *y = server->cursor->y - out->box.y;
+    return true;
+}
+
+/* The liquid, standing on desktop `d` — started there if there is none yet,
+ * moved there if what there is holds nothing. NULL when it holds something
+ * somewhere else, with that desktop in `*elsewhere` (-1 when it could not be
+ * started at all), so each caller can say so in its own numbering.
+ *
+ * Liquid that cannot be seen is not stepped, and a desktop's worth of it
+ * waiting unseen elsewhere is one more desktop the CPU is spent on the moment
+ * it comes back; until there are liquids on more than one desktop at once,
+ * the one there is says where. A clear still waiting for its tick counts as
+ * empty, since the clear goes in before anything poured after it. */
+static struct FwmLiquidRun *claim_desktop(FwmServer *server, int d, int *elsewhere) {
+    struct FwmLiquidRun *run = server->liquid;
+    *elsewhere = -1;
+    if (run && run->desktop != d) {
+        bool empty = run->clear
+                  || (run->pour == 0 && run->stream == 0 && run->snap_n == 0
+                      && run_idle(run) && liquid_count(run->sim) == 0);
+        if (!empty) {
+            *elsewhere = run->desktop;
+            return NULL;
+        }
+        run->desktop = d;
+    }
+    if (!run) {
+        run = server->liquid = run_create(server, d);
+        if (!run) return NULL;
+        wlr_log(WLR_INFO, "liquid: on desktop %d", d);
+    }
+    return run;
+}
+
 bool server_liquid_pour(FwmServer *server, int count, int *desktop_out,
                         char *err, size_t errcap) {
     const LiquidsConfig *cfg = &server->config.liquids;
@@ -257,53 +324,35 @@ bool server_liquid_pour(FwmServer *server, int count, int *desktop_out,
     /* Where: under the pointer, which is also where a bind that pours would
      * mean. A pointer on no screen pours from the top of the desktop the
      * user is working on. */
-    FwmOutput *out = server_output_at(server, server->cursor->x, server->cursor->y);
-    bool at_pointer = out && out->enabled;
-    if (!at_pointer) out = server_active_output(server);
-    if (!out || out->desktop < 0 || out->desktop >= FWM_DESKTOPS) {
-        snprintf(err, errcap, "no screen to pour onto");
-        return false;
-    }
-    int d = out->desktop;
-
-    struct FwmLiquidRun *run = server->liquid;
-    if (run && run->desktop != d) {
-        /* Liquid that cannot be seen is not stepped, and a desktop's worth of
-         * it waiting unseen elsewhere is one more desktop the CPU is spent
-         * on the moment it comes back; until there are liquids on more than
-         * one desktop at once, the one there is says where. An empty one
-         * simply moves — and one with a clear still waiting for its tick is
-         * as good as empty, since the clear goes in before the pour does. */
-        bool empty = run->clear
-                  || (run->pour == 0 && run->snap_n == 0 && run_idle(run)
-                      && liquid_count(run->sim) == 0);
-        if (!empty) {
-            snprintf(err, errcap, "the liquid is on desktop %d — fwmctl liquid clear "
-                                  "first (one desktop at a time, for now)", run->desktop);
+    int d;
+    double x, y;
+    if (!pointer_target(server, &d, &x, &y)) {
+        FwmOutput *out = server_active_output(server);
+        if (!out || out->desktop < 0 || out->desktop >= FWM_DESKTOPS) {
+            snprintf(err, errcap, "no screen to pour onto");
             return false;
         }
-        run->desktop = d;
+        d = out->desktop;
+        x = out->box.width / 2.0;
+        y = out->box.height / 4.0;
     }
+    int elsewhere;
+    struct FwmLiquidRun *run = claim_desktop(server, d, &elsewhere);
     if (!run) {
-        run = server->liquid = run_create(server, d);
-        if (!run) {
+        if (elsewhere >= 0)
+            snprintf(err, errcap, "the liquid is on desktop %d — fwmctl liquid clear "
+                                  "first (one desktop at a time, for now)", elsewhere);
+        else
             snprintf(err, errcap, "the liquid could not be started");
-            return false;
-        }
-        wlr_log(WLR_INFO, "liquid: on desktop %d", d);
+        return false;
     }
 
     if (count <= 0) count = cfg->particles / 4;
     if (count < 1) count = 1;
     run->pour += count;
     if (run->pour > cfg->particles) run->pour = cfg->particles;
-    if (at_pointer) {
-        run->pour_x = server->cursor->x - (out->box.x + (double)d * server->screen_width - out->camera_x);
-        run->pour_y = server->cursor->y - out->box.y;
-    } else {
-        run->pour_x = out->box.width / 2.0;
-        run->pour_y = out->box.height / 4.0;
-    }
+    run->pour_x = x;
+    run->pour_y = y;
     if (desktop_out) *desktop_out = d;
     return true;
 }
@@ -312,7 +361,7 @@ void server_liquid_clear(FwmServer *server) {
     struct FwmLiquidRun *run = server->liquid;
     if (!run) return;
     run->clear = true;
-    run->pour = 0;
+    run->pour = run->stream = run->drain = 0;
 }
 
 void server_liquid_state(FwmServer *server, FwmLiquidState *st) {
@@ -329,6 +378,404 @@ void server_liquid_state(FwmServer *server, FwmLiquidState *st) {
     st->substeps = run->substeps;
     st->step_ms = run->step_ms;
     st->drawn = run->paint && liquid_paint_current(run->paint);
+}
+
+/* ── the bucket ──────────────────────────────────────────────────────────
+ *
+ * Picked up from the liquids menu: a bucket of one liquid in the hand, the
+ * pointer turned into it, the left button pouring a stream from its lip and
+ * the right one draining what is under it, slowly. Escape puts it down.
+ *
+ * The bucket takes the pointer — clicks pour instead of reaching windows, and
+ * no window hears the pointer move — and leaves the keyboard alone, because
+ * the gravity switch is a key, and turning gravity off under a stream in mid
+ * pour is the whole point of having both. */
+
+/* How fast a bucket pours, as a share of the desktop's budget a second: a
+ * bucket emptied in five seconds of holding the button, whatever the budget
+ * is. And how fast the right button drains, which is slower on purpose —
+ * it is the one that cannot be taken back. */
+#define BUCKET_POUR_SHARE 0.2
+#define BUCKET_DRAIN_RATE 600.0   /* particles a second */
+/* The hand's speed is smoothed over about this long before the stream takes
+ * it, or a stream poured from a still hand flickers with every jitter of the
+ * mouse. And capped, because a flick across the screen is thousands of px/s
+ * for one frame, and water thrown that hard leaves through the far wall's
+ * clamp rather than splashing against it. */
+#define BUCKET_HAND_SMOOTH 0.06
+#define BUCKET_THROW_MAX 2500.0
+
+#define BUCKET_PX 44
+
+struct FwmLiquidHand {
+    int liquid;               /* the row of the liquids menu it was taken from */
+    bool pouring, draining;
+    double pour_owed, drain_owed;
+    double px, py, vx, vy;    /* the hand, layout px and px/s */
+    bool have_pos;
+    bool told;                /* said why this press is not pouring */
+    struct wlr_buffer *picture;
+    int hot_x, hot_y;         /* the lip, in the picture */
+};
+
+/* The bucket: a pail tipped to pour, its mouth up and to the left, with the
+ * liquid showing in the mouth and a stream running off the low end of the
+ * lip. The point of the cursor is where the stream lands, because that is
+ * where the liquid appears. Outlined twice — dark, then light — so it stands
+ * out on any wallpaper, the way a cursor has to. */
+struct bucket_paint { float color[3]; int hot_x, hot_y; };
+
+static void bucket_outline(cairo_t *cr, cairo_path_t *const *paths, int n) {
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass == 0) cairo_set_source_rgba(cr, 0.06, 0.07, 0.09, 0.85);
+        else           cairo_set_source_rgb(cr, 0.93, 0.94, 0.96);
+        cairo_set_line_width(cr, pass == 0 ? 3.6 : 1.5);
+        for (int i = 0; i < n; i++) {
+            cairo_new_path(cr);
+            cairo_append_path(cr, paths[i]);
+            cairo_stroke(cr);
+        }
+    }
+}
+
+static void draw_bucket(cairo_t *cr, int w, int h, void *data) {
+    struct bucket_paint *bp = data;
+    cairo_matrix_t m;
+    cairo_matrix_init_translate(&m, w * 0.63, h * 0.43);
+    cairo_matrix_rotate(&m, -48.0 * M_PI / 180.0);
+    cairo_set_matrix(cr, &m);
+
+    /* Upright, the mouth is an ellipse at y = -8 and the base is at y = 9. */
+    cairo_new_path(cr);
+    cairo_move_to(cr, -9.5, -8.0);
+    cairo_line_to(cr, -7.0, 9.0);
+    cairo_curve_to(cr, -4.0, 11.0, 4.0, 11.0, 7.0, 9.0);
+    cairo_line_to(cr, 9.5, -8.0);
+    cairo_path_t *body = cairo_copy_path(cr);
+
+    cairo_set_source_rgb(cr, 0.55, 0.58, 0.63);
+    cairo_append_path(cr, body);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    cairo_new_path(cr);
+    cairo_save(cr);
+    cairo_translate(cr, 0.0, -8.0);
+    cairo_scale(cr, 9.5, 3.2);
+    cairo_arc(cr, 0.0, 0.0, 1.0, 0.0, 2.0 * M_PI);
+    cairo_restore(cr);
+    cairo_path_t *mouth = cairo_copy_path(cr);
+    /* The liquid in it. */
+    cairo_set_source_rgb(cr, bp->color[0], bp->color[1], bp->color[2]);
+    cairo_fill(cr);
+
+    /* The handle, a bail swung up over the mouth. */
+    cairo_new_path(cr);
+    cairo_arc(cr, 0.0, -6.0, 10.5, M_PI * 1.08, M_PI * 1.92);
+    cairo_path_t *handle = cairo_copy_path(cr);
+
+    cairo_path_t *const parts[] = { body, mouth, handle };
+    bucket_outline(cr, parts, 3);
+    cairo_path_destroy(body);
+    cairo_path_destroy(mouth);
+    cairo_path_destroy(handle);
+
+    /* The lip: the end of the mouth that hangs lowest once tipped. */
+    double ax = -9.5, ay = -8.0, bx = 9.5, by = -8.0;
+    cairo_matrix_transform_point(&m, &ax, &ay);
+    cairo_matrix_transform_point(&m, &bx, &by);
+    double lx = ay > by ? ax : bx, ly = ay > by ? ay : by;
+
+    /* The stream, from the lip down to the point of the cursor. */
+    cairo_identity_matrix(cr);
+    double hx = lx - 3.0, hy = h - 4.0;
+    cairo_new_path(cr);
+    cairo_move_to(cr, lx, ly);
+    cairo_curve_to(cr, lx - 3.0, ly + 4.0, hx, hy - 8.0, hx, hy - 2.0);
+    cairo_path_t *stream = cairo_copy_path(cr);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_source_rgba(cr, 0.06, 0.07, 0.09, 0.85);
+    cairo_set_line_width(cr, 5.0);
+    cairo_stroke(cr);
+    cairo_append_path(cr, stream);
+    cairo_set_source_rgb(cr, bp->color[0], bp->color[1], bp->color[2]);
+    cairo_set_line_width(cr, 2.6);
+    cairo_stroke(cr);
+    cairo_path_destroy(stream);
+    cairo_arc(cr, hx, hy, 2.4, 0.0, 2.0 * M_PI);
+    cairo_fill(cr);
+
+    bp->hot_x = (int)lround(hx);
+    bp->hot_y = (int)lround(hy);
+}
+
+bool server_liquid_hand_held(FwmServer *server) {
+    return server->liquid_hand != NULL;
+}
+
+/* `quiet` at teardown, where there is nobody left to give the pointer back to
+ * and no tray to redraw. */
+static void hand_drop(FwmServer *server, bool quiet) {
+    struct FwmLiquidHand *hand = server->liquid_hand;
+    if (!hand) return;
+    server->liquid_hand = NULL;
+    /* The cursor lets go of the picture before we do. */
+    if (server->cursor && server->cursor_mgr)
+        wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "default");
+    if (hand->picture) wlr_buffer_unlock(hand->picture);
+    free(hand);
+    if (quiet) return;
+    /* The window under the pointer is told it has it again. */
+    server_pointer_resync(server);
+    server_request_tray_redraw(server);
+}
+
+void server_liquid_put_down(FwmServer *server) {
+    hand_drop(server, false);
+}
+
+static void liquids_menu_fill(FwmServer *server, LiquidsMenuState *st);
+
+void server_liquid_take(FwmServer *server, int liquid) {
+    LiquidsMenuState ms;
+    liquids_menu_fill(server, &ms);
+    if (liquid < 0 || liquid >= ms.count) return;
+    server_liquid_put_down(server);
+
+    /* Picking up a bucket is how liquids are switched on from the screen; the
+     * config's switch is for whether there is any at startup. */
+    if (!server->config.liquids.enabled) {
+        server->config.liquids.enabled = 1;
+        server_settings_notify(server);
+    }
+
+    struct FwmLiquidHand *hand = calloc(1, sizeof(*hand));
+    if (!hand) return;
+    hand->liquid = liquid;
+    struct bucket_paint bp;
+    const float *c = ms.item[liquid].color;
+    float k = c[3] > 0.0f ? 1.0f / c[3] : 0.0f;
+    for (int i = 0; i < 3; i++) bp.color[i] = c[i] * k;
+    hand->picture = cairo_picture_create(BUCKET_PX, BUCKET_PX, draw_bucket, &bp);
+    hand->hot_x = bp.hot_x;
+    hand->hot_y = bp.hot_y;
+    server->liquid_hand = hand;
+
+    server_close_modes_menu(server);
+    server_close_liquids_menu(server);
+    /* Whatever had the pointer lets go of it, and a game that had it locked
+     * for mouse-look with it — the same as the screenshot selector does. */
+    wlr_seat_pointer_clear_focus(server->seat);
+    server_pointer_release_constraint(server);
+    if (hand->picture)
+        wlr_cursor_set_buffer(server->cursor, hand->picture, hand->hot_x, hand->hot_y, 1.0f);
+    else
+        wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "crosshair");
+    toast_show(server, false, "%s in hand — left pours, right drains, Esc puts it down",
+               ms.item[liquid].name);
+    server_request_tray_redraw(server);
+}
+
+bool server_liquid_hand_button(FwmServer *server, uint32_t button, bool pressed) {
+    struct FwmLiquidHand *hand = server->liquid_hand;
+    if (!hand) return false;
+    if (button == BTN_LEFT) hand->pouring = pressed;
+    else if (button == BTN_RIGHT) hand->draining = pressed;
+    if (pressed) hand->told = false;
+    /* Every button: with a bucket in the hand nothing under it is clicked. */
+    return true;
+}
+
+bool server_liquid_escape(FwmServer *server) {
+    if (server->liquid_hand) {
+        server_liquid_put_down(server);
+        return true;
+    }
+    if (server->liquids_buffer) {
+        server_close_liquids_menu(server);
+        return true;
+    }
+    return false;
+}
+
+/* Once a tick: follow the hand, and hand over what it poured and drained. */
+static void hand_tick(FwmServer *server, double elapsed) {
+    struct FwmLiquidHand *hand = server->liquid_hand;
+    if (!hand) return;
+    const LiquidsConfig *cfg = &server->config.liquids;
+    /* Put down by anything that takes the screen away from it. */
+    if (!cfg->enabled || expo_active(server) || server->locked) {
+        server_liquid_put_down(server);
+        return;
+    }
+
+    double x = server->cursor->x, y = server->cursor->y;
+    if (hand->have_pos && elapsed > 0.0) {
+        double k = 1.0 - exp(-elapsed / BUCKET_HAND_SMOOTH);
+        hand->vx += ((x - hand->px) / elapsed - hand->vx) * k;
+        hand->vy += ((y - hand->py) / elapsed - hand->vy) * k;
+    }
+    hand->px = x;
+    hand->py = y;
+    hand->have_pos = true;
+    if (!hand->pouring && !hand->draining) {
+        hand->pour_owed = hand->drain_owed = 0.0;
+        return;
+    }
+
+    int d;
+    double lx, ly;
+    if (!pointer_target(server, &d, &lx, &ly)) return;
+    int elsewhere;
+    struct FwmLiquidRun *run = claim_desktop(server, d, &elsewhere);
+    if (!run) {
+        if (!hand->told && elsewhere >= 0)
+            toast_show(server, true, "The water is on desktop %d — drain it there first",
+                       elsewhere + 1);
+        hand->told = true;
+        return;
+    }
+
+    if (hand->pouring) {
+        double rate = cfg->particles * BUCKET_POUR_SHARE;
+        if (rate < 200.0) rate = 200.0;
+        hand->pour_owed += rate * elapsed;
+        int n = (int)hand->pour_owed;
+        if (n > 0) {
+            hand->pour_owed -= n;
+            run->stream += n;
+            run->stream_x = lx;
+            run->stream_y = ly;
+            double v = sqrt(hand->vx * hand->vx + hand->vy * hand->vy);
+            double s = v > BUCKET_THROW_MAX ? BUCKET_THROW_MAX / v : 1.0;
+            run->stream_vx = hand->vx * s;
+            run->stream_vy = hand->vy * s;
+        }
+        if (run->full && !hand->told) {
+            toast_show(server, false, "That is all this desktop holds — [liquids] particles");
+            hand->told = true;
+        }
+    }
+    if (hand->draining) {
+        hand->drain_owed += BUCKET_DRAIN_RATE * elapsed;
+        int n = (int)hand->drain_owed;
+        if (n > 0) {
+            hand->drain_owed -= n;
+            run->drain += n;
+            run->drain_x = lx;
+            run->drain_y = ly;
+        }
+    }
+}
+
+/* ── the liquids menu ──────────────────────────────────────────────────── */
+
+/* The liquids there are. One, for now: the one [liquids] describes. */
+static void liquids_menu_fill(FwmServer *server, LiquidsMenuState *st) {
+    memset(st, 0, sizeof(*st));
+    const LiquidsConfig *cfg = &server->config.liquids;
+    struct FwmLiquidRun *run = server->liquid;
+    bool there = run && (run->snap_n > 0 || run->pour > 0 || run->stream > 0) && !run->clear;
+    st->count = 1;
+    st->item[0].name = "Water";
+    memcpy(st->item[0].color, cfg->color, sizeof(st->item[0].color));
+    st->item[0].desktop = there ? run->desktop : -1;
+    st->hover = server->liquids_buffer ? server->liquids_hover : -1;
+    st->hover_bin = server->liquids_hover_bin;
+    st->in_hand = server->liquid_hand ? server->liquid_hand->liquid : -1;
+    st->opacity = glass_fill(&server->config, server->config.decor.tray_opacity);
+}
+
+bool server_liquid_lit(FwmServer *server) {
+    struct FwmLiquidRun *run = server->liquid;
+    return server->liquid_hand
+        || (run && (run->snap_n > 0 || run->pour > 0) && !run->clear);
+}
+
+void server_open_liquids_menu(FwmServer *server) {
+    if (server->liquids_buffer) return;
+    FwmOutput *out = server_active_output(server);
+    if (!out || !out->tray_buffer || !out->tray_buffer->node.enabled) return;
+    /* Hung where the modes menu hangs — right-aligned with the modes pill —
+     * since it is that menu's next page. A screen too narrow for the pill
+     * hangs it at the right edge instead. */
+    double right = out->box.x + out->box.width - 8;
+    if (tray_modes_pill_hit(&out->tray_strip, tray_modes_pill_x(&out->tray_strip), 1.0))
+        right = out->tray_buffer->node.x + tray_modes_pill_x(&out->tray_strip) + MODES_PILL_W;
+    server->liquids_hover = -1;
+    server->liquids_hover_bin = false;
+    LiquidsMenuState st;
+    liquids_menu_fill(server, &st);
+    server->liquids_buffer = liquids_menu_show(server->layer_overlay, &out->box, right, &st);
+}
+
+void server_close_liquids_menu(FwmServer *server) {
+    if (!server->liquids_buffer) return;
+    cairo_overlay_animate_out(server->liquids_buffer, LIQUIDS_MENU_ANIM_MS,
+                              -LIQUIDS_MENU_RISE_PX, NULL, NULL);
+    server->liquids_buffer = NULL;
+}
+
+void server_toggle_liquids_menu(FwmServer *server) {
+    if (server->liquids_buffer) server_close_liquids_menu(server);
+    else server_open_liquids_menu(server);
+}
+
+static void liquids_menu_refresh(FwmServer *server) {
+    if (!server->liquids_buffer) return;
+    LiquidsMenuState st;
+    liquids_menu_fill(server, &st);
+    liquids_menu_redraw(server->liquids_buffer, &st);
+}
+
+bool server_liquid_menu_click(FwmServer *server) {
+    if (!server->liquids_buffer) return false;
+    double mx = server->cursor->x - server->liquids_buffer->node.x;
+    double my = server->cursor->y - server->liquids_buffer->node.y;
+    LiquidsMenuState st;
+    liquids_menu_fill(server, &st);
+    int mw, mh;
+    liquids_menu_size(st.count, &mw, &mh);
+    if (mx < 0 || mx >= mw || my < 0 || my >= mh) {
+        /* Outside: dismiss, and let the click carry on to whatever it was
+         * aimed at, the way the modes menu does. */
+        server_close_liquids_menu(server);
+        return false;
+    }
+    bool bin = false;
+    int row = liquids_menu_hit(st.count, mx, my, &bin);
+    if (row < 0) return true;
+    if (bin) {
+        server_liquid_clear(server);
+        liquids_menu_refresh(server);
+        server_request_tray_redraw(server);
+        return true;
+    }
+    server_liquid_take(server, row);
+    return true;
+}
+
+void server_liquid_menu_motion(FwmServer *server) {
+    if (!server->liquids_buffer) return;
+    double mx = server->cursor->x - server->liquids_buffer->node.x;
+    double my = server->cursor->y - server->liquids_buffer->node.y;
+    LiquidsMenuState st;
+    liquids_menu_fill(server, &st);
+    bool bin = false;
+    int row = liquids_menu_hit(st.count, mx, my, &bin);
+    if (row == server->liquids_hover && bin == server->liquids_hover_bin) return;
+    server->liquids_hover = row;
+    server->liquids_hover_bin = bin;
+    liquids_menu_refresh(server);
+}
+
+void server_kill_liquids_menu(FwmServer *server) {
+    if (server->liquids_buffer) {
+        cairo_overlay_destroy(server->liquids_buffer);
+        server->liquids_buffer = NULL;
+    }
 }
 
 /* ── the tick ────────────────────────────────────────────────────────── */
@@ -413,6 +860,14 @@ static void place_nodes(FwmServer *server, struct FwmLiquidRun *run, bool show,
 
 void server_liquid_sync(FwmServer *server, double elapsed) {
     const LiquidsConfig *cfg = &server->config.liquids;
+
+    hand_tick(server, elapsed);
+    if (server->liquids_buffer) {
+        LiquidsMenuState st;
+        liquids_menu_fill(server, &st);
+        liquids_menu_tick(server->liquids_buffer, &st, elapsed);
+    }
+
     if (!cfg->enabled) {
         if (server->liquid) {
             run_destroy(server);
@@ -477,6 +932,21 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
             wlr_log(WLR_DEBUG, "liquid: poured %d of %d", got, run->pour);
             run->pour = 0;
             changed = true;
+        }
+        if (run->stream > 0 && run->box_w > 0.0) {
+            int got = liquid_pour(run->sim, run->stream_x, run->stream_y, run->stream,
+                                  run->stream_vx, run->stream_vy);
+            run->full = got == 0 && liquid_count(run->sim) >= liquid_budget(run->sim);
+            run->stream = 0;
+            changed = true;
+        }
+        if (run->drain > 0) {
+            /* A drain the width of a few particles: a spout, not a sponge —
+             * the liquid around it has to run into it. */
+            if (liquid_drain(run->sim, run->drain_x, run->drain_y,
+                             6.0 * liquid_spacing(run->sim), run->drain))
+                changed = true;
+            run->drain = 0;
         }
         if (changed) snapshot_take(run);
 
@@ -554,10 +1024,15 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
  * would advance in jumps of a fifth of a second. Settled, or out of sight, it
  * costs nothing. */
 bool server_liquid_busy(FwmServer *server) {
+    if (server->liquids_buffer && liquids_menu_animating()) return true;
+    /* A bucket pouring or draining is fed at the tick, and on the heartbeat it
+     * would pour in lumps five times a second. */
+    if (server->liquid_hand && (server->liquid_hand->pouring || server->liquid_hand->draining))
+        return true;
     struct FwmLiquidRun *run = server->liquid;
     if (!run) return false;
     if (!run_idle(run) || run->stepped || run->dirty) return true;
-    if (run->pour > 0 || run->clear) return true;
+    if (run->pour > 0 || run->stream > 0 || run->drain > 0 || run->clear) return true;
     if (run->asleep) return false;
     FwmOutput *mon = server_output_showing(server, run->desktop);
     return mon && !expo_active(server);

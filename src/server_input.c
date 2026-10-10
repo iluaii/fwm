@@ -559,6 +559,20 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
         }
     }
     
+    /* Escape puts a bucket down, or closes the liquids menu. Only Escape: the
+     * rest of the keyboard stays the keyboard, so gravity can be switched off
+     * under a stream in mid pour. */
+    if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+        (server_liquid_hand_held(server) || server->liquids_buffer)) {
+        xkb_keysym_t sym = xkb_state_key_get_one_sym(keyboard->wlr_keyboard->xkb_state,
+                                                     event->keycode + 8);
+        if (sym == XKB_KEY_Escape && server_liquid_escape(server)) {
+            if (event->keycode < sizeof(server->key_consumed))
+                server->key_consumed[event->keycode] = 1;
+            return;
+        }
+    }
+
     /* The region selector owns the keyboard while it is up — Escape cancels
      * and everything else is swallowed, releases included, so a client never
      * sees half of a key the selector ate. Ahead of the binds on purpose:

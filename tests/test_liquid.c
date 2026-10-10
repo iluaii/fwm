@@ -140,6 +140,28 @@ static void test_pour(void) {
     CHECK_INT(s.bad, 0);
     CHECK(s.x0 >= 0 && s.y1 <= 600);
 
+    CASE("a drain takes what stands over it and nothing else");
+    liquid_clear(l);
+    liquid_set_material(l, &(LiquidMaterial){ .viscosity = 0, .tension = 0 });
+    liquid_pour(l, 500, 300, 1500, 0, 0);
+    int before = liquid_count(l);
+    CHECK_INT(liquid_drain(l, 500, 300, 30, 10), 10);
+    CHECK_INT(liquid_count(l), before - 10);
+    int gone = liquid_drain(l, 500, 300, 30, 100000);
+    /* A disc of radius 30 holds about pi*30²/36 of them. */
+    CHECK(gone > 60 && gone < 90);
+    CHECK_INT(liquid_drain(l, 900, 100, 30, 100), 0);
+    Shape d = shape_of(l, 1000, 600);
+    CHECK_INT(d.bad, 0);
+    int st;
+    const float *dp = liquid_positions(l, &st);
+    int inside = 0;
+    for (int i = 0; i < liquid_count(l); i++) {
+        double ddx = dp[i * st] - 500, ddy = dp[i * st + 1] - 300;
+        if (ddx * ddx + ddy * ddy <= 30 * 30) inside++;
+    }
+    CHECK_INT(inside, 0);
+
     CASE("the budget is a ceiling");
     liquid_clear(l);
     liquid_set_budget(l, 300);

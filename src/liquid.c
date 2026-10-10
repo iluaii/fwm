@@ -390,6 +390,25 @@ void liquid_clear(FwmLiquid *l) {
     wake(l);
 }
 
+int liquid_drain(FwmLiquid *l, double cx, double cy, double r, int max) {
+    if (!l || max <= 0 || !(r > 0.0)) return 0;
+    float fx = (float)cx, fy = (float)cy, r2 = (float)(r * r);
+    int gone = 0;
+    /* Swapped out from the end, so the order the rest are in does not matter
+     * and nothing is moved twice. */
+    for (int k = 0; k < l->n && gone < max; ) {
+        float dx = l->p[k].x - fx, dy = l->p[k].y - fy;
+        if (dx * dx + dy * dy <= r2) {
+            l->p[k] = l->p[--l->n];
+            gone++;
+        } else {
+            k++;
+        }
+    }
+    if (gone) wake(l);
+    return gone;
+}
+
 /* ── the pressure solve ──────────────────────────────────────────────────
  *
  * One equation per fluid cell: the pressure it takes for the edges around it
