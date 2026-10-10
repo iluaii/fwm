@@ -870,7 +870,8 @@ fps        = 24
 [liquids]
 enabled   = false
 # The most one desktop may hold, and the cost: a step touches every particle.
-# The default fills about a fifth of a 1080p screen.
+# The default fills about a fifth of a 1080p screen; a desktop never takes
+# more than its own area holds, whatever this says.
 particles = 12000
 # Px between particles at rest — the finest drop there can be. 8 covers nearly
 # twice the screen with the same particles, in coarser drops. Reload-only, and

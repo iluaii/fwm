@@ -87,7 +87,8 @@ FwmLiquid *liquid_create(double spacing, int budget);
 void liquid_destroy(FwmLiquid *l);
 
 /* The walls: a `w` x `h` px box. A box that shrinks under liquid standing in
- * it pushes that liquid in with it. */
+ * it pushes that liquid in with it, and what no longer fits in it at all runs
+ * over the top and is gone. */
 void liquid_set_box(FwmLiquid *l, double w, double h);
 void liquid_set_material(FwmLiquid *l, const LiquidMaterial *m);
 /* Change the most the liquid may hold. Lowering it below what is already
@@ -97,8 +98,9 @@ void liquid_set_budget(FwmLiquid *l, int budget);
 /* Pour up to `count` particles as one round blob centred on (cx, cy), moving
  * at (vx, vy) px/s. The blob is pulled inside the walls if it would cross
  * them; liquid already there is poured into, and swells to hold it. Returns
- * how many particles went in — fewer than asked when the budget runs out, or
- * by a few when a disc of lattice sites does not come out exactly. */
+ * how many particles went in — fewer than asked when there is no more room
+ * (liquid_room), or by a few when a disc of lattice sites does not come out
+ * exactly. */
 int liquid_pour(FwmLiquid *l, double cx, double cy, int count,
                 double vx, double vy);
 void liquid_clear(FwmLiquid *l);
@@ -119,6 +121,10 @@ void liquid_step(FwmLiquid *l, double dt, double gx, double gy);
 
 int liquid_count(const FwmLiquid *l);
 int liquid_budget(const FwmLiquid *l);
+/* How many more particles it takes: up to the budget, and up to what the box
+ * holds — it cannot be squeezed, so a box is full when its area is, less a
+ * little for air. */
+int liquid_room(const FwmLiquid *l);
 double liquid_spacing(const FwmLiquid *l);
 
 /* Particle positions, px inside the box, `stride` floats from one particle's

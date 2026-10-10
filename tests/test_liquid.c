@@ -193,6 +193,35 @@ static void test_pour(void) {
     CHECK_INT(liquid_pour(l, 100, 100, 50, 0, 0), 0);
     liquid_destroy(l);
 
+    CASE("a box holds no more than its area, and full it still settles");
+    /* Liquid past the box's area has nowhere to be: poured 5% over, a full
+     * desktop once thrashed at the ceiling of steps for good. */
+    l = liquid_create(SPACING, 100000);
+    liquid_set_box(l, 600, 400);
+    liquid_set_material(l, &(LiquidMaterial){ .viscosity = 60, .tension = 30 });
+    int brim = (int)(600 * 400 / (SPACING * SPACING));
+    for (int k = 0; k < 40; k++) {
+        liquid_pour(l, 100 + (k % 5) * 100, 100, 1500, 0, 0);
+        run(l, 0.1, 0, G);
+    }
+    CHECK(liquid_count(l) <= brim);
+    CHECK(liquid_count(l) >= 0.9 * brim);
+    CHECK_INT(liquid_room(l), 0);
+    CHECK_INT(liquid_pour(l, 300, 100, 100, 0, 0), 0);
+    run(l, 3.0, 0, G);
+    CHECK(liquid_max_speed(l) < 1000);
+    CHECK(liquid_last_substeps(l) < 6);
+
+    CASE("a box made smaller than the liquid in it spills the top of it");
+    int before_shrink = liquid_count(l);
+    liquid_set_box(l, 600, 200);
+    CHECK(liquid_count(l) < before_shrink);
+    CHECK(liquid_count(l) <= (int)(600 * 200 / (SPACING * SPACING)));
+    CHECK_INT(shape_of(l, 600, 200).bad, 0);
+    run(l, 2.0, 0, G);
+    CHECK(liquid_max_speed(l) < 1000);
+    liquid_destroy(l);
+
     CASE("nothing can be poured into a world with no size");
     l = liquid_create(SPACING, 100);
     CHECK_INT(liquid_pour(l, 10, 10, 50, 0, 0), 0);

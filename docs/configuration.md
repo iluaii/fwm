@@ -1314,6 +1314,10 @@ particles and 5ms for 12000 — on a worker thread, so the desktop stays smooth
 even when the liquid cannot keep up; a big pour sloshes for a while before it
 settles, like a big pool would. Drawing it needs the GLES2 renderer.
 
+A desktop holds no more than its own area of liquid, whatever `particles` says:
+it cannot be squeezed, so a full desktop refuses more, and a monitor swapped
+for a smaller one spills what no longer fits over the top.
+
 Live: `viscosity`, `tension`, `color`, `particles` and `enabled` are all
 `fwmctl set liquids.*`; switching it off empties it. Picking up a bucket switches
 it on for the session. A bucket pours a fifth of `particles` a second. `spacing` is reload-only,

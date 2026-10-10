@@ -106,6 +106,14 @@
 #define SOLVE_TOL 1e-4f
 #define SOLVE_MAX_ITERS 200
 
+/* How full a box may be poured. The liquid cannot be squeezed, so liquid past
+ * the box's area has nowhere to be: the pressure has no answer, and the drift
+ * correction shoves for good at cells it can never empty — a desktop poured
+ * 5% over its area thrashed at the most steps a frame may take and never
+ * settled. Full to the brim settles; a twentieth is left for air anyway, as
+ * the margin between the two. */
+#define BRIM 0.95
+
 enum { AIR = 0, FLUID = 1, SOLID = 2 };
 
 /* One particle, laid out the way the loops read it: everything a step touches
@@ -250,6 +258,16 @@ void liquid_destroy(FwmLiquid *l) {
     free(l);
 }
 
+static int capacity(const FwmLiquid *l) {
+    return (int)(BRIM * l->w * l->h / (l->spacing * l->spacing));
+}
+
+/* Lowest first: y grows downwards. */
+static int lower_first(const void *a, const void *b) {
+    float ya = ((const Particle *)a)->y, yb = ((const Particle *)b)->y;
+    return (ya < yb) - (ya > yb);
+}
+
 void liquid_set_box(FwmLiquid *l, double w, double h) {
     if (!l || !(w > 0.0) || !(h > 0.0)) return;
     if (w == l->w && h == l->h) return;
@@ -309,6 +327,12 @@ void liquid_set_box(FwmLiquid *l, double w, double h) {
         p->x = fminf(fmaxf(p->x, x0), x1);
         p->y = fminf(fmaxf(p->y, y0), y1);
     }
+    /* And what the smaller box cannot hold runs over its top. */
+    int most = capacity(l);
+    if (l->n > most) {
+        qsort(l->p, (size_t)l->n, sizeof(*l->p), lower_first);
+        l->n = most;
+    }
     wake(l);
 }
 
@@ -349,7 +373,7 @@ static bool reserve(FwmLiquid *l, int want) {
 int liquid_pour(FwmLiquid *l, double cx, double cy, int count,
                 double vx, double vy) {
     if (!l || count <= 0 || !l->u) return 0;
-    int room = l->budget - l->n;
+    int room = liquid_room(l);
     if (room <= 0) return 0;
     if (count > room) count = room;
     if (!reserve(l, l->n + count)) return 0;
@@ -1157,6 +1181,11 @@ void liquid_step(FwmLiquid *l, double dt, double gx, double gy) {
 
 int liquid_count(const FwmLiquid *l) { return l ? l->n : 0; }
 int liquid_budget(const FwmLiquid *l) { return l ? l->budget : 0; }
+int liquid_room(const FwmLiquid *l) {
+    if (!l || !l->u) return 0;
+    int most = capacity(l) < l->budget ? capacity(l) : l->budget;
+    return most > l->n ? most - l->n : 0;
+}
 double liquid_spacing(const FwmLiquid *l) { return l ? l->spacing : 0.0; }
 bool liquid_asleep(const FwmLiquid *l) { return !l || l->n == 0 || l->asleep; }
 int liquid_last_substeps(const FwmLiquid *l) { return l ? l->substeps : 0; }

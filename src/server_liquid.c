@@ -79,6 +79,8 @@
  * in sixteen pieces. Two frames, the same allowance the window physics has. */
 #define LIQUID_MAX_DT (2.0 / 60.0)
 
+enum { FULL_BUDGET = 1, FULL_BRIM = 2 };
+
 struct FwmLiquidRun {
     FwmLiquid *sim;
     int desktop;
@@ -114,7 +116,9 @@ struct FwmLiquidRun {
     double stream_x, stream_y, stream_vx, stream_vy;
     int drain;
     double drain_x, drain_y;
-    bool full;              /* the last stream found the budget spent */
+    /* The last stream found no room: FULL_BUDGET, the budget spent, or
+     * FULL_BRIM, the desktop full to the top; 0 while there is room. */
+    int full;
 
     float *snap;            /* the particles as (x, y) pairs, for the picture */
     int snap_n, snap_cap;
@@ -712,7 +716,9 @@ static void hand_tick(FwmServer *server, double elapsed) {
         run->stream_vy = hand->vy * s;
     }
     if (run->full && !hand->told) {
-        toast_show(server, false, "That is all this desktop holds — [liquids] particles");
+        toast_show(server, false, run->full == FULL_BRIM
+                   ? "The desktop is full to the top"
+                   : "That is all this desktop holds — [liquids] particles");
         hand->told = true;
     }
 }
@@ -1170,7 +1176,9 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
         if (run->stream > 0 && run->box_w > 0.0) {
             int got = liquid_pour(run->sim, run->stream_x, run->stream_y, run->stream,
                                   run->stream_vx, run->stream_vy);
-            run->full = got == 0 && liquid_count(run->sim) >= liquid_budget(run->sim);
+            run->full = got > 0 || liquid_room(run->sim) > 0 ? 0
+                      : liquid_count(run->sim) >= liquid_budget(run->sim) ? FULL_BUDGET
+                      : FULL_BRIM;
             run->stream = 0;
             changed = true;
         }
