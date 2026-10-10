@@ -538,6 +538,40 @@ static void test_solids(void) {
     CHECK_INT(shape_of(l, W, H).bad, 0);
     liquid_destroy(l);
 
+    CASE("a window tumbling along the floor of a pool does not send it wild");
+    /* What spin mode does: a turned window rolling through a pool, its
+     * corners sweeping the floor and meeting the walls. Liquid shut in
+     * between a corner and a wall once had no pressure that could answer it
+     * and went to millions of px/s; liquid squeezed out of a closing gap, to
+     * tens of thousands, with every frame at the ceiling of steps. */
+    l = make(W, H, 60, 30);
+    for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 250, 1800, 0, 0);
+    run(l, 3.0, 0, G);
+    n = liquid_count(l);
+    LiquidSolid tumbler = { .id = 4, .w = 400, .h = 250 };
+    double turn = 0.3, cx = W / 2, dir = 1, wildest = 0;
+    int ceiling = 0;
+    for (int f = 0; f < 300; f++) {
+        turn += 2.5 * DT;
+        double c = fabs(cos(turn)), sn = fabs(sin(turn));
+        double ex = c * 200 + sn * 125, ey = sn * 200 + c * 125;
+        cx += dir * 400 * DT;
+        if (cx + ex > W - 1) { cx = W - 1 - ex; dir = -1; }
+        if (cx - ex < 1) { cx = 1 + ex; dir = 1; }
+        tumbler.x = cx - 200;
+        tumbler.y = H - 1 - ey - 125;
+        tumbler.angle = turn;
+        liquid_set_solids(l, &tumbler, 1);
+        liquid_step(l, DT, 0, G);
+        if (liquid_max_speed(l) > wildest) wildest = liquid_max_speed(l);
+        ceiling += liquid_last_substeps(l) >= 16;
+    }
+    CHECK(wildest < 10000);
+    CHECK_INT(ceiling, 0);
+    CHECK_INT(shape_of(l, W, H).bad, 0);
+    CHECK(liquid_count(l) > 0.99 * n);
+    liquid_destroy(l);
+
     CASE("a turning paddle stirs a pool and stays dry inside");
     l = make(W, H, 60, 30);
     for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 300, 1800, 0, 0);

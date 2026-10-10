@@ -187,7 +187,11 @@ struct FwmLiquid {
     int nsolid;            /* cells under a body, as of the last step */
     struct sface *sfaces;
     int nsfaces, sfaces_cap;
-    int *flood;            /* release_solids' stack */
+    int *flood;            /* release_solids' and find_pockets' stack */
+    /* Liquid shut in with no air — between a solid and a wall, say — as
+     * runs of cells in `pocket`, pocket k from pocket_at[k]. */
+    int *pocket, *pocket_at;
+    int npockets, pocket_cap;
     double smax;           /* the fastest solid surface near the liquid */
     /* The particles' bounding box after the last step: "near the liquid". */
     float lo_x, lo_y, hi_x, hi_y;
@@ -283,7 +287,7 @@ static void grid_free(FwmLiquid *l) {
     free(l->mass); free(l->colour);
     free(l->txx);  free(l->tyy);  free(l->txy);  free(l->type);
     free(l->fluid); free(l->nbits); free(l->ndiag);
-    free(l->sid);   free(l->flood);
+    free(l->sid);   free(l->flood); free(l->pocket);
     free(l->ring);
     free(l->pgrid); free(l->pocc);
     free(l->pres); free(l->rhs);  free(l->res);  free(l->aux);
@@ -296,6 +300,7 @@ static void grid_free(FwmLiquid *l) {
     l->nbits = l->ndiag = NULL;
     l->sid = NULL;
     l->flood = NULL;
+    l->pocket = NULL;
     l->ring = NULL;
     l->pgrid = NULL;
     l->pocc = NULL;
@@ -307,7 +312,7 @@ void liquid_destroy(FwmLiquid *l) {
     crew_destroy(l->crew);
     free(l->p);
     free(l->sol_prev); free(l->sol_next);
-    free(l->bodies);   free(l->sfaces);
+    free(l->bodies);   free(l->sfaces); free(l->pocket_at);
     grid_free(l);
     free(l);
 }
@@ -409,6 +414,7 @@ void liquid_set_box(FwmLiquid *l, double w, double h) {
     GRAB(l->fluid, l->cn, sizeof(int));
     GRAB(l->nbits, l->cn, 1);           GRAB(l->ndiag, l->cn, 1);
     GRAB(l->sid, l->cn, 1);             GRAB(l->flood, l->cn, sizeof(int));
+    GRAB(l->pocket, l->cn, sizeof(int));
     GRAB(l->ring, (size_t)(2 * (l->nx + l->ny)), 1);
     GRAB(l->pres, l->cn, sizeof(float)); GRAB(l->rhs, l->cn, sizeof(float));
     GRAB(l->res, l->cn, sizeof(float));  GRAB(l->aux, l->cn, sizeof(float));
@@ -591,6 +597,22 @@ int liquid_drain(FwmLiquid *l, double cx, double cy, double r, int max) {
  * the next test does not find it on it. */
 #define SKIN 0.01f
 
+/* The fastest a solid may drive the liquid: this many times its own fastest
+ * point, and never less than SQUEEZE_LEAST px/s.
+ *
+ * Not a law, and the one place here that is not: a limit on what a law
+ * cannot do with a solid nothing pushes back on. Liquid between a solid and
+ * a wall it is closing on has to leave through the gap, and as fast as the
+ * gap is narrow — a window's corner sweeping the floor of a pool drove it at
+ * 50000 px/s, the step ran at its ceiling for frames on end and the pool
+ * sprayed like a burst pipe. Real water would hold the window off instead;
+ * until the liquid pushes back (the next stage) it gives, here, at a speed
+ * nothing else on a desktop reaches, and is a little fuller there for a
+ * moment. A free splash never comes near it: water that fell the height of
+ * the screen splashes at a few thousand px/s. Only while solids are in it. */
+#define SQUEEZE_TIMES 3.0f
+#define SQUEEZE_LEAST 6000.0f
+
 struct body {
     float hw, hh, reach;       /* half its size, and half its diagonal */
     float cx0, cy0, a0;        /* its centre and turn at the start of the step */
@@ -733,35 +755,57 @@ static inline void body_velocity(const struct body *b, float x, float y, float *
     *vy = b->vy + b->spin * (x - b->px);
 }
 
-/* Out of every solid it stands in: onto that solid's nearest face, and no
- * longer moving into it faster than the face is moving away. */
-static void push_out(const FwmLiquid *l, Particle *p) {
+/* Out of every solid it stands in: onto that solid's nearest face that is
+ * inside the walls, and no longer moving into it faster than the face is
+ * moving away. False when no face of a solid it is in has room on the near
+ * side of the walls — a window's corner has met the wall with this particle
+ * between them, and there is nowhere left for it to be. */
+static bool push_out(const FwmLiquid *l, Particle *p) {
+    const float dx0 = l->dx;
+    const float x0 = l->ox + 0.1f * dx0, x1 = l->ox + l->nx * dx0 - 0.1f * dx0;
+    const float y0 = l->oy + 0.1f * dx0, y1 = l->oy + l->ny * dx0 - 0.1f * dx0;
     for (int k = 0; k < l->nbodies; k++) {
         const struct body *b = &l->bodies[k];
         float dx = p->x - b->px, dy = p->y - b->py;
         if (fabsf(dx) >= b->reach || fabsf(dy) >= b->reach) continue;
         float lx = b->c * dx + b->s * dy, ly = -b->s * dx + b->c * dy;
-        float ex = b->hw - fabsf(lx), ey = b->hh - fabsf(ly);
-        if (ex <= 0.0f || ey <= 0.0f) continue;
-        float nx = 0.0f, ny = 0.0f, skin = SKIN * l->dx;
-        if (ex < ey) {
-            nx = lx < 0.0f ? -1.0f : 1.0f;
-            lx = nx * (b->hw + skin);
-        } else {
-            ny = ly < 0.0f ? -1.0f : 1.0f;
-            ly = ny * (b->hh + skin);
+        if (b->hw - fabsf(lx) <= 0.0f || b->hh - fabsf(ly) <= 0.0f) continue;
+
+        /* The four faces, nearest first. */
+        const float skin = SKIN * dx0;
+        struct { float d, nx, ny; } face[4] = {
+            { b->hw - lx,  1.0f,  0.0f }, { b->hw + lx, -1.0f,  0.0f },
+            { b->hh - ly,  0.0f,  1.0f }, { b->hh + ly,  0.0f, -1.0f },
+        };
+        for (int i = 1; i < 4; i++)
+            for (int j = i; j > 0 && face[j].d < face[j - 1].d; j--) {
+                __typeof__(face[0]) t = face[j];
+                face[j] = face[j - 1];
+                face[j - 1] = t;
+            }
+        bool placed = false;
+        for (int i = 0; i < 4 && !placed; i++) {
+            float nlx = face[i].nx ? face[i].nx * (b->hw + skin) : lx;
+            float nly = face[i].ny ? face[i].ny * (b->hh + skin) : ly;
+            float wx = b->px + b->c * nlx - b->s * nly;
+            float wy = b->py + b->s * nlx + b->c * nly;
+            if (wx < x0 || wx > x1 || wy < y0 || wy > y1) continue;
+            p->x = wx;
+            p->y = wy;
+            float wnx = b->c * face[i].nx - b->s * face[i].ny;
+            float wny = b->s * face[i].nx + b->c * face[i].ny;
+            float svx, svy;
+            body_velocity(b, wx, wy, &svx, &svy);
+            float into = (p->vx - svx) * wnx + (p->vy - svy) * wny;
+            if (into < 0.0f) {
+                p->vx -= into * wnx;
+                p->vy -= into * wny;
+            }
+            placed = true;
         }
-        p->x = b->px + b->c * lx - b->s * ly;
-        p->y = b->py + b->s * lx + b->c * ly;
-        float wnx = b->c * nx - b->s * ny, wny = b->s * nx + b->c * ny;
-        float svx, svy;
-        body_velocity(b, p->x, p->y, &svx, &svy);
-        float into = (p->vx - svx) * wnx + (p->vy - svy) * wny;
-        if (into < 0.0f) {
-            p->vx -= into * wnx;
-            p->vy -= into * wny;
-        }
+        if (!placed) return false;
     }
+    return true;
 }
 
 static bool add_sface(FwmLiquid *l, const struct sface *e) {
@@ -1114,6 +1158,83 @@ static double largest(const FwmLiquid *l, int slot) {
     return m;
 }
 
+/* Liquid with no air anywhere around it: every cell reachable from one
+ * beside air marked, and what is left gathered into pockets. Only a solid
+ * can shut liquid in — the box alone never fills to the brim — so with none
+ * there is nothing to look for. */
+static void find_pockets(FwmLiquid *l) {
+    l->npockets = 0;
+    if (l->nbodies == 0) return;
+    const int cw = l->cw;
+    const unsigned char *t = l->type;
+    unsigned char *seen = l->okb;   /* free until release_solids */
+    int *stack = l->flood, top = 0;
+    memset(seen, 0, l->cn);
+    for (int j = 0; j < l->ny; j++)
+        for (int i = 0; i < l->nx; i++) {
+            size_t c = CIX(l, i, j);
+            if (t[c] != FLUID) continue;
+            if (t[c - 1] == AIR || t[c + 1] == AIR || t[c - cw] == AIR || t[c + cw] == AIR) {
+                seen[c] = 1;
+                stack[top++] = (int)c;
+            }
+        }
+    while (top > 0) {
+        int c = stack[--top];
+        const int around[4] = { c - 1, c + 1, c - cw, c + cw };
+        for (int k = 0; k < 4; k++)
+            if (!seen[around[k]] && t[around[k]] == FLUID) {
+                seen[around[k]] = 1;
+                stack[top++] = around[k];
+            }
+    }
+
+    int n = 0;
+    for (int j = 0; j < l->ny; j++)
+        for (int i = 0; i < l->nx; i++) {
+            size_t c0 = CIX(l, i, j);
+            if (seen[c0] || t[c0] != FLUID) continue;
+            if (l->npockets + 1 >= l->pocket_cap) {
+                int cap = l->pocket_cap ? 2 * l->pocket_cap : 16;
+                int *a = realloc(l->pocket_at, (size_t)cap * sizeof(*a));
+                if (!a) return;
+                l->pocket_at = a;
+                l->pocket_cap = cap;
+            }
+            l->pocket_at[l->npockets++] = n;
+            seen[c0] = 1;
+            stack[top++] = (int)c0;
+            while (top > 0) {
+                int c = stack[--top];
+                l->pocket[n++] = c;
+                const int around[4] = { c - 1, c + 1, c - cw, c + cw };
+                for (int k = 0; k < 4; k++)
+                    if (!seen[around[k]] && t[around[k]] == FLUID) {
+                        seen[around[k]] = 1;
+                        stack[top++] = around[k];
+                    }
+            }
+        }
+    if (l->npockets) l->pocket_at[l->npockets] = n;
+}
+
+/* A pocket shut in by a solid that is moving can have more coming into it
+ * than going out, and nothing can be squeezed: for that there is no
+ * pressure at all, and the solve, asked for one, answered in millions of
+ * px/s. So what a pocket cannot get rid of it keeps — the part of its
+ * inflow every cell of it shares is taken out of the equations, and the
+ * pocket is a little fuller until the solid lets it out again, which the
+ * drift correction then evens out. */
+static void open_pockets(FwmLiquid *l) {
+    for (int k = 0; k < l->npockets; k++) {
+        int a = l->pocket_at[k], b = l->pocket_at[k + 1];
+        double sum = 0.0;
+        for (int q = a; q < b; q++) sum += l->rhs[l->pocket[q]];
+        float mean = (float)(sum / (b - a));
+        for (int q = a; q < b; q++) l->rhs[l->pocket[q]] -= mean;
+    }
+}
+
 /* Solve for `pres` (which holds the last step's answer, scaled to this one,
  * as the first guess): each member its own strip, in step with the rest. */
 static void job_pressure(void *ctx, int part, int parts) {
@@ -1130,6 +1251,10 @@ static void job_pressure(void *ctx, int part, int parts) {
     }
     mine[0] = strip_rhs(l, k0, k1, job->h);
     crew_sync(l->crew);
+    if (l->npockets) {
+        if (part == 0) open_pockets(l);
+        crew_sync(l->crew);
+    }
 
     float scale = (float)largest(l, 0);
     if (scale < 1e-9f) {
@@ -1192,7 +1317,10 @@ static void job_pressure(void *ctx, int part, int parts) {
 /* The pressure for this step: the strips cut afresh when the cells did
  * change, and the solve. */
 static void solve_pressure(FwmLiquid *l, float h, bool lists) {
-    if (lists) cut_strips(l);
+    if (lists) {
+        cut_strips(l);
+        find_pockets(l);
+    }
     struct step_job job = { .l = l, .h = h, .lists = lists };
     crew_run(l->crew, job_pressure, &job);
 }
@@ -1259,6 +1387,7 @@ static void gather(const FwmLiquid *l, int lo, int hi, float h, const struct gri
         Particle *p = &l->p[k];
         /* Whatever a solid moved over this substep, it is off it now. */
         if (l->nbodies) {
+            /* One with nowhere left to be is let go of after the move. */
             push_out(l, p);
             p->x = fminf(fmaxf(p->x, x0), x1);
             p->y = fminf(fmaxf(p->y, y0), y1);
@@ -1696,6 +1825,7 @@ static void job_to_particles(void *ctx, int part, int parts) {
     const float x0 = l->ox + 0.1f * dx, x1 = l->ox + nx * dx - 0.1f * dx;
     const float y0 = l->oy + 0.1f * dx, y1 = l->oy + ny * dx - 0.1f * dx;
     const float dinv = 4.0f * idx;   /* D^-1 times the dx in each offset */
+    const float squeeze = l->nbodies ? fmaxf(SQUEEZE_LEAST, SQUEEZE_TIMES * (float)l->smax) : 0.0f;
     float vmax2 = 0.0f;
     double vsum2 = 0.0;
     float lox = INFINITY, loy = INFINITY, hix = -INFINITY, hiy = -INFINITY;
@@ -1728,6 +1858,12 @@ static void job_to_particles(void *ctx, int part, int parts) {
                 c11 += w * ((float)j - fy);
             }
         }
+        float drive = vx * vx + vy * vy;
+        if (squeeze > 0.0f && drive > squeeze * squeeze) {
+            float k = squeeze / sqrtf(drive);
+            vx *= k;
+            vy *= k;
+        }
         p->vx = vx;  p->vy = vy;
         p->c00 = c00 * dinv;  p->c01 = c01 * dinv;
         p->c10 = c10 * dinv;  p->c11 = c11 * dinv;
@@ -1735,8 +1871,15 @@ static void job_to_particles(void *ctx, int part, int parts) {
         p->x += h * vx;
         p->y += h * vy;
         /* The grid stops liquid at a solid's face the way it does at a wall,
-         * and a substep's move can still carry a particle a hair into it. */
-        if (l->nbodies) push_out(l, p);
+         * and a substep's move can still carry a particle a hair into it.
+         * Caught between a solid and a wall with no room left, it is
+         * squeezed out of the liquid altogether — what no longer fits runs
+         * over the top, here as anywhere. */
+        if (l->nbodies && !push_out(l, p)) {
+            p->x = NAN;
+            bad++;
+            continue;
+        }
         /* The grid stops liquid at the walls; this catches the last fraction
          * of a step that carries a particle a hair past one, which would
          * otherwise read nodes outside the grid next time. */
@@ -1811,7 +1954,8 @@ static void substep(FwmLiquid *l, float h) {
     /* A particle gone to NaN would poison the grid for every neighbour on the
      * next step and the whole body after that. It cannot happen inside the
      * step limits; if it does anyway, that one particle is lost rather than
-     * the liquid. */
+     * the liquid. The ones squeezed out between a solid and a wall leave the
+     * same way. */
     if (bad) {
         int out = 0;
         for (int k = 0; k < l->n; k++) {
