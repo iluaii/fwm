@@ -182,7 +182,7 @@ exists because its subject cannot be checked by hand in a running session.
 | `test_physics` | the ends of the world: throws, walls, the ring join, mass scaling |
 | `test_physics_speed` | what has to keep working at speed — the drag that used to pass through windows, the world ceiling, walls under absurd throws |
 | `test_liquid_kinds` | the liquids made in the menu, through their state file and back |
-| `test_liquid` | the liquid's laws: free fall, inertia, a pool as deep as its volume that then goes still, gravity turned round, tension rounding a strip, viscosity, walls, a box that holds no more than its area — all of it once on one thread and again split across four |
+| `test_liquid` | the liquid's laws: free fall, inertia, a pool as deep as its volume that then goes still, gravity turned round, tension rounding a strip, viscosity, walls, a box that holds no more than its area, windows standing in it (displacement, a cup that does not leak, a splash, a window lifted out without the pool) — all of it once on one thread and again split across four |
 | `test_ipc_events` | the event name/bit vocabulary |
 | `test_wobble` | the drag lattice, which only runs while a button is held |
 | `test_gestures` | what a swipe means, without a touchpad |

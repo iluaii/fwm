@@ -146,6 +146,38 @@ static double now_s(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
+/* ── the windows in it ───────────────────────────────────────────────── */
+
+/* The most windows handed to the liquid: more than anyone keeps on one
+ * desktop, and the rest simply are not in the water. */
+#define LIQUID_SOLIDS_MAX 64
+
+/* The windows standing in the liquid: every one on its desktop that the
+ * physics moves or holds still, as a box in the liquid's own coordinates —
+ * where it is, never how fast it goes; the liquid works that out from where
+ * it was. Not the tiled ones: the layout's, they stand in front of the
+ * liquid like the glass of an aquarium. Not a fullscreen one, which covers
+ * the desktop and stops the liquid anyway, and not one that has not painted
+ * anything yet. */
+static void solids_sync(FwmServer *server, struct FwmLiquidRun *run, int d) {
+    LiquidSolid s[LIQUID_SOLIDS_MAX];
+    int n = 0;
+    FwmView *view;
+    wl_list_for_each(view, &server->views, link) {
+        if (n == LIQUID_SOLIDS_MAX) break;
+        if (!view->scene_tree || !view->scene_tree->node.enabled) continue;
+        PhysicsBody *b = physics_find_body(&server->physics, view->id);
+        if (!b || b->desktop_id != d || b->tiled || b->fullscreen) continue;
+        s[n++] = (LiquidSolid){
+            .id = view->id,
+            .x = b->x - (double)d * server->screen_width, .y = b->y,
+            .w = b->width, .h = b->height,
+            .angle = b->spin ? b->angle : 0.0,
+        };
+    }
+    liquid_set_solids(run->sim, s, n);
+}
+
 /* ── the worker ──────────────────────────────────────────────────────── */
 
 /* How many threads the worker splits a step across, itself one of them:
@@ -1175,6 +1207,8 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
                 run->box_h = bh;
                 changed = true;
             }
+            /* Before a pour, which goes around them. */
+            solids_sync(server, run, d);
         }
 
         if (run->clear) {

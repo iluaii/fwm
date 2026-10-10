@@ -56,13 +56,16 @@
  * Like physics.c it knows nothing of the compositor — no wlroots, no windows,
  * no desktops. Where and when a step runs is the caller's; what it does with
  * threads of its own is split its loops across them (liquid_set_threads), and
- * a step still starts and ends inside the one call. The world is one box, `w` x `h` px, y-down with the
- * origin at its top-left; its floor is exactly the box's bottom edge, and the
- * other walls stand at most a grid cell outside it. The caller decides what
- * the box is (a desktop), what the gravity is (that desktop's), and when time
- * passes. That is what lets the whole thing be stepped in a loop by
- * tests/test_liquid.c, and moved to the GPU later without anything outside
- * noticing.
+ * a step still starts and ends inside the one call.
+ *
+ * The world is one box, `w` x `h` px, y-down with the origin at its top-left;
+ * its floor is exactly the box's bottom edge, and the other walls stand at
+ * most a grid cell outside it. Inside it stand whatever solids the caller
+ * places (liquid_set_solids) — windows, to the caller; boxes, to it. The
+ * caller decides what the box is (a desktop), what stands in it, what the
+ * gravity is (that desktop's), and when time passes. That is what lets the
+ * whole thing be stepped in a loop by tests/test_liquid.c, and moved to the
+ * GPU later without anything outside noticing.
  *
  * Units are px and seconds throughout, and the density is 1. */
 
@@ -93,6 +96,34 @@ void liquid_destroy(FwmLiquid *l);
  * over the top and is gone. */
 void liquid_set_box(FwmLiquid *l, double w, double h);
 void liquid_set_material(FwmLiquid *l, const LiquidMaterial *m);
+
+/* Something solid standing in the liquid: a box `w` x `h` whose unturned
+ * top-left is (x, y), turned `angle` radians about its centre (y-down, the
+ * way a window's is). `id` says it is the same thing from one call to the
+ * next, which is how its motion is known: the liquid is told where things
+ * are, never how fast they go — the speed is how far a solid got over a
+ * step, and that is the same for a window falling, thrown or carried on the
+ * pointer.
+ *
+ * A solid is a moving wall. Nothing goes through it; what it moves into is
+ * pushed ahead of it and what lies on it stays there; it pulls on the liquid
+ * against it only where no air could get in behind — a window lifted out of
+ * a pool comes out dripping, not with the pool hanging under it. It is not
+ * pushed back: the liquid does not move what stands in it. And it takes up
+ * room, so a desktop holds that much less liquid while it is there. */
+typedef struct {
+    unsigned id;
+    double x, y, w, h;
+    double angle;
+} LiquidSolid;
+
+/* Where the solids are to be at the end of the next step; `n` of them, which
+ * may be none. Over the step each moves from where it stood at the end of the
+ * last one to here. One it did not know before simply is there, and so is
+ * one that went further in a step than anything is thrown — a window sent
+ * across the desktop by a key, not by a hand. A change near the liquid wakes
+ * it; far from it, it does not. */
+void liquid_set_solids(FwmLiquid *l, const LiquidSolid *s, int n);
 /* Change the most the liquid may hold. Lowering it below what is already
  * poured keeps what is there and refuses more. */
 void liquid_set_budget(FwmLiquid *l, int budget);

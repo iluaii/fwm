@@ -1305,7 +1305,16 @@ feels — the `[physics.<name>]` profile and the switch.
 
 Particles are how it is computed; on screen it is one body, cut from a smooth
 field the particles are blurred into, so close particles melt together and a
-lone one is a drop. It stands behind the windows, which do not feel it yet.
+lone one is a drop.
+
+The windows on its desktop stand in it, as moving walls: it runs round them
+and lies on them, a window dropped in splashes it and raises it by what it
+displaces, one dragged through it pushes it along, and one lifted out comes out
+dripping — it is let go wherever air can get in behind, the way the walls let
+go of it. A desktop holds that much less liquid while a window takes up room in
+it; what no longer fits runs over the top. Tiled windows are not in it: they
+stand in front of it, like the glass of an aquarium. It does not push windows
+back yet.
 
 One desktop at a time: the liquid stands on the desktop it was first poured on
 until it is cleared. It is only stepped while a monitor shows that desktop and

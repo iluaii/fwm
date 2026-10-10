@@ -23,6 +23,7 @@
 #include "test.h"
 #include "liquid.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 #define DT (1.0 / 60.0)
@@ -382,6 +383,179 @@ static void test_walls(void) {
     liquid_destroy(l);
 }
 
+/* ── solids ──────────────────────────────────────────────────────────── */
+
+/* Particles standing inside a box turned `angle` about its centre — deeper
+ * than `skin` px, so that one lying on the face does not count. */
+static int inside(const FwmLiquid *l, LiquidSolid b, double skin) {
+    int st, in = 0;
+    const float *p = liquid_positions(l, &st);
+    double cx = b.x + b.w / 2, cy = b.y + b.h / 2, c = cos(b.angle), sn = sin(b.angle);
+    for (int i = 0; i < liquid_count(l); i++) {
+        double dx = p[i * st] - cx, dy = p[i * st + 1] - cy;
+        double lx = c * dx + sn * dy, ly = -sn * dx + c * dy;
+        if (fabs(lx) < b.w / 2 - skin && fabs(ly) < b.h / 2 - skin) in++;
+    }
+    return in;
+}
+
+static void settle(FwmLiquid *l, double most) {
+    for (double t = 0; !liquid_asleep(l) && t < most; t += DT) liquid_step(l, DT, 0, G);
+}
+
+static void test_solids(void) {
+    const double W = 1200, H = 700;
+
+    CASE("a window standing in a pool raises it by what it displaces");
+    FwmLiquid *l = make(W, H, 60, 30);
+    LiquidSolid post = { .id = 1, .x = 500, .y = H - 450, .w = 200, .h = 450 };
+    liquid_set_solids(l, &post, 1);
+    int n = 0;
+    for (int k = 0; k < 4; k++) n += liquid_pour(l, 150 + k * 300, 200, 2000, 0, 0);
+    /* Two deep, narrow basins slosh for longer than a test should wait for
+     * them to sleep — a box that narrow does without any window in it. */
+    run(l, 25.0, 0, G);
+    CHECK_INT(inside(l, post, 1.0), 0);
+    CHECK_INT(liquid_count(l), n);
+    /* The window covers the cells whose centres it covers: 16 of 12 px. */
+    double depth = n * SPACING * SPACING / (W - 16 * 12.0);
+    CHECK_DBL(H - height_below(l, 0.02), depth, 0.1 * depth + SPACING);
+
+    liquid_destroy(l);
+
+    CASE("a window lifted out of a pool comes out dripping, not with the pool");
+    /* Slowly, its bottom under the surface: held to it everywhere, the
+     * liquid under it is drawn up after it in a sheet. Let go where air can
+     * get in, what still hangs there when it is well clear is the meniscus
+     * the surface tension holds — about half as much. */
+    l = make(W, H, 60, 30);
+    n = 0;
+    for (int k = 0; k < 4; k++) n += liquid_pour(l, 150 + k * 300, 250, 1800, 0, 0);
+    run(l, 10.0, 0, G);
+    double surface = H - n * SPACING * SPACING / W;
+    LiquidSolid lid = { .id = 2, .x = 450, .y = surface - 100, .w = 300, .h = 180 };
+    liquid_set_solids(l, &lid, 1);
+    run(l, 2.0, 0, G);
+    int hanging = -1;
+    for (int f = 0; f < 300 && hanging < 0; f++) {
+        lid.y -= 150 * DT;
+        liquid_set_solids(l, &lid, 1);
+        liquid_step(l, DT, 0, G);
+        double bottom = lid.y + lid.h;
+        if (bottom > surface - 100) continue;
+        int st;
+        const float *q = liquid_positions(l, &st);
+        hanging = 0;
+        for (int i = 0; i < liquid_count(l); i++) {
+            double x = q[i * st], y = q[i * st + 1];
+            hanging += x > 450 && x < 750 && y > bottom - 2 && y < surface - 30;
+        }
+    }
+    CHECK(hanging >= 0 && hanging < 170);
+    liquid_destroy(l);
+
+    CASE("liquid poured into a cup of three solids stays in it");
+    l = make(W, H, 60, 30);
+    LiquidSolid cup[3] = {
+        { .id = 1, .x = 400, .y = 300, .w = 24, .h = 220 },
+        { .id = 2, .x = 776, .y = 300, .w = 24, .h = 220 },
+        { .id = 3, .x = 400, .y = 496, .w = 400, .h = 24 },
+    };
+    liquid_set_solids(l, cup, 3);
+    n = liquid_pour(l, 600, 380, 1500, 0, 0);
+    run(l, 4.0, 0, G);
+    CHECK_INT(shape_of(l, W, H).bad, 0);
+    int st, in_cup = 0, under = 0;
+    const float *p = liquid_positions(l, &st);
+    for (int i = 0; i < liquid_count(l); i++) {
+        double x = p[i * st], y = p[i * st + 1];
+        in_cup += x > 420 && x < 780 && y < 500;
+        under += y > 520;
+    }
+    CHECK(in_cup >= 0.98 * n);
+    CHECK_INT(under, 0);
+    for (int k = 0; k < 3; k++) CHECK_INT(inside(l, cup[k], 1.0), 0);
+
+    CASE("taking the bottom out of the cup lets it all fall");
+    liquid_set_solids(l, cup, 2);
+    CHECK(!liquid_asleep(l));
+    run(l, 2.0, 0, G);
+    /* Not every drop: what lands throws spray as high as the ceiling, cup or
+     * no cup. The body of it. */
+    CHECK(shape_of(l, W, H).cy > 560);
+    liquid_destroy(l);
+
+    CASE("a window dropped into a pool throws it up, and displaces it");
+    l = make(W, H, 60, 30);
+    for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 300, 1800, 0, 0);
+    settle(l, 40);
+    n = liquid_count(l);
+    surface = H - n * SPACING * SPACING / W;
+    LiquidSolid slab = { .id = 7, .x = 450, .y = surface - 260, .w = 300, .h = 120 };
+    liquid_set_solids(l, &slab, 1);
+    liquid_step(l, DT, 0, G);
+    double highest = H;
+    for (int f = 0; f < 90; f++) {
+        if (slab.y + slab.h < H - 30) slab.y += 900 * DT;
+        liquid_set_solids(l, &slab, 1);
+        liquid_step(l, DT, 0, G);
+        Shape sh = shape_of(l, W, H);
+        if (sh.y0 < highest) highest = sh.y0;
+    }
+    CHECK(highest < surface - 80);
+    CHECK_INT(inside(l, slab, 1.0), 0);
+    CHECK_INT(shape_of(l, W, H).bad, 0);
+    /* Sunk to 30 px off the floor, all 120 px of it under: 10 rows of 25
+     * cells, over 1200 px. */
+    run(l, 8.0, 0, G);
+    CHECK_DBL(H - height_below(l, 0.02), n * SPACING * SPACING / W + 250 * 144.0 / W, 20);
+    liquid_destroy(l);
+
+    CASE("a window moving far above a settled pool does not wake it");
+    l = make(W, H, 60, 30);
+    for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 250, 1200, 0, 0);
+    settle(l, 40);
+    CHECK(liquid_asleep(l));
+    LiquidSolid far = { .id = 9, .x = 100, .y = 20, .w = 200, .h = 100 };
+    for (int f = 0; f < 30; f++) {
+        far.x += 5;
+        liquid_set_solids(l, &far, 1);
+        liquid_step(l, DT, 0, G);
+    }
+    CHECK(liquid_asleep(l));
+
+    CASE("a window put somewhere by a key is there, without a wave the size of the desktop");
+    far.y = H - 200;   /* 480 px in one step, into the pool */
+    liquid_set_solids(l, &far, 1);
+    CHECK(!liquid_asleep(l));
+    double fastest = 0;
+    for (int f = 0; f < 30; f++) {
+        liquid_step(l, DT, 0, G);
+        if (liquid_max_speed(l) > fastest) fastest = liquid_max_speed(l);
+    }
+    CHECK(fastest < 2500);
+    CHECK_INT(inside(l, far, 1.0), 0);
+    CHECK_INT(shape_of(l, W, H).bad, 0);
+    liquid_destroy(l);
+
+    CASE("a turning paddle stirs a pool and stays dry inside");
+    l = make(W, H, 60, 30);
+    for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 300, 1800, 0, 0);
+    settle(l, 40);
+    LiquidSolid paddle = { .id = 3, .x = 450, .y = H - 300, .w = 300, .h = 40 };
+    double rms = 0;
+    for (int f = 0; f < 90; f++) {
+        paddle.angle += 2.0 * DT;
+        liquid_set_solids(l, &paddle, 1);
+        liquid_step(l, DT, 0, G);
+        if (liquid_rms_speed(l) > rms) rms = liquid_rms_speed(l);
+    }
+    CHECK(rms > 30);
+    CHECK(inside(l, paddle, 2.0) < 5);
+    CHECK_INT(shape_of(l, W, H).bad, 0);
+    liquid_destroy(l);
+}
+
 /* ── threads ─────────────────────────────────────────────────────────── */
 
 static void test_threads(void) {
@@ -443,6 +617,7 @@ int main(void) {
         test_tension();
         test_viscosity();
         test_walls();
+        test_solids();
     }
     return t_report("test_liquid");
 }

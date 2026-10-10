@@ -21,7 +21,11 @@ incompressible pressure solve, viscosity and surface tension — and no rule
 anywhere about what a splash or a ball should look like: a blob falls and
 splashes and sloshes because of gravity, and with gravity switched off it keeps
 flying and its own surface gathers it into balls. On screen it is one smooth
-body, behind the windows; they do not feel it yet. It runs beside the
+body. The windows on its desktop stand in it: it runs round them and lies
+on them, a window dropped in splashes it and raises it by what it displaces,
+and one lifted out comes out dripping rather than with the pool hanging under
+it. Tiled windows stand in front of it instead, like the glass of an
+aquarium, and nothing pushes a window back yet. It runs beside the
 compositor, split across the CPU's cores (`[liquids] threads`), only while
 somebody can see it and only until it settles — six cores keep a whole 1080p
 screen of it moving in real time. A desktop holds 30000 particles by default,
