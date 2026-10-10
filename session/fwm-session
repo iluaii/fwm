@@ -33,6 +33,21 @@ LOGFILE="$STATE_DIR/fwm.log"
 
 mkdir -p "$STATE_DIR"
 
+# Without XDG_RUNTIME_DIR fwm has nowhere to put its socket and exits at
+# once, three times, and the display manager is left showing black. It is
+# elogind that sets it, from PAM, for a new login session — and it does not
+# make one for a display manager that was itself started from inside a
+# logged-in tty, which is exactly how one gets tried out. The directory is
+# usually there anyway; take it when it is ours and closed to everyone else.
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    rd="/run/user/$(id -u)"
+    if [ -d "$rd" ] && [ -O "$rd" ] && [ "$(stat -c %a "$rd")" = 700 ]; then
+        export XDG_RUNTIME_DIR="$rd"
+        printf '%s: XDG_RUNTIME_DIR was not set, using %s\n' \
+            "$(date -Is 2>/dev/null || date)" "$rd" >>"$LOG"
+    fi
+fi
+
 crashes=0
 window_start=$(date +%s)
 
