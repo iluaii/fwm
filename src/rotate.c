@@ -75,9 +75,26 @@ static const char frag_ext_src[] =
  * all of them ARE something laid over the background, and come out exactly
  * right. Anything cut by distance from the background instead left a step
  * where the cut fell: first the opaque rim round every letter, then a ring
- * across every shadow wider than the cut. The price is honest: a card a shade
- * off the page, or the darkest parts of a picture on a dark page, are mostly
- * background too, and come out as a tint over what is behind the window. */
+ * across every shadow wider than the cut.
+ *
+ * Taken literally that thins far too much: grey text, the icons and titles of
+ * the browser's own toolbar, anything in mid-tones is half background by that
+ * reckoning and came out washed out against the wallpaper. So the alpha it
+ * finds is tripled, capped at whole: whatever is clearly NOT background — a
+ * third of the way to its opposite is plenty — stands fully solid, and only
+ * what is close to the background keeps its see-through share: the background
+ * itself, shadows, the last pixels of an antialiased edge, a card a shade off
+ * the page. It is a curve and not a cut, so no step comes back.
+ *
+ * And only rows of the PAGE are touched at all. A browser's own toolbar is a
+ * shade off its page — exactly the kind of thing the above thins to a tint —
+ * and a toolbar the wallpaper shows through has every icon and title on it
+ * looking faded. A page's background runs out to the window's edge, a
+ * toolbar's colour is its own: so a row is keyed only where its left or right
+ * edge is the background, and left exactly as drawn otherwise. That keeps the
+ * tabs and the address bar whole, and with them a site's full-width header
+ * and a picture that spans the page — and the line between the two is the
+ * straight edge of the thing itself. */
 #define KEY_BODY \
     "varying vec2 v_texcoord;\n" \
     "uniform vec4 color;\n" \
@@ -108,11 +125,15 @@ static const char frag_ext_src[] =
     "    have = best >= 4;\n" \
     "  }\n" \
     "  if (!have) { gl_FragColor = c; return; }\n" \
+    "  vec4 el = texture2D(tex, vec2(0.01, v_texcoord.y));\n" \
+    "  vec4 er = texture2D(tex, vec2(0.99, v_texcoord.y));\n" \
+    "  if (!((el.a >= 0.98 && dist(el.rgb, k) < tol) ||\n" \
+    "        (er.a >= 0.98 && dist(er.rgb, k) < tol))) { gl_FragColor = c; return; }\n" \
     "  vec3 cs = straight(c);\n" \
     "  vec3 up = (cs - k) / max(vec3(1.0) - k, vec3(0.004));\n" \
     "  vec3 dn = (k - cs) / max(k, vec3(0.004));\n" \
     "  vec3 ch = max(up, dn);\n" \
-    "  float a = clamp(max(ch.r, max(ch.g, ch.b)), 0.0, 1.0);\n" \
+    "  float a = clamp(max(ch.r, max(ch.g, ch.b)) * 3.0, 0.0, 1.0);\n" \
     "  if (dist(cs, k) < tol) a = 0.0;\n" \
     "  vec3 rgb = cs - (1.0 - a) * k * (1.0 - alpha);\n" \
     "  float oa = 1.0 - (1.0 - a) * (1.0 - alpha);\n" \
