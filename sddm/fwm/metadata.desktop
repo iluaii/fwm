@@ -1,0 +1,13 @@
+[SddmGreeterTheme]
+Name=fwm
+Description=The fwm login screen: fwm's wallpaper and tray, and each user as a card that is a body.
+Author=Ilu
+License=GPL-2.0
+Type=sddm-theme
+Version=0.1
+Website=https://github.com/iluaii/fwm
+MainScript=Main.qml
+ConfigFile=theme.conf
+Theme-Id=fwm
+Theme-API=2.0
+QtVersion=6
