@@ -66,12 +66,23 @@ static const char frag_ext_src[] =
  * them agree on is the background. Points that are not opaque — the shadow a
  * client draws around itself — do not vote, and no agreement means no key:
  * the window is copied as it is rather than guessed at. Twelve fetches and a
- * hundred-odd comparisons a fragment, on a commit and not on a frame. */
+ * hundred-odd comparisons a fragment, on a commit and not on a frame.
+ *
+ * The edges of text are the hard part. An antialiased edge pixel is a MIX of
+ * the text and the background, close to neither, so a plain key left every
+ * letter standing in an opaque rim of half-background — ragged text on a
+ * see-through page. So a pixel next to the background (one of its eight
+ * neighbours is background) is un-mixed instead, the way an image editor's
+ * colour-to-alpha does it: the least alpha that explains it as something laid
+ * over the background, and only that much of it stays. Only next to the
+ * background: a dark picture or a card a shade off the page would otherwise
+ * thin out everywhere, and the inside of either is never next to it. */
 #define KEY_BODY \
     "varying vec2 v_texcoord;\n" \
     "uniform vec4 color;\n" \
     "uniform float alpha;\n" \
     "uniform float tol;\n" \
+    "uniform vec2 texel;\n" \
     "vec3 straight(vec4 c) { return c.a > 0.004 ? c.rgb / c.a : vec3(0.0); }\n" \
     "float dist(vec3 a, vec3 b) { vec3 d = abs(a - b); return max(d.r, max(d.g, d.b)); }\n" \
     "void main() {\n" \
@@ -97,8 +108,26 @@ static const char frag_ext_src[] =
     "    have = best >= 4;\n" \
     "  }\n" \
     "  if (!have) { gl_FragColor = c; return; }\n" \
-    "  float f = smoothstep(tol, tol * 3.0, dist(straight(c), k));\n" \
-    "  gl_FragColor = c * mix(alpha, 1.0, f);\n" \
+    "  vec3 cs = straight(c);\n" \
+    "  float a;\n" \
+    "  if (dist(cs, k) < tol) {\n" \
+    "    a = 0.0;\n" \
+    "  } else {\n" \
+    "    bool edge = false;\n" \
+    "    for (int y = -1; y <= 1; y++)\n" \
+    "      for (int x = -1; x <= 1; x++) {\n" \
+    "        vec4 n = texture2D(tex, v_texcoord + vec2(float(x), float(y)) * texel);\n" \
+    "        if (n.a >= 0.98 && dist(n.rgb, k) < tol) edge = true;\n" \
+    "      }\n" \
+    "    if (!edge) { gl_FragColor = c; return; }\n" \
+    "    vec3 up = (cs - k) / max(vec3(1.0) - k, vec3(0.004));\n" \
+    "    vec3 dn = (k - cs) / max(k, vec3(0.004));\n" \
+    "    vec3 ch = max(up, dn);\n" \
+    "    a = clamp(max(ch.r, max(ch.g, ch.b)), 0.0, 1.0);\n" \
+    "  }\n" \
+    "  vec3 rgb = cs - (1.0 - a) * k * (1.0 - alpha);\n" \
+    "  float oa = 1.0 - (1.0 - a) * (1.0 - alpha);\n" \
+    "  gl_FragColor = vec4(rgb, oa) * c.a;\n" \
     "}\n"
 
 static const char frag_key_2d_src[] =
@@ -116,7 +145,7 @@ struct program {
     GLuint id;
     GLint attr_pos, attr_texcoord, uni_tex;
     GLint uni_alpha, uni_color;   /* the strip's programs; -1 in the others */
-    GLint uni_tol;                /* the key's; -1 in the others */
+    GLint uni_tol, uni_texel;     /* the key's; -1 in the others */
     bool tried;       /* compiled once already, successfully or not */
 };
 
@@ -241,6 +270,7 @@ static bool program_build_from(struct program *p, const char *vsrc, const char *
     p->uni_alpha = glGetUniformLocation(id, "alpha");
     p->uni_color = glGetUniformLocation(id, "color");
     p->uni_tol = glGetUniformLocation(id, "tol");
+    p->uni_texel = glGetUniformLocation(id, "texel");
     return true;
 }
 
@@ -372,6 +402,13 @@ static bool blit_verts_keyed(struct wlr_renderer *renderer, struct wlr_buffer *d
         glUniform4fv(p->uni_color, 1, key->color);
         glUniform1f(p->uni_alpha, key->alpha);
         glUniform1f(p->uni_tol, key->tol);
+        /* One source pixel, for the neighbours the edge test reads. */
+        glUniform2f(p->uni_texel, 1.0f / (float)(src->width ? src->width : 1),
+                                  1.0f / (float)(src->height ? src->height : 1));
+        /* Neighbours are exact pixels, not blends of them: the copy is one to
+         * one, and nearest keeps the edge test reading what is there. */
+        glTexParameteri(attribs.target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(attribs.target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     }
 
     /* Client-side arrays, so a buffer left bound by whoever ran last would be
