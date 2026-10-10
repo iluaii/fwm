@@ -197,6 +197,11 @@ typedef struct FwmView {
     double bg_alpha;
     struct wl_list bg_surfs;
 
+    /* [[rule]] blur: frosted glass desktop under the window (glass.h). */
+    bool   blur;
+    double blur_radius;
+    struct FwmGlass *glass;
+
     /* Open animation.
      *
      * The client's surface is NEVER blended at partial opacity: ramping it was

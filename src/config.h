@@ -1356,6 +1356,12 @@ typedef struct {
     double bg_alpha;
     int    bg_auto;
     float  bg_color[4];
+
+    /* Frosted glass desktop behind this window (glass.h).
+     * blur: -1 unset, 0 false, 1 true.
+     * blur_radius: px reach, NAN = use [glass] radius. */
+    int    blur;
+    double blur_radius;
 } ConfigRule;
 
 /* ── runtime-settable options ────────────────────────────────────────── */

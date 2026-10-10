@@ -14,6 +14,7 @@
 
 #include "snapshot.h"
 #include "server.h"
+#include "view.h"
 #include "wallpaper.h"
 #include <math.h>
 #include <wlr/types/wlr_buffer.h>
@@ -228,6 +229,90 @@ bool snapshot_lens(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
 
     bool ok = wlr_render_pass_submit(pass);
     if (hide) wlr_scene_node_set_enabled(hide, true);
+    return ok;
+}
+
+bool snapshot_lens_view(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
+                        int lx, int ly, FwmView *view) {
+    if (!server->wlr_renderer || !dst || !view || !view->scene_tree) return false;
+
+    /* Furniture above layer_windows */
+    struct wlr_scene_tree *furniture[] = {
+        server->ls_top, server->ls_overlay, server->layer_overlay,
+        server->layer_lock,
+    };
+    bool furniture_was[sizeof(furniture) / sizeof(furniture[0])];
+    for (size_t i = 0; i < sizeof(furniture) / sizeof(furniture[0]); i++) {
+        furniture_was[i] = furniture[i] && furniture[i]->node.enabled;
+        if (furniture[i]) wlr_scene_node_set_enabled(&furniture[i]->node, false);
+    }
+
+    /* Disable view and all nodes stacked above view in layer_windows */
+    #define MAX_DISABLED_VIEW_NODES 128
+    struct wlr_scene_node *disabled[MAX_DISABLED_VIEW_NODES];
+    int disabled_count = 0;
+    bool found = false;
+    struct wlr_scene_node *node;
+    if (server->layer_windows) {
+        wl_list_for_each(node, &server->layer_windows->children, link) {
+            if (node == &view->scene_tree->node) found = true;
+            if (found && node->enabled) {
+                if (disabled_count < MAX_DISABLED_VIEW_NODES) {
+                    disabled[disabled_count++] = node;
+                    wlr_scene_node_set_enabled(node, false);
+                }
+            }
+        }
+    }
+
+    struct wlr_render_pass *pass =
+        wlr_renderer_begin_buffer_pass(server->wlr_renderer, dst, NULL);
+    bool ok = false;
+    if (pass) {
+        wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
+            .box = { .x = 0, .y = 0, .width = dst->width, .height = dst->height },
+            .color = { .r = 0, .g = 0, .b = 0, .a = 0 },
+            .blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+        });
+
+        FwmOutput *sout = out ? out : server_active_output(server);
+        FwmWallpaper *wp = sout ? sout->wallpaper : NULL;
+        for (int i = 0; i < wallpaper_layer_count(wp); i++) {
+            bool borrowed = false;
+            struct wlr_texture *tex =
+                wallpaper_layer_texture(wp, i, server->wlr_renderer, &borrowed);
+            if (!tex) continue;
+            int crop_w = sout && sout->box.width  > 0 ? sout->box.width  : server->screen_width;
+            int crop_h = sout && sout->box.height > 0 ? sout->box.height : server->screen_height;
+            struct wlr_fbox crop;
+            wallpaper_layer_crop(wp, i, sout ? sout->camera_x : 0, crop_w, crop_h, &crop);
+            wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options){
+                .texture = tex,
+                .src_box = crop,
+                .dst_box = { .x = (sout ? sout->box.x : 0) - lx,
+                             .y = (sout ? sout->box.y : 0) - ly,
+                             .width = crop_w, .height = crop_h },
+                .filter_mode = WLR_SCALE_FILTER_BILINEAR,
+                .blend_mode = WLR_RENDER_BLEND_MODE_PREMULTIPLIED,
+            });
+            if (!borrowed) wlr_texture_destroy(tex);
+        }
+
+        struct snapshot_ctx ctx = {
+            .pass = pass, .renderer = server->wlr_renderer,
+            .origin_x = lx, .origin_y = ly, .scale = 1.0,
+            .dst_w = dst->width, .dst_h = dst->height,
+        };
+        wlr_scene_node_for_each_buffer(&server->scene->tree.node, snapshot_add_buffer, &ctx);
+
+        ok = wlr_render_pass_submit(pass);
+    }
+
+    for (int i = 0; i < disabled_count; i++)
+        wlr_scene_node_set_enabled(disabled[i], true);
+    for (size_t i = 0; i < sizeof(furniture) / sizeof(furniture[0]); i++)
+        if (furniture[i]) wlr_scene_node_set_enabled(&furniture[i]->node, furniture_was[i]);
+
     return ok;
 }
 

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Frosted glass behind see-through windows
+
+`[[rule]] blur = true`: what is behind a window — the wallpaper and the
+windows under it, nothing above — is blurred and cut to the window, under the
+window's own surfaces. A terminal's alpha or a browser made transparent by its
+own stylesheet then reads as glass, and the text on it as text. `blur_radius`
+sets the reach; `[glass] tint` and `brightness` colour it.
+
 ### A liquid on the desktop (experimental)
 
 Modes menu → Liquids → Water, and a bucket of it is in your hand: hold the

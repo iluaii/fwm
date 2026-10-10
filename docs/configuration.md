@@ -203,6 +203,8 @@ hardness  = 3.0        # ... but hits like a brick
 | `hardness` | Multiplies the damage this window **deals**. Separate from `toughness` so a heavy soft thing does not have to be a hammer. |
 | `opacity` | 0..1, how much of itself the whole window shows — text and pictures too, unlike a terminal that draws only its background translucent. Multiplies `[decor] inactive_opacity`, so an unfocused window still steps back. |
 | `bg_alpha` | 0..1, the **background only** made see-through, the way a terminal draws its own: pixels of the background colour are drawn at this strength, text and pictures stay whole. For a client that cannot do it itself — a browser above all. GLES2 renderer only. |
+| `blur` | `true`: frosted glass behind the window — the wallpaper and the windows under it, blurred and cut to the window, so a see-through background (a terminal's alpha, a browser made transparent by its own stylesheet, `bg_alpha`) reads as glass rather than as a desktop fighting the text. Tinted and brightened by `[glass]` `tint` and `brightness`, whether or not `[glass]` itself is on. GLES2 renderer only. |
+| `blur_radius` | px, how far the blur reaches, 0..128; unsaid is `[glass] radius`. More is easier to read text over and costs more while the window moves. |
 | `bg_color` | Which colour is the background: `"auto"` (the default) finds it in the window every time it draws — the colour its left, right and bottom edges agree on, so each site's own background is the one cleared — or a fixed `"#RRGGBB"`. |
 | `nocollide` | Other windows pass through it; it still cannot leave the play area. |
 | `pin` | Immovable: physics never moves it. |

@@ -40,6 +40,7 @@
 #include "wpgen.h"
 #include "grass.h"
 #include "group.h"
+#include "glass.h"
 
 #include <dirent.h>
 #include <stdlib.h>
@@ -851,6 +852,17 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
     wl_list_for_each(view, &server->views, link) {
         view_update_border_geometry(view);
         view_refresh_border_color(view);
+
+        ConfigRule rule;
+        int have_rule = config_match_rules(&server->config,
+                                           view_app_id(view), view_title(view), &rule);
+        bool want_blur = have_rule && (rule.blur == 1);
+        if (want_blur != view->blur) {
+            view->blur = want_blur;
+            view->blur_radius = have_rule && !isnan(rule.blur_radius) ? rule.blur_radius : NAN;
+            if (view->blur) glass_view_attach(view);
+            else            glass_view_detach(view);
+        }
     }
 
     /* The sun: a new [sun] may have turned the shadows on, off, or moved them,

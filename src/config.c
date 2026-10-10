@@ -2057,6 +2057,8 @@ static void load_rules(toml_table_t *root, FwmConfig *cfg) {
         r->hardness  = rule_number(cfg, tbl, "hardness",  i, 0.0, 1000.0);
         r->opacity   = rule_number(cfg, tbl, "opacity",   i, 0.0, 1.0);
         r->bg_alpha  = rule_number(cfg, tbl, "bg_alpha",  i, 0.0, 1.0);
+        r->blur      = rule_tristate(tbl, "blur");
+        r->blur_radius = rule_number(cfg, tbl, "blur_radius", i, 0.0, 128.0);
         r->bg_auto   = -1;
         toml_datum_t bgc = toml_string_in(tbl, "bg_color");
         if (bgc.ok) {
@@ -2073,7 +2075,8 @@ static void load_rules(toml_table_t *root, FwmConfig *cfg) {
         if (r->nocollide < 0 && r->pin < 0 && r->desktop < 0 &&
             isnan(r->mass) && isnan(r->gravity) && isnan(r->bounce) &&
             isnan(r->friction) && isnan(r->toughness) && isnan(r->hardness) &&
-            isnan(r->opacity) && isnan(r->bg_alpha) && r->bg_auto < 0)
+            isnan(r->opacity) && isnan(r->bg_alpha) && r->bg_auto < 0 &&
+            r->blur < 0 && isnan(r->blur_radius))
             config_report_error(cfg, "[[rule]] #%d: matches but sets nothing", i + 1);
 
         idx++;
@@ -2091,6 +2094,8 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
     out->opacity = NAN;
     out->bg_alpha = NAN;
     out->bg_auto = -1;
+    out->blur = -1;
+    out->blur_radius = NAN;
 
     int matched = 0;
     for (int i = 0; i < cfg->rule_count; i++) {
@@ -2117,6 +2122,8 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
         if (!isnan(r->hardness))  out->hardness  = r->hardness;
         if (!isnan(r->opacity))   out->opacity   = r->opacity;
         if (!isnan(r->bg_alpha))  out->bg_alpha  = r->bg_alpha;
+        if (r->blur >= 0)         out->blur      = r->blur;
+        if (!isnan(r->blur_radius)) out->blur_radius = r->blur_radius;
         if (r->bg_auto >= 0) {
             out->bg_auto = r->bg_auto;
             memcpy(out->bg_color, r->bg_color, sizeof(out->bg_color));

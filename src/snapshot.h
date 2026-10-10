@@ -92,4 +92,13 @@ bool snapshot_lens(struct FwmServer *server, struct FwmOutput *out,
                    struct wlr_buffer *dst, int lx, int ly,
                    struct wlr_scene_node *hide);
 
+struct FwmView;
+
+/* One WINDOW onto the desktop, at layout position (lx, ly), the size of `dst`:
+ * wallpaper first, then everything in the scene graph BEHIND `view`.
+ * The view itself and any window/furniture stacked above it are excluded. */
+bool snapshot_lens_view(struct FwmServer *server, struct FwmOutput *out,
+                        struct wlr_buffer *dst, int lx, int ly,
+                        struct FwmView *view);
+
 #endif /* FWM_SNAPSHOT_H */

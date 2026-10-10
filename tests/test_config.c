@@ -512,6 +512,26 @@ static void test_rule_material(void) {
     config_free(&cfg);
     drop_config();
 
+    CASE("[[rule]] blur and blur_radius");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[[rule]]\n"
+        "app_id = \"^firefox$\"\n"
+        "blur   = true\n"
+        "[[rule]]\n"
+        "app_id      = \"^foot$\"\n"
+        "blur_radius = 40\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);   /* neither is a rule that sets nothing */
+    CHECK_INT(config_match_rules(&cfg, "firefox", NULL, &out), 1);
+    CHECK_INT(out.blur, 1);
+    CHECK(isnan(out.blur_radius));   /* unsaid: [glass] radius */
+    CHECK_INT(config_match_rules(&cfg, "foot", NULL, &out), 1);
+    CHECK_INT(out.blur, -1);
+    CHECK_DBL(out.blur_radius, 40.0, 1e-9);
+    config_free(&cfg);
+    drop_config();
+
     CASE("out-of-range material is reported, not obeyed");
     p = write_config(
         "[binds]\n\"super+q\" = \"killclient\"\n"

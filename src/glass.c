@@ -40,7 +40,8 @@
 typedef struct FwmGlass {
     struct wl_list link;
     FwmServer *server;
-    struct wlr_scene_buffer *panel;   /* the overlay we hang under */
+    struct wlr_scene_buffer *panel;   /* the overlay we hang under (NULL for view) */
+    struct FwmView *view;             /* the window we hang under (NULL for panel) */
     struct wlr_scene_buffer *pane;    /* our own node, one place below it */
     struct wl_listener panel_destroy;
 
@@ -176,19 +177,21 @@ static int glass_margin(const FwmConfig *cfg) {
     return m < 2 ? 2 : m;
 }
 
-static bool buffers_build(FwmGlass *g, int pw, int ph, const FwmConfig *cfg) {
-    int margin = glass_margin(cfg);
+static bool buffers_build_ext(FwmGlass *g, int pw, int ph, double radius, double shadow_blur) {
+    double reach = radius;
+    if (shadow_blur > reach) reach = shadow_blur;
+    int margin = (int)ceil(reach) + 2;
+    if (margin < 2) margin = 2;
     int w = pw + margin * 2, h = ph + margin * 2;
-    double shadow_blur = cfg->glass.shadow ? cfg->glass.shadow_blur : 0.0;
 
     if (g->cap && g->pw == pw && g->ph == ph && g->margin == margin &&
-        g->built_radius == cfg->glass.radius && g->built_shadow == shadow_blur)
+        g->built_radius == radius && g->built_shadow == shadow_blur)
         return true;
 
     buffers_free(g);
     if (pw <= 0 || ph <= 0 || w <= 0 || h <= 0) return false;
 
-    double scale = blur_scratch_scale(cfg->glass.radius, shadow_blur, w, h);
+    double scale = blur_scratch_scale(radius, shadow_blur, w, h);
     int sw = (int)lround(w * scale), sh = (int)lround(h * scale);
     if (sw < 1) sw = 1;
     if (sh < 1) sh = 1;
@@ -209,9 +212,14 @@ static bool buffers_build(FwmGlass *g, int pw, int ph, const FwmConfig *cfg) {
     g->pw = pw; g->ph = ph;
     g->margin = margin;
     g->w = w; g->h = h;
-    g->built_radius = cfg->glass.radius;
+    g->built_radius = radius;
     g->built_shadow = shadow_blur;
     return true;
+}
+
+static bool buffers_build(FwmGlass *g, int pw, int ph, const FwmConfig *cfg) {
+    double shadow_blur = cfg->glass.shadow ? cfg->glass.shadow_blur : 0.0;
+    return buffers_build_ext(g, pw, ph, cfg->glass.radius, shadow_blur);
 }
 
 /* ── the mask ─────────────────────────────────────────────────────────── */
@@ -282,18 +290,43 @@ static void pane_hide(FwmGlass *g) {
     if (g->pane) wlr_scene_node_set_enabled(&g->pane->node, false);
 }
 
+static struct wlr_buffer *g_solid_mask_buf;
+static struct wlr_texture *g_solid_mask_tex;
+
+static struct wlr_texture *glass_solid_mask(FwmServer *server) {
+    if (g_solid_mask_tex) return g_solid_mask_tex;
+    if (!server || !server->wlr_renderer) return NULL;
+    if (!g_solid_mask_buf) {
+        g_solid_mask_buf = snapshot_alloc(server, 1, 1);
+        if (!g_solid_mask_buf) return NULL;
+        struct wlr_render_pass *pass =
+            wlr_renderer_begin_buffer_pass(server->wlr_renderer, g_solid_mask_buf, NULL);
+        if (pass) {
+            wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options){
+                .box = { .x = 0, .y = 0, .width = 1, .height = 1 },
+                .color = { .r = 1.0f, .g = 1.0f, .b = 1.0f, .a = 1.0f },
+                .blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+            });
+            wlr_render_pass_submit(pass);
+        }
+    }
+    g_solid_mask_tex = wlr_texture_from_buffer(server->wlr_renderer, g_solid_mask_buf);
+    return g_solid_mask_tex;
+}
+
 static void glass_free(FwmGlass *g) {
     wl_list_remove(&g->link);
-    wl_list_remove(&g->panel_destroy.link);
+    if (g->panel) {
+        wl_list_remove(&g->panel_destroy.link);
+    }
+    if (g->view) {
+        g->view->glass = NULL;
+        g->view = NULL;
+    }
     buffers_free(g);
     mask_free(g);
     if (g->pane) wlr_scene_node_destroy(&g->pane->node);
     free(g);
-}
-
-static void handle_panel_destroy(struct wl_listener *listener, void *data) {
-    FwmGlass *g = wl_container_of(listener, g, panel_destroy);
-    glass_free(g);
 }
 
 /* The pane is the panel plus a margin on every side for the blur and the shadow
@@ -307,11 +340,53 @@ static void handle_panel_destroy(struct wl_listener *listener, void *data) {
  *
  * Scenery has no business taking input — the same answer the hole and the
  * effect snapshots give (star_draw.c, view_effects.c). The panel itself is a
- * separate node ABOVE this one and goes on answering for its own area. */
+ * separate node ABOVE this one and goes on answering for its own area; a
+ * window's pane sits UNDER the window's own surfaces, which answer for theirs. */
 static bool glass_declines_input(struct wlr_scene_buffer *buffer,
                                  double *sx, double *sy) {
     (void)buffer; (void)sx; (void)sy;
     return false;
+}
+
+bool glass_owns_buffer(const FwmGlass *g, struct wlr_scene_buffer *buf) {
+    return g && g->pane == buf;
+}
+
+void glass_view_attach(FwmView *view) {
+    if (!g_server || !view || !view->scene_tree) return;
+    if (view->glass) return;
+    panes_init();
+
+    FwmGlass *g = calloc(1, sizeof(*g));
+    if (!g) return;
+    g->server = g_server;
+    g->view = view;
+    view->glass = g;
+    g->built_radius = g->built_shadow = -1.0;
+
+    g->pane = wlr_scene_buffer_create(view->scene_tree, NULL);
+    if (!g->pane) {
+        free(g);
+        view->glass = NULL;
+        return;
+    }
+    g->pane->point_accepts_input = glass_declines_input;
+    wlr_scene_node_set_enabled(&g->pane->node, false);
+    wlr_scene_node_lower_to_bottom(&g->pane->node);
+
+    wl_list_insert(&g_panes, &g->link);
+}
+
+void glass_view_detach(FwmView *view) {
+    if (!view || !view->glass) return;
+    FwmGlass *g = view->glass;
+    view->glass = NULL;
+    glass_free(g);
+}
+
+static void handle_panel_destroy(struct wl_listener *listener, void *data) {
+    FwmGlass *g = wl_container_of(listener, g, panel_destroy);
+    glass_free(g);
 }
 
 void glass_attach(struct wlr_scene_buffer *panel) {
@@ -385,8 +460,114 @@ void glass_tick(FwmOutput *out) {
     const FwmConfig *cfg = &server->config;
     bool on = glass_available(cfg);
 
-    FwmGlass *g;
-    wl_list_for_each(g, &g_panes, link) {
+    FwmGlass *g, *tmp;
+    wl_list_for_each_safe(g, tmp, &g_panes, link) {
+        if (g->view) {
+            FwmView *view = g->view;
+            if (!view->scene_tree || !view->scene_tree->node.enabled ||
+                !view->blur || view->width <= 0 || view->height <= 0) {
+                pane_hide(g);
+                continue;
+            }
+            if (!server->wlr_renderer || !blur_supported(server->wlr_renderer)) {
+                pane_hide(g);
+                continue;
+            }
+
+            int lx, ly;
+            if (!wlr_scene_node_coords(&view->scene_tree->node, &lx, &ly)) {
+                pane_hide(g);
+                continue;
+            }
+
+            FwmOutput *po = server_output_at(server, lx + view->width / 2, ly + view->height / 2);
+            if (!po) po = server_active_output(server);
+            if (!po) { pane_hide(g); continue; }
+            if (out && po != out) continue;
+
+            double radius = !isnan(view->blur_radius) ? view->blur_radius : cfg->glass.radius;
+            int margin = (int)ceil(radius) + 2;
+            if (margin < 2) margin = 2;
+
+            BlurParams p = {
+                .radius = radius,
+                .fill = 1.0,
+                .tint = cfg->glass.tint,
+                .brightness = cfg->glass.brightness,
+                .panel_x = margin,
+                .panel_y = margin,
+                .panel_w = view->width,
+                .panel_h = view->height,
+                .shadow_alpha = 0.0,
+            };
+            if (cfg->glass.tint_color[3] > 0.0f) {
+                for (int c = 0; c < 3; c++)
+                    p.tint_color[c] = cfg->glass.tint_color[c] / cfg->glass.tint_color[3];
+            }
+
+            int pane_w = p.panel_w + margin * 2, pane_h = p.panel_h + margin * 2;
+            {
+                double cx = lx - margin, cy = ly - margin;
+                double x0 = (po->box.x - cx) / pane_w, x1 = (po->box.x + po->box.width  - cx) / pane_w;
+                double y0 = (po->box.y - cy) / pane_h, y1 = (po->box.y + po->box.height - cy) / pane_h;
+                double hx = 0.5 / pane_w, hy = 0.5 / pane_h;
+                p.keep[0] = (float)fmin(fmax(x0 + hx, 0.0), 1.0);
+                p.keep[1] = (float)fmin(fmax(y0 + hy, 0.0), 1.0);
+                p.keep[2] = (float)fmin(fmax(x1 - hx, 0.0), 1.0);
+                p.keep[3] = (float)fmin(fmax(y1 - hy, 0.0), 1.0);
+                if (p.keep[2] < p.keep[0]) p.keep[2] = p.keep[0];
+                if (p.keep[3] < p.keep[1]) p.keep[3] = p.keep[1];
+            }
+
+            struct GlassSig sig;
+            memset(&sig, 0, sizeof(sig));
+            sig.x = lx; sig.y = ly;
+            sig.pw = p.panel_w; sig.ph = p.panel_h; sig.margin = margin;
+            sig.opacity = (float)(view->has_opacity ? view->opacity * view->dim : view->dim);
+            sig.radius = p.radius; sig.fill = p.fill; sig.tint = p.tint;
+            sig.brightness = p.brightness;
+            memcpy(sig.keep, p.keep, sizeof(sig.keep));
+            memcpy(sig.tint_color, p.tint_color, sizeof(sig.tint_color));
+
+            if (g->drawn && memcmp(&sig, &g->sig, sizeof(sig)) == 0 &&
+                !backdrop_dirty(server, po, g, lx - margin, ly - margin, pane_w, pane_h))
+                continue;
+
+            if (!buffers_build_ext(g, p.panel_w, p.panel_h, radius, 0.0)) {
+                pane_hide(g);
+                continue;
+            }
+
+            if (!snapshot_lens_view(server, po, g->cap, lx - g->margin, ly - g->margin, view)) {
+                pane_hide(g);
+                continue;
+            }
+            if (!g->cap_tex)
+                g->cap_tex = wlr_texture_from_buffer(server->wlr_renderer, g->cap);
+            if (!g->cap_tex) { pane_hide(g); continue; }
+
+            struct wlr_texture *mask_tex = glass_solid_mask(server);
+            if (!mask_tex) { pane_hide(g); continue; }
+
+            struct wlr_buffer *dst = g->out_buf[g->out_i];
+            if (!blur_glass(server->wlr_renderer, dst, g->cap_tex, mask_tex,
+                            &g->scratch[0], &g->scratch[1], &g->scratch[2], &p)) {
+                pane_hide(g);
+                continue;
+            }
+            g->out_i = (g->out_i + 1) % GLASS_PANES;
+
+            wlr_scene_buffer_set_buffer(g->pane, dst);
+            wlr_scene_node_set_position(&g->pane->node, -g->margin, -g->margin);
+            wlr_scene_node_lower_to_bottom(&g->pane->node);
+            wlr_scene_buffer_set_opacity(g->pane, sig.opacity);
+            wlr_scene_node_set_enabled(&g->pane->node, true);
+
+            g->sig = sig;
+            g->drawn = true;
+            continue;
+        }
+
         /* Switched off, live: hide the pane and give its buffers back. The
          * tray's are two megabytes that no longer draw anything. */
         if (!on) {
@@ -542,6 +723,10 @@ void glass_gpu_release(void) {
         if (g->mask_tex) wlr_texture_destroy(g->mask_tex);
         g->mask_tex = NULL;
     }
+    if (g_solid_mask_tex) wlr_texture_destroy(g_solid_mask_tex);
+    g_solid_mask_tex = NULL;
+    if (g_solid_mask_buf) wlr_buffer_drop(g_solid_mask_buf);
+    g_solid_mask_buf = NULL;
     if (g_server && g_server->wlr_renderer) blur_shutdown(g_server->wlr_renderer);
 }
 
@@ -549,6 +734,10 @@ void glass_finish(void) {
     if (!g_panes_ready) return;
     FwmGlass *g, *tmp;
     wl_list_for_each_safe(g, tmp, &g_panes, link) glass_free(g);
+    if (g_solid_mask_tex) wlr_texture_destroy(g_solid_mask_tex);
+    g_solid_mask_tex = NULL;
+    if (g_solid_mask_buf) wlr_buffer_drop(g_solid_mask_buf);
+    g_solid_mask_buf = NULL;
     if (g_server && g_server->wlr_renderer) blur_shutdown(g_server->wlr_renderer);
     g_server = NULL;
 }

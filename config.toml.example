@@ -1518,6 +1518,10 @@ dir = "~/Pictures"
 #             pictures stay whole. For clients that cannot do it themselves.
 #   bg_color  "auto" (default): the colour the window's edges agree on, found
 #             every time it draws — every site paints its own. Or "#RRGGBB".
+#   blur      true: frosted glass behind the window, so a see-through
+#             background reads as glass rather than as a sharp desktop
+#             fighting the text. Tinted by [glass] tint and brightness.
+#   blur_radius  px the blur reaches, 0..128 (default [glass] radius).
 #
 # There is no per-window "float" on purpose: tiling here is a property of the
 # DESKTOP, not of the window, so such a rule could not be honoured. Use
@@ -1543,6 +1547,7 @@ dir = "~/Pictures"
 #[[rule]]
 #app_id   = "^firefox$"
 #bg_alpha = 0.6            # ... or only through the page's background
+#blur     = true           # ... and frosted, so the text stays readable
 #
 #[[rule]]
 #app_id = "^mpv$"

@@ -25,6 +25,7 @@
 #include "session.h"
 #include "launched.h"
 #include "bgkey.h"
+#include "glass.h"
 #include "foreign.h"
 #include "ipc.h"
 #include "urgent.h"
@@ -553,6 +554,7 @@ static void dim_iter(struct wlr_scene_buffer *buffer, int sx, int sy, void *data
      * fading a window's shadow along with the window would make the light
      * follow the keyboard around. */
     if (shadow_owns_buffer(ctx->view->shadow, buffer)) return;
+    if (glass_owns_buffer(ctx->view->glass, buffer)) return;
     wlr_scene_buffer_set_opacity(buffer, ctx->opacity);
 }
 
@@ -1088,6 +1090,9 @@ void view_map(FwmView *view) {
         if (!view->bg_auto)
             for (int i = 0; i < 3; i++) view->bg_color[i] = rule.bg_color[i];
     }
+    view->blur = have_rule && (rule.blur == 1);
+    view->blur_radius = have_rule && !isnan(rule.blur_radius) ? rule.blur_radius : NAN;
+    if (view->blur) glass_view_attach(view);
 
     int current_desktop = server_active_desktop(view->server);
     int placed = 0;   /* somebody has already said where this window goes */
@@ -1310,6 +1315,7 @@ void view_unmap(FwmView *view) {
     view_jelly_stop(view);
     view_stop_spin(view);
     view_rubber_end(view);
+    glass_view_detach(view);
 
     /* Which desktop to re-home the keyboard on, read before the body goes. */
     PhysicsBody *ub = physics_find_body(&view->server->physics, view->id);
@@ -1394,6 +1400,7 @@ void view_unmap(FwmView *view) {
      * own, and destroying the tree first would leave the second to leak. */
     shadow_destroy(view->shadow);
     view->shadow = NULL;
+    glass_view_detach(view);
 
     if (view->scene_tree) {
         wlr_scene_node_destroy(&view->scene_tree->node);

@@ -85,6 +85,19 @@ double glass_fill(const FwmConfig *cfg, double fallback);
  * is allocated until the first frame that actually draws one. */
 void glass_attach(struct wlr_scene_buffer *panel);
 
+struct FwmView;
+struct FwmGlass;
+
+/* The same frost under a WINDOW, for [[rule]] blur: what is behind the window
+ * — the wallpaper and every window under it, nothing above — blurred and cut
+ * to the window's rectangle, in the window's own scene tree below its
+ * surfaces. A client that draws its background see-through (a terminal's
+ * alpha, a browser told to by its own stylesheet) then shows frosted glass
+ * through it instead of a desktop sharp enough to fight the text. */
+void glass_view_attach(struct FwmView *view);
+void glass_view_detach(struct FwmView *view);
+bool glass_owns_buffer(const struct FwmGlass *g, struct wlr_scene_buffer *buf);
+
 /* Redraw every pane on `out`. Once per frame, after everything has moved and
  * before the scene is committed. */
 void glass_tick(struct FwmOutput *out);
