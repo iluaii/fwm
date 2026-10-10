@@ -70,8 +70,8 @@ static void expo_selftest(FwmExpo *e) {
             double wy = server->screen_height * j / 4.0;
             double sx, sy;
             expo_to_screen(e, wx, wy, d, &sx, &sy);
-            if (sx < 0 || sx > server->screen_width) continue;
-            if (sy < 0 || sy > server->screen_height) continue;
+            if (sx < 0 || sx > expo_view_w(e)) continue;
+            if (sy < 0 || sy > expo_view_h(e)) continue;
             tried++;
             int gd; double gx, gy;
             if (!expo_point(e, sx, sy, &gd, &gx, &gy) || gd != d) { misses++; continue; }
@@ -182,8 +182,8 @@ static void expo_open(FwmServer *server) {
      * windows and the wallpaper underneath. */
     wlr_scene_node_place_below(&e->tree->node, &server->ls_top->node);
 
-    e->backdrop = wlr_scene_rect_create(e->tree, server->screen_width,
-                                        server->screen_height,
+    e->backdrop = wlr_scene_rect_create(e->tree, e->out->box.width,
+                                        e->out->box.height,
                                         (float[4]){0.0f, 0.0f, 0.0f, 0.0f});
 
     /* Turned cards need a renderer that can draw a trapezoid. Where there is
@@ -192,8 +192,8 @@ static void expo_open(FwmServer *server) {
     e->gl = rotate_supported(server->wlr_renderer);
     if (e->gl) {
         for (int i = 0; i < 2; i++) {
-            struct wlr_buffer *b = snapshot_alloc(server, server->screen_width,
-                                                  server->screen_height);
+            struct wlr_buffer *b = snapshot_alloc(server, e->out->box.width,
+                                                  e->out->box.height);
             if (!b) { e->gl = false; break; }
             e->canvas_buf[i] = wlr_buffer_lock(b);
             wlr_buffer_drop(b);
@@ -241,7 +241,7 @@ static void expo_open(FwmServer *server) {
     /* The strip's keys are not binds — they belong to the mode and are in
      * nobody's config — so nothing else could tell anyone what they are. */
     e->hints = expo_hints_show(server->layer_overlay, e->out->box.x, e->out->box.y,
-                               server->screen_width, server->screen_height,
+                               e->out->box.width, e->out->box.height,
                                expo_can_orbit(e));
     e->hints_reveal = e->hints_reveal_target = 1.0;
     e->hints_timer = EXPO_HINT_SHOW_S;
@@ -284,7 +284,7 @@ void expo_close(FwmServer *server, int desktop) {
     e->home = desktop;
     server_output_show_desktop(server, e->out, desktop, 0);
     e->out->camera_x = e->out->target_camera_x;
-    e->pan = was_looking_at - (e->out->camera_x + server->screen_width / 2.0
+    e->pan = was_looking_at - (e->out->camera_x + expo_anchor_x(e)
                                + e->home * expo_gap(e));
     if (server->config.camera.wrap) {
         /* On a ring the rebased offset can be most of a circle even though the
@@ -345,7 +345,7 @@ void expo_orrery_toggle(FwmServer *server) {
         e->orrery_cfg.enabled = 1;
         double size = server->config.star.orrery_size;
         if (size <= 0.0) size = 0.16;
-        e->orrery_cfg.radius  = server->screen_height * size;
+        e->orrery_cfg.radius  = expo_view_h(e) * size;
         /* Light enough that the first collapse leaves an ember: the road down
          * is then three presses long instead of one. */
         e->orrery_cfg.mass    = 1.10;
@@ -429,7 +429,7 @@ void expo_orrery_resize(FwmServer *server, double factor) {
     double base = server->config.star.orrery_size;
     if (base <= 0.0) base = 0.16;
     star_draw_destroy(e->orrery_draw);
-    e->orrery_cfg.radius = server->screen_height * base * scale;
+    e->orrery_cfg.radius = expo_view_h(e) * base * scale;
     e->orrery_draw = star_draw_create(server, e->out, NULL, NULL, &e->orrery_cfg);
     star_draw_set_lensing(e->orrery_draw, false);
     expo_canvas_dirty(e);
@@ -548,7 +548,7 @@ void expo_zoom_step(FwmServer *server) {
     /* The far step is where the camera may leave its seat, so it is where the
      * hints have something else to say — and a set that has just changed is
      * worth showing again, whether or not the bar had taken itself away. */
-    expo_hints_set_flight(e->hints, server->screen_width, server->screen_height,
+    expo_hints_set_flight(e->hints, e->out->box.width, e->out->box.height,
                           expo_can_orbit(e));
     e->hints_reveal_target = 1.0;
     e->hints_timer = EXPO_HINT_SHOW_S;
@@ -759,13 +759,16 @@ void expo_tick(FwmServer *server, double dt) {
      * a closed ring that means a window really can be walked all the way round,
      * which is most of what closing the ring was for. */
     if (e->drag && !e->leaving) {
-        double lx = server->cursor->x;
+        /* In this monitor's frame: measured against the layout, every
+         * monitor right of the first was "at the right edge" all the time. */
+        double lx = server->cursor->x - e->out->box.x;
+        double vw = expo_view_w(e);
         double band = EXPO_DRAG_EDGE_PX;
-        int dir = lx >= server->screen_width - band ? 1 : (lx <= band ? -1 : 0);
+        int dir = lx >= vw - band ? 1 : (lx <= band ? -1 : 0);
         if (dir) {
             /* Faster the closer to the edge: a window nudged into the band
              * drifts, one pressed against the screen edge travels. */
-            double into = dir > 0 ? (lx - (server->screen_width - band)) / band
+            double into = dir > 0 ? (lx - (vw - band)) / band
                                   : (band - lx) / band;
             if (into < 0.0) into = 0.0;
             if (into > 1.0) into = 1.0;
@@ -774,7 +777,7 @@ void expo_tick(FwmServer *server, double dt) {
             /* No easing while a hand is steering: the window would lag the
              * strip it is being carried over. */
             e->pan = e->pan_target;
-            expo_drag_to(e, lx, server->cursor->y);
+            expo_drag_to(e, server->cursor->x, server->cursor->y);
         }
     }
 
@@ -825,7 +828,7 @@ void expo_tick(FwmServer *server, double dt) {
         if (!e->leaving) {
             /* The cursor in THIS monitor's frame: the bar is along the bottom
              * of the strip's screen, not of the layout. */
-            if (expo_hints_hit(server->screen_height,
+            if (expo_hints_hit(e->out->box.height,
                                server->cursor->y - e->out->box.y)) {
                 e->hints_reveal_target = 1.0;
                 e->hints_timer = EXPO_HINT_LINGER_S;
@@ -839,7 +842,7 @@ void expo_tick(FwmServer *server, double dt) {
             e->hints_reveal += hgap * (1.0 - exp(-EXPO_HINT_SLIDE * dt));
         else
             e->hints_reveal = e->hints_reveal_target;
-        expo_hints_place(e->hints, server->screen_width, server->screen_height,
+        expo_hints_place(e->hints, e->out->box.width, e->out->box.height,
                          e->hints_reveal);
     }
 

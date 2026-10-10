@@ -39,6 +39,39 @@ double expo_openness(FwmExpo *e) {
     return t;
 }
 
+/* The monitor the strip is drawn on — which is not the desktop it shows. The
+ * column is as big as the LARGEST monitor (server_output.c), and a smaller one
+ * looks at it through a window of its own size in the column's top-left
+ * corner. Everything on the SCREEN — the vanishing point, the canvas, what is
+ * on or off it — is measured by this; everything in the WORLD stays
+ * screen_width. Measuring both by the column is what drew the strip on the
+ * smaller monitor as if it were the bigger one: centred past its right and
+ * bottom edges, and too big to fit. */
+double expo_view_w(FwmExpo *e) {
+    int w = e->out ? e->out->box.width : 0;
+    return w > 0 ? (double)w : (double)e->server->screen_width;
+}
+
+double expo_view_h(FwmExpo *e) {
+    int h = e->out ? e->out->box.height : 0;
+    return h > 0 ? (double)h : (double)e->server->screen_height;
+}
+
+/* The point of a desktop that stands under the middle of the screen. Closed,
+ * it is the middle of what the monitor shows of it, which is what keeps zoom
+ * 1.0 the live view pixel for pixel; open, it is the middle of the whole
+ * desktop, so a card on the smaller monitor is centred instead of hanging off
+ * its corner. On a monitor as big as the column both ends are the same. */
+double expo_anchor_x(FwmExpo *e) {
+    double vw = expo_view_w(e), sw = e->server->screen_width;
+    return (vw + (sw - vw) * expo_openness(e)) / 2.0;
+}
+
+double expo_anchor_y(FwmExpo *e) {
+    double vh = expo_view_h(e), sh = e->server->screen_height;
+    return (vh + (sh - vh) * expo_openness(e)) / 2.0;
+}
+
 double expo_gap(FwmExpo *e) {
     /* Zero at zoom 1.0, so entering opens the seams rather than jumping them
      * open. Full by the near step — the near step is only a little way out, and
@@ -52,12 +85,23 @@ double expo_pitch(FwmExpo *e) {
 
 /* Screen px per world px. */
 double expo_scale(FwmExpo *e) {
-    return e->server->screen_width / (e->zoom * expo_pitch(e));
+    /* The zoom steps say how many desktops fit across the screen, so on a
+     * monitor smaller than the column the strip has to shrink by the same
+     * ratio to show as many — eased in with the opening, so 1.0 stays 1:1. */
+    double sw = e->server->screen_width, sh = e->server->screen_height;
+    double fit = 1.0;
+    if (sw > 0.0 && sh > 0.0) {
+        fit = expo_view_w(e) / sw;
+        if (expo_view_h(e) / sh < fit) fit = expo_view_h(e) / sh;
+        if (fit > 1.0) fit = 1.0;
+    }
+    fit = 1.0 + (fit - 1.0) * expo_openness(e);
+    return fit * sw / (e->zoom * expo_pitch(e));
 }
 
 /* Strip coordinate the middle of the screen is looking at. */
 double expo_center(FwmExpo *e) {
-    return e->out->camera_x + e->server->screen_width / 2.0
+    return e->out->camera_x + expo_anchor_x(e)
          + e->home * expo_gap(e) + e->pan;
 }
 
@@ -134,7 +178,7 @@ double expo_focal(FwmExpo *e) {
  * world pixels down the desktop. */
 ExpoPt expo_ring_point(FwmExpo *e, double u, double wy) {
     double r = expo_radius(e);
-    ExpoPt p = { .y = wy - e->server->screen_height / 2.0 };
+    ExpoPt p = { .y = wy - expo_anchor_y(e) };
     if (r <= 0.0) {
         p.x = u;
         p.z = 0.0;
@@ -151,7 +195,7 @@ ExpoPt expo_ring_point(FwmExpo *e, double u, double wy) {
  * the plane of its own desktop instead of bending it onto the arc. */
 ExpoPt expo_facet_point(FwmExpo *e, ExpoPt a, ExpoPt b, double s, double wy) {
     ExpoPt p = { .x = a.x + (b.x - a.x) * s,
-                 .y = wy - e->server->screen_height / 2.0,
+                 .y = wy - expo_anchor_y(e),
                  .z = a.z + (b.z - a.z) * s };
     return p;
 }
@@ -174,8 +218,8 @@ struct scene3d_vert expo_project(FwmExpo *e, ExpoPt p, double u, double v) {
     double w = expo_dist(e) + r - z;
     double f = expo_focal(e);
     struct scene3d_vert out = {
-        .x = (float)(e->server->screen_width / 2.0 + f * p.x / (w > 1.0 ? w : 1.0)),
-        .y = (float)(e->server->screen_height / 2.0 + f * y / (w > 1.0 ? w : 1.0)),
+        .x = (float)(expo_view_w(e) / 2.0 + f * p.x / (w > 1.0 ? w : 1.0)),
+        .y = (float)(expo_view_h(e) / 2.0 + f * y / (w > 1.0 ? w : 1.0)),
         .w = (float)w,
         .u = (float)u, .v = (float)v,
     };
@@ -190,7 +234,7 @@ struct scene3d_vert expo_project(FwmExpo *e, ExpoPt p, double u, double v) {
 double expo_desktop_strip_x(FwmExpo *e, int desktop) {
     double x = (double)desktop * expo_pitch(e);
     double lap = expo_lap(e);
-    double centre = expo_center(e) - e->server->screen_width / 2.0;
+    double centre = expo_center(e) - expo_anchor_x(e);
     while (x - centre >  lap / 2.0) x -= lap;
     while (x - centre < -lap / 2.0) x += lap;
     return x;
@@ -262,8 +306,8 @@ void expo_to_screen(FwmExpo *e, double wx, double wy, int desktop,
 /* The line of sight through a screen point, in ring space. */
 static void expo_ray(FwmExpo *e, double sx, double sy, ExpoPt *origin, ExpoPt *dir) {
     double f = expo_focal(e), d = expo_dist(e);
-    double X = (sx - e->server->screen_width / 2.0) / f;
-    double Y = (sy - e->server->screen_height / 2.0) / f;
+    double X = (sx - expo_view_w(e) / 2.0) / f;
+    double Y = (sy - expo_view_h(e) / 2.0) / f;
     double ct = cos(e->tilt), st = sin(e->tilt);
 
     /* Camera space runs (X w, Y w, D - w) as w grows; rotating that back into
@@ -316,7 +360,7 @@ bool expo_point(FwmExpo *e, double sx, double sy,
         found = true;
         *desktop = d;
         *wx = (double)d * sw + s * sw;
-        *wy = o.y + dir.y * t + e->server->screen_height / 2.0;
+        *wy = o.y + dir.y * t + expo_anchor_y(e);
     }
     return found;
 }
@@ -327,9 +371,9 @@ bool expo_point(FwmExpo *e, double sx, double sy,
  * on pointing at the desktop you entered from. */
 static double expo_position_for(FwmExpo *e, double pan) {
     FwmServer *server = e->server;
-    double centre = e->out->camera_x + server->screen_width / 2.0
+    double centre = e->out->camera_x + expo_anchor_x(e)
                   + e->home * expo_gap(e) + pan;
-    double p = (centre - server->screen_width / 2.0) / expo_pitch(e);
+    double p = (centre - expo_anchor_x(e)) / expo_pitch(e);
     if (server->config.camera.wrap) {
         p = fmod(p, (double)FWM_DESKTOPS);
         if (p < 0.0) p += FWM_DESKTOPS;

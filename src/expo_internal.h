@@ -213,6 +213,10 @@ bool expo_can_orbit(FwmExpo *e);
 
 /* ── expo_geom.c ──────────────────────────────────────────────────────── */
 double expo_openness(FwmExpo *e);
+double expo_view_w(FwmExpo *e);
+double expo_view_h(FwmExpo *e);
+double expo_anchor_x(FwmExpo *e);
+double expo_anchor_y(FwmExpo *e);
 double expo_gap(FwmExpo *e);
 double expo_pitch(FwmExpo *e);
 double expo_scale(FwmExpo *e);

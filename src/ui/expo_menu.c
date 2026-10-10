@@ -115,6 +115,7 @@ int expo_menu_hit(double x, double y) {
 }
 
 struct wlr_scene_buffer *expo_menu_show(struct wlr_scene_tree *parent,
+                                        int origin_x, int origin_y,
                                         int screen_w, int screen_h,
                                         double x, double y, const char *title,
                                         const char *mode) {
@@ -130,11 +131,13 @@ struct wlr_scene_buffer *expo_menu_show(struct wlr_scene_tree *parent,
 
     /* Opened at the cursor, so it is the one panel in fwm that can be asked to
      * appear off-screen. Push it back rather than letting a row be unclickable. */
+    x -= origin_x;
+    y -= origin_y;
     if (x + MENU_W > screen_w) x = screen_w - MENU_W;
     if (y + MENU_H > screen_h) y = screen_h - MENU_H;
     if (x < 0) x = 0;
     if (y < 0) y = 0;
-    wlr_scene_node_set_position(&buf->node, (int)x, (int)y);
+    wlr_scene_node_set_position(&buf->node, origin_x + (int)x, origin_y + (int)y);
     return buf;
 }
 

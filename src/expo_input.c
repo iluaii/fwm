@@ -27,6 +27,15 @@
 
 /* ── input ────────────────────────────────────────────────────────────── */
 
+/* expo_point for a LAYOUT point, which is what the pointer hands in. The strip
+ * is drawn in its own monitor's frame; feeding it layout coordinates went
+ * unnoticed on the monitor at the origin and missed by a whole screen on any
+ * other. */
+static bool expo_point_at(FwmExpo *e, double lx, double ly,
+                          int *desktop, double *wx, double *wy) {
+    return expo_point(e, lx - e->out->box.x, ly - e->out->box.y, desktop, wx, wy);
+}
+
 static ExpoItem *expo_item_at(FwmExpo *e, double lx, double ly) {
     /* Through the inverse projection, not by testing projected boxes: a turned
      * card's window is a trapezoid on screen, and there is exactly one place
@@ -42,7 +51,7 @@ static ExpoItem *expo_item_at(FwmExpo *e, double lx, double ly) {
      * happened to hold. */
     int d;
     double wx, wy;
-    if (!expo_point(e, lx, ly, &d, &wx, &wy)) return NULL;
+    if (!expo_point_at(e, lx, ly, &d, &wx, &wy)) return NULL;
 
     ExpoItem *hit = NULL;
     for (int i = 0; i < e->n_items; i++) {
@@ -71,7 +80,7 @@ void expo_clamp_pan(FwmExpo *e) {
         return;
     }
 
-    double half = e->server->screen_width / (2.0 * expo_scale(e));
+    double half = expo_view_w(e) / (2.0 * expo_scale(e));
     double lo = -half - e->home * pitch;
     double hi = (FWM_DESKTOPS - 1 - e->home) * pitch + half;
     if (e->pan_target < lo) e->pan_target = lo;
@@ -97,7 +106,7 @@ void expo_drag_to(FwmExpo *e, double lx, double ly) {
      * there is no world point to carry the card to. Leaving it where it is
      * beats moving it to an uninitialised one: the hand is still holding it,
      * and coming back over a facet picks it up again. */
-    if (!expo_point(e, lx, ly, &d, &wx, &wy)) return;
+    if (!expo_point_at(e, lx, ly, &d, &wx, &wy)) return;
     e->drag->wx = wx - e->drag_off_x;
     e->drag->wy = wy - e->drag_off_y;
     e->drag->desktop = d;
@@ -124,8 +133,8 @@ bool expo_goto_desktop(FwmServer *server, int d) {
      * entered from, so the landing would be off by (d - home) gaps: most of a
      * card by the far end of the strip. Pan is exact, and it is already eased.
      *
-     * strip x of desktop d's centre is d * pitch + screen_width / 2, and
-     * expo_center is camera_x + screen_width/2 + home * gap + pan, with
+     * strip x of desktop d's anchor is d * pitch + expo_anchor_x, and
+     * expo_center is camera_x + expo_anchor_x + home * gap + pan, with
      * camera_x == home * screen_width — which leaves this. */
     e->pan_target = (d - e->home) * expo_pitch(e);
     if (server->config.camera.wrap) {
@@ -413,7 +422,8 @@ bool expo_handle_button(FwmServer *server, uint32_t button, bool pressed,
             ExpoItem *it = expo_item_at(e, lx, ly);
             if (it) {
                 e->menu = expo_menu_show(server->layer_overlay,
-                                         server->screen_width, server->screen_height,
+                                         e->out->box.x, e->out->box.y,
+                                         e->out->box.width, e->out->box.height,
                                          lx, ly, view_title(it->view),
                                          expo_mode_name(server, it->desktop));
                 e->menu_item = e->menu ? it : NULL;
@@ -446,7 +456,7 @@ bool expo_handle_button(FwmServer *server, uint32_t button, bool pressed,
          * away on the first motion. */
         int d;
         double wx, wy;
-        if (!expo_point(e, lx, ly, &d, &wx, &wy)) return true;
+        if (!expo_point_at(e, lx, ly, &d, &wx, &wy)) return true;
         e->drag = it;
         e->drag_off_x = wx - it->wx;
         e->drag_off_y = wy - it->wy;
@@ -474,7 +484,7 @@ bool expo_handle_button(FwmServer *server, uint32_t button, bool pressed,
      * desktop; the one the strip is looking at is what Escape already means. */
     int d;
     double wx, wy;
-    if (!expo_point(e, lx, ly, &d, &wx, &wy)) d = expo_view_desktop(server);
+    if (!expo_point_at(e, lx, ly, &d, &wx, &wy)) d = expo_view_desktop(server);
     expo_close(server, d);
     return true;
 }

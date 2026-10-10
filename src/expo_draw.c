@@ -71,8 +71,8 @@ static bool expo_quad_onscreen(FwmExpo *e, const struct scene3d_vert q[4]) {
         if (q[i].y < top) top = q[i].y;
         if (q[i].y > bot) bot = q[i].y;
     }
-    return hi >= -8.0f && lo <= e->server->screen_width + 8.0f
-        && bot >= -8.0f && top <= e->server->screen_height + 8.0f;
+    return hi >= -8.0f && lo <= expo_view_w(e) + 8.0f
+        && bot >= -8.0f && top <= expo_view_h(e) + 8.0f;
 }
 
 static bool expo_quad_visible(FwmExpo *e, const struct scene3d_vert q[4]) {
@@ -269,9 +269,9 @@ static bool expo_canvas_current(FwmExpo *e) {
  * Two traps, both of which put the star somewhere that looked deliberate and
  * was not:
  *
- *   - y is already centred by expo_ring_point (`wy - screen_height/2`), so the
- *     middle of a desktop is y = 0. Passing half a screen here dropped the
- *     star a half-screen below the ring.
+ *   - y is already centred by expo_ring_point (`wy - expo_anchor_y`), so on
+ *     an open strip the middle of a desktop is y = 0. Passing half a screen
+ *     here dropped the star a half-screen below the ring.
  *
  *   - the origin is not the axis. expo_ring_point puts u = 0 — the middle of
  *     the desktop facing you — at (0, 0, 0), and builds the circle as
@@ -325,7 +325,7 @@ void expo_draw_orrery(FwmExpo *e) {
      * nothing and one ring-unit is worth an unbounded number of pixels. Any
      * answer that big is arithmetic, not a star, and drawing it would fill the
      * screen for a frame. */
-    if (r > e->server->screen_height * 1.5) return;
+    if (r > expo_view_h(e) * 1.5) return;
 
     /* Hand the star what it is standing in front of.
      *
@@ -339,8 +339,8 @@ void expo_draw_orrery(FwmExpo *e) {
      * frame, which makes the bent picture one frame old — invisible on a ring
      * that takes seconds to turn, and the price of never feeding the lens its
      * own output. */
-    FwmServer *srv = e->server;
-    double sw = srv->screen_width, sh = srv->screen_height;
+    /* Fractions of the CANVAS, which is the size of this monitor. */
+    double sw = expo_view_w(e), sh = expo_view_h(e);
     if (star_lenses(&e->orrery_star, &e->orrery_cfg) && sw > 0.0 && sh > 0.0) {
         unsigned ring = scene3d_capture();
         double x0 = mid.x - r, y0 = mid.y - r, side = 2.0 * r;

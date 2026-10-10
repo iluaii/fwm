@@ -37,10 +37,12 @@ enum {
     EXPO_MENU_ROW_COUNT,
 };
 
-/* Open at (x, y) in screen coordinates, naming `title` (the window's own, shown
- * dimmed above the rows). The menu is nudged back on screen if it would hang
- * off the right or bottom edge. Returns NULL if it could not be created. */
+/* Open at (x, y) in layout coordinates, naming `title` (the window's own, shown
+ * dimmed above the rows). The menu is nudged back onto the monitor whose
+ * top-left is (origin_x, origin_y) if it would hang off its right or bottom
+ * edge. Returns NULL if it could not be created. */
 struct wlr_scene_buffer *expo_menu_show(struct wlr_scene_tree *parent,
+                                        int origin_x, int origin_y,
                                         int screen_w, int screen_h,
                                         double x, double y, const char *title,
                                         const char *mode);
