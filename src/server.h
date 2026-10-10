@@ -839,7 +839,8 @@ typedef struct FwmServer {
 } FwmServer;
 
 bool server_init(FwmServer *server, bool debug);
-void server_run(FwmServer *server);
+/* False when the backend could not start; true once the session ran and ended. */
+bool server_run(FwmServer *server);
 void server_destroy(FwmServer *server);
 
 /* Ask every output for a frame. The scene schedules frames off its own damage,

@@ -1,10 +1,44 @@
 #include "src/server.h"
+#include <execinfo.h>
 #include <malloc.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include <wlr/util/log.h>
+
+/* A crash says where it happened before it takes the process down.
+ *
+ * fwm runs with core dumps off on a normal desktop, and a compositor that
+ * dies takes the screen it would be debugged on with it, so the one thing
+ * left afterwards is its stderr — fwm-session keeps that as fwm.log. The
+ * frames go there as binary+offset pairs, which `addr2line -f -e <fwm>`
+ * turns back into functions. backtrace() is primed once at startup: its
+ * first call loads libgcc and allocates, neither of which a signal handler
+ * may do. Then the signal is raised again with its default action, so the
+ * exit status still says what killed it. */
+static void crash_handler(int sig) {
+    static const char head[] = "fwm: fatal signal, backtrace:\n";
+    if (write(STDERR_FILENO, head, sizeof(head) - 1) < 0) { /* nothing to do */ }
+    void *frames[64];
+    int n = backtrace(frames, 64);
+    backtrace_symbols_fd(frames, n, STDERR_FILENO);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void crash_handler_install(void) {
+    void *prime[1];
+    backtrace(prime, 1);
+    struct sigaction sa = { .sa_handler = crash_handler };
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESETHAND;
+    const int fatal[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT };
+    for (size_t i = 0; i < sizeof(fatal) / sizeof(fatal[0]); i++)
+        sigaction(fatal[i], &sa, NULL);
+}
 
 int main(int argc, char *argv[]) {
     /* The only arguments fwm takes. Everything else it is told comes from the
@@ -56,6 +90,10 @@ int main(int argc, char *argv[]) {
     mallopt(M_MMAP_THRESHOLD, 256 * 1024);
 
     wlr_log_init(getenv("FWM_DEBUG") ? WLR_DEBUG : WLR_INFO, NULL);
+    /* Not under ASan, which has a better report of its own. */
+#if !defined(__SANITIZE_ADDRESS__)
+    crash_handler_install();
+#endif
 
     FwmServer server;
     if (!server_init(&server, debug)) {
@@ -63,7 +101,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
-    server_run(&server);
+    /* A backend that would not start — no seat, no input, another display
+     * server holding the screen — is a failure, not a session the user ended:
+     * fwm-session reads 0 as "leave" and would end the login over it. */
+    bool ran = server_run(&server);
     server_destroy(&server);
-    return 0;
+    return ran ? 0 : 1;
 }

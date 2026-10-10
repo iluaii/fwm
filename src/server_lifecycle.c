@@ -804,10 +804,10 @@ bool server_init(FwmServer *server, bool debug) {
     return true;
 }
 
-void server_run(FwmServer *server) {
+bool server_run(FwmServer *server) {
     if (!wlr_backend_start(server->wlr_backend)) {
         wlr_log(WLR_ERROR, "failed to start backend");
-        return;
+        return false;
     }
 
     /* After the backend is up (so WAYLAND_DISPLAY is exported and the socket
@@ -826,6 +826,7 @@ void server_run(FwmServer *server) {
     }
 
     wl_display_run(server->wl_display);
+    return true;
 }
 
 /* Detach a listener that may never have been attached: server_init memsets the
