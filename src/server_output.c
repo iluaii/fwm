@@ -1462,13 +1462,17 @@ static void server_output_layout_update(FwmServer *server) {
     lock_arrange(server);
     for (int d = 0; d < FWM_DESKTOPS; d++) {
         /* A hotplug deals the desktops out again: one that changed hands, or
-         * whose monitor changed mode, is fullscreen at the old screen's size
-         * until this. Cheap when nothing moved — the box comes out identical
-         * and nothing is sent. */
-        desktop_refit_clamp(server, d);
-        desktop_refit_fullscreen(server, d);
-        if (resized && server->desktop_mode[d] == DESKTOP_MODE_TILING)
-            server_apply_tiling(server, d);
+         * whose monitor changed mode, is fullscreen — and tiled — at the old
+         * screen's size until this. Cheap when nothing moved — the box comes
+         * out identical and nothing is sent.
+         *
+         * The tiles used to wait for the COLUMN to change size, which a
+         * monitor smaller than the largest never does. Windows that mapped
+         * before it came up (a session restored at login, the second screen
+         * slower to wake than the first) stayed cut for the big screen until
+         * the first desktop switch refitted them — sometimes, depending only
+         * on which got there first. */
+        server_desktop_refit(server, d);
     }
 
     /* The panels and the debug hooks that exist once, now that there is a
