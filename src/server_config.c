@@ -127,6 +127,22 @@ static void server_state_mkdir_parents(const char *file) {
     mkdir(dir, 0755);
 }
 
+/* Leaving was asked for: say so before tearing down, with this process's pid
+ * in it. Teardown is the part of a run that touches the most at once — every
+ * client, the GPU, the seat — and if it crashes, the exit status alone reads
+ * like any other crash, and fwm-session would bring the compositor straight
+ * back up over a login screen. The pid is what keeps a nested -debug run,
+ * which shares this directory, from speaking for the session it is not. */
+void server_state_note_exit(void) {
+    char path[512];
+    server_state_path(path, sizeof(path), "exit-requested");
+    server_state_mkdir_parents(path);
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "%ld\n", (long)getpid());
+    fclose(f);
+}
+
 /* The state file a monitor's pick lives in: `wallpaper` for the un-named set,
  * `wallpaper.DP-1` for one screen. Output names come from the kernel and carry
  * no slashes, so they are their own file name. */

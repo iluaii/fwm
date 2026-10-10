@@ -539,6 +539,9 @@ void server_dispatch_action(FwmServer *server, const char *action) {
             server_apply_tiling(server, d);
         }
     } else if (strcmp(action, "EXIT") == 0) {
+        /* Before anything is torn down: fwm-session must know this was asked
+         * for even if the teardown itself goes wrong. */
+        server_state_note_exit();
         server->running = 0;
         wl_display_terminate(server->wl_display);
     } else if (strcmp(action, "show_hints") == 0) {

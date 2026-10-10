@@ -31,6 +31,13 @@ WINDOW=60        # ...within this many seconds means it is not coming back
 # .log.1, which is the run you actually want to read after a restart.
 LOGFILE="$STATE_DIR/fwm.log"
 
+# Written by fwm, with its pid, the moment leaving is asked for and before
+# anything is torn down. A crash in the teardown then still counts as the
+# user leaving rather than as a crash to recover from: restarting the
+# compositor over a login screen that is already coming back fights it for
+# the screen and the input, and the machine with it.
+EXIT_MARK="$STATE_DIR/exit-requested"
+
 mkdir -p "$STATE_DIR"
 
 # Without XDG_RUNTIME_DIR fwm has nowhere to put its socket and exits at
@@ -51,13 +58,30 @@ fi
 crashes=0
 window_start=$(date +%s)
 
+# fwm runs as a child we know the pid of, so the mark above can be checked
+# against it; the session ending under us takes it down too.
+child=
+trap 'if [ -n "$child" ]; then kill -TERM "$child" 2>/dev/null; wait "$child"; fi; exit 0' TERM INT HUP
+
 while :; do
     [ -f "$LOGFILE" ] && mv -f "$LOGFILE" "$LOGFILE.1"
-    "$FWM" "$@" 2>>"$LOGFILE"
+    rm -f "$EXIT_MARK"
+    "$FWM" "$@" 2>>"$LOGFILE" &
+    child=$!
+    wait "$child"
     code=$?
+    pid=$child
+    child=
 
     if [ "$code" -eq 0 ]; then
         exit 0    # the user asked to leave
+    fi
+
+    if [ "$(cat "$EXIT_MARK" 2>/dev/null)" = "$pid" ]; then
+        printf '%s: fwm exited with code %s while leaving; it was asked to, so not restarting\n' \
+            "$(date -Is 2>/dev/null || date)" "$code" >>"$LOG"
+        rm -f "$EXIT_MARK"
+        exit 0
     fi
 
     now=$(date +%s)

@@ -187,6 +187,8 @@ void server_state_apply_wallpaper(FwmServer *server);
  * moment one of them is clicked. */
 void server_state_apply_modes(FwmServer *server);
 void server_state_save_modes(FwmServer *server);
+/* Write ~/.local/state/fwm/exit-requested with our pid; see server_config.c. */
+void server_state_note_exit(void);
 
 /* ── the settings overlay (server_config.c) ───────────────────────────────
  *
