@@ -1345,6 +1345,17 @@ typedef struct {
      * inactive_opacity rather than replacing it, so an unfocused translucent
      * window still steps back like the rest. NAN says nothing. */
     double opacity;
+
+    /* The background only: what a terminal does for itself, for a client that
+     * does not. Pixels of the window's background colour are drawn at
+     * bg_alpha and everything else — text, pictures — at full strength.
+     * bg_auto takes the colour off the window itself, every frame it draws,
+     * which is what a browser needs: every site paints its own. Otherwise
+     * bg_color is the one colour to clear. bg_alpha NAN says nothing; bg_auto
+     * -1 the same. */
+    double bg_alpha;
+    int    bg_auto;
+    float  bg_color[4];
 } ConfigRule;
 
 /* ── runtime-settable options ────────────────────────────────────────── */

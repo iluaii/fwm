@@ -202,6 +202,8 @@ hardness  = 3.0        # ... but hits like a brick
 | `toughness` | Multiplies this window's hit points. 0 = glass, broken by any hit at all; 10 = a safe. Only means anything while `[physics] hp` is on. |
 | `hardness` | Multiplies the damage this window **deals**. Separate from `toughness` so a heavy soft thing does not have to be a hammer. |
 | `opacity` | 0..1, how much of itself the whole window shows — text and pictures too, unlike a terminal that draws only its background translucent. Multiplies `[decor] inactive_opacity`, so an unfocused window still steps back. |
+| `bg_alpha` | 0..1, the **background only** made see-through, the way a terminal draws its own: pixels of the background colour are drawn at this strength, text and pictures stay whole. For a client that cannot do it itself — a browser above all. GLES2 renderer only. |
+| `bg_color` | Which colour is the background: `"auto"` (the default) finds it in the window every time it draws — the colour its left, right and bottom edges agree on, so each site's own background is the one cleared — or a fixed `"#RRGGBB"`. |
 | `nocollide` | Other windows pass through it; it still cannot leave the play area. |
 | `pin` | Immovable: physics never moves it. |
 | `desktop` | 0..9, where the window opens. Applies to the application's own windows; a dialog opens on its parent's desktop instead, wherever the parent has been moved to since. |

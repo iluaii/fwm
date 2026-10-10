@@ -189,6 +189,13 @@ typedef struct FwmView {
     /* [[rule]] opacity, multiplied into the dim; only when has_opacity. */
     int    has_opacity;
     double opacity;
+    /* [[rule]] bg_alpha: the background keyed see-through (bgkey.h). bg_auto
+     * finds the colour in the picture; otherwise it is bg_color. bg_surfs is
+     * bgkey.c's, one entry per surface it has keyed. */
+    int    bg_key, bg_auto;
+    float  bg_color[3];
+    double bg_alpha;
+    struct wl_list bg_surfs;
 
     /* Open animation.
      *

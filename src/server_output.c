@@ -15,6 +15,7 @@
 /* Outputs and the per-frame path: the animation step that runs immediately
  * before the scene is committed, plus output creation and teardown. Split out
  * of server.c; see server_internal.h. */
+#include "bgkey.h"
 #include "server.h"
 #include "view.h"
 #include "physics.h"
@@ -435,7 +436,12 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
      * our back; see view_dim_reassert. */
     {
         FwmView *v;
-        wl_list_for_each(v, &output->server->views, link) view_dim_reassert(v);
+        wl_list_for_each(v, &output->server->views, link) {
+            /* The background key first: it may hand a surface a new buffer,
+             * and the dim is put on whatever is there. */
+            bgkey_view_frame(v);
+            view_dim_reassert(v);
+        }
     }
     /* And the frost under fwm's own panels, last of all: it photographs the
      * desktop, so everything that moves this frame has to have moved. */

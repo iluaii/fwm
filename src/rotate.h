@@ -130,4 +130,12 @@ void scene3d_end(void);
  * destroyed. */
 void rotate_shutdown(struct wlr_renderer *renderer);
 
+/* Copy `src` into `dst` (the same size) with its background made see-through:
+ * pixels within a shade of the background colour come out at `alpha`, the
+ * rest whole. `color` is that colour as straight RGB, or NULL to find it in
+ * the picture itself — the colour its edges agree on, and no key at all when
+ * they do not agree. Returns false if it could not be drawn. */
+bool key_blit(struct wlr_renderer *renderer, struct wlr_buffer *dst,
+              struct wlr_texture *src, const float *color, float alpha);
+
 #endif /* FWM_ROTATE_H */

@@ -484,6 +484,34 @@ static void test_rule_material(void) {
     config_free(&cfg);
     drop_config();
 
+    CASE("[[rule]] bg_alpha and bg_color");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[[rule]]\n"
+        "app_id   = \"^firefox$\"\n"
+        "bg_alpha = 0.6\n"
+        "[[rule]]\n"
+        "app_id   = \"^term$\"\n"
+        "bg_alpha = 0.5\n"
+        "bg_color = \"#1c1b22\"\n"
+        "[[rule]]\n"
+        "app_id   = \"^bad$\"\n"
+        "bg_alpha = 0.5\n"
+        "bg_color = \"purple\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(config_match_rules(&cfg, "firefox", NULL, &out), 1);
+    CHECK_DBL(out.bg_alpha, 0.6, 1e-9);
+    CHECK_INT(out.bg_auto, -1);     /* unsaid: the view takes that as auto */
+    CHECK_INT(config_match_rules(&cfg, "term", NULL, &out), 1);
+    CHECK_INT(out.bg_auto, 0);
+    CHECK_DBL(out.bg_color[0], 0x1c / 255.0, 1e-6);
+    CHECK_DBL(out.bg_color[2], 0x22 / 255.0, 1e-6);
+    CHECK_INT(cfg.error_count, 1);  /* "purple" */
+    config_match_rules(&cfg, "bad", NULL, &out);
+    CHECK_INT(out.bg_auto, -1);
+    config_free(&cfg);
+    drop_config();
+
     CASE("out-of-range material is reported, not obeyed");
     p = write_config(
         "[binds]\n\"super+q\" = \"killclient\"\n"

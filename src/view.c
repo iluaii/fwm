@@ -24,6 +24,7 @@
 #include "group.h"
 #include "session.h"
 #include "launched.h"
+#include "bgkey.h"
 #include "foreign.h"
 #include "ipc.h"
 #include "urgent.h"
@@ -980,6 +981,7 @@ void view_destroy(FwmView *view) {
         view->last_buffer = NULL;
     }
 
+    bgkey_view_free(view);
     free(view->launch_cmd);
     free(view);
 }
@@ -1077,6 +1079,15 @@ void view_map(FwmView *view) {
      * commit and the end of the open fade both call. */
     view->has_opacity = have_rule && !isnan(rule.opacity);
     if (view->has_opacity) view->opacity = rule.opacity;
+    /* The background key, the same way: on the view, run once a frame. The
+     * colour is found in the picture unless the rule names one. */
+    view->bg_key = have_rule && !isnan(rule.bg_alpha);
+    if (view->bg_key) {
+        view->bg_alpha = rule.bg_alpha;
+        view->bg_auto = rule.bg_auto != 0;
+        if (!view->bg_auto)
+            for (int i = 0; i < 3; i++) view->bg_color[i] = rule.bg_color[i];
+    }
 
     int current_desktop = server_active_desktop(view->server);
     int placed = 0;   /* somebody has already said where this window goes */

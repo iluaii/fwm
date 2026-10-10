@@ -1480,6 +1480,11 @@ dir = "~/Pictures"
 #   opacity   0..1, how much of itself the whole window shows — text and
 #             pictures too, unlike foot, which draws only its background
 #             translucent. Multiplies [decor] inactive_opacity.
+#   bg_alpha  0..1, the BACKGROUND only, the way foot does it: pixels of the
+#             background colour are drawn at this strength and text and
+#             pictures stay whole. For clients that cannot do it themselves.
+#   bg_color  "auto" (default): the colour the window's edges agree on, found
+#             every time it draws — every site paints its own. Or "#RRGGBB".
 #
 # There is no per-window "float" on purpose: tiling here is a property of the
 # DESKTOP, not of the window, so such a rule could not be honoured. Use
@@ -1501,6 +1506,10 @@ dir = "~/Pictures"
 #[[rule]]
 #app_id  = "^firefox$"
 #opacity = 0.9             # the wallpaper shows through the whole window
+#
+#[[rule]]
+#app_id   = "^firefox$"
+#bg_alpha = 0.6            # ... or only through the page's background
 #
 #[[rule]]
 #app_id = "^mpv$"

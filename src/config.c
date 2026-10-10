@@ -2006,11 +2006,24 @@ static void load_rules(toml_table_t *root, FwmConfig *cfg) {
         r->toughness = rule_number(cfg, tbl, "toughness", i, 0.0, 1000.0);
         r->hardness  = rule_number(cfg, tbl, "hardness",  i, 0.0, 1000.0);
         r->opacity   = rule_number(cfg, tbl, "opacity",   i, 0.0, 1.0);
+        r->bg_alpha  = rule_number(cfg, tbl, "bg_alpha",  i, 0.0, 1.0);
+        r->bg_auto   = -1;
+        toml_datum_t bgc = toml_string_in(tbl, "bg_color");
+        if (bgc.ok) {
+            if (strcmp(bgc.u.s, "auto") == 0)
+                r->bg_auto = 1;
+            else if (parse_hex_color(bgc.u.s, r->bg_color))
+                r->bg_auto = 0;
+            else
+                config_report_error(cfg, "[[rule]] #%d: bg_color \"%s\" is not \"auto\" or #RRGGBB",
+                                    i + 1, bgc.u.s);
+            free(bgc.u.s);
+        }
 
         if (r->nocollide < 0 && r->pin < 0 && r->desktop < 0 &&
             isnan(r->mass) && isnan(r->gravity) && isnan(r->bounce) &&
             isnan(r->friction) && isnan(r->toughness) && isnan(r->hardness) &&
-            isnan(r->opacity))
+            isnan(r->opacity) && isnan(r->bg_alpha) && r->bg_auto < 0)
             config_report_error(cfg, "[[rule]] #%d: matches but sets nothing", i + 1);
 
         idx++;
@@ -2026,6 +2039,8 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
     out->mass = out->gravity = out->bounce = out->friction = NAN;
     out->toughness = out->hardness = NAN;
     out->opacity = NAN;
+    out->bg_alpha = NAN;
+    out->bg_auto = -1;
 
     int matched = 0;
     for (int i = 0; i < cfg->rule_count; i++) {
@@ -2051,6 +2066,11 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
         if (!isnan(r->toughness)) out->toughness = r->toughness;
         if (!isnan(r->hardness))  out->hardness  = r->hardness;
         if (!isnan(r->opacity))   out->opacity   = r->opacity;
+        if (!isnan(r->bg_alpha))  out->bg_alpha  = r->bg_alpha;
+        if (r->bg_auto >= 0) {
+            out->bg_auto = r->bg_auto;
+            memcpy(out->bg_color, r->bg_color, sizeof(out->bg_color));
+        }
         matched = 1;
     }
     return matched;

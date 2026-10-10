@@ -137,6 +137,7 @@ set(SOURCES
     src/view.c
     src/view_effects.c
     src/rotate.c
+    src/bgkey.c
     src/snapshot.c
     src/screenshot.c
     src/clipboard.c

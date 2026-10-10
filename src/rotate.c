@@ -56,10 +56,67 @@ static const char frag_ext_src[] =
     "uniform samplerExternalOES tex;\n"
     "void main() { gl_FragColor = texture2D(tex, v_texcoord); }\n";
 
+/* The background key: a straight copy, except that pixels of the window's
+ * background colour come out at `alpha` instead of whole — the translucent
+ * background a terminal draws for itself, for a client that does not.
+ *
+ * The colour is either handed in (key.a = 1) or found here, per fragment, by
+ * a vote among twelve points along the left, right and bottom edges, where a
+ * page's background shows if it shows anywhere: the colour at least four of
+ * them agree on is the background. Points that are not opaque — the shadow a
+ * client draws around itself — do not vote, and no agreement means no key:
+ * the window is copied as it is rather than guessed at. Twelve fetches and a
+ * hundred-odd comparisons a fragment, on a commit and not on a frame. */
+#define KEY_BODY \
+    "varying vec2 v_texcoord;\n" \
+    "uniform vec4 color;\n" \
+    "uniform float alpha;\n" \
+    "uniform float tol;\n" \
+    "vec3 straight(vec4 c) { return c.a > 0.004 ? c.rgb / c.a : vec3(0.0); }\n" \
+    "float dist(vec3 a, vec3 b) { vec3 d = abs(a - b); return max(d.r, max(d.g, d.b)); }\n" \
+    "void main() {\n" \
+    "  vec4 c = texture2D(tex, v_texcoord);\n" \
+    "  vec3 k = color.rgb;\n" \
+    "  bool have = color.a > 0.5;\n" \
+    "  if (!have) {\n" \
+    "    vec4 s[12];\n" \
+    "    s[0] = texture2D(tex, vec2(0.01, 0.35)); s[1] = texture2D(tex, vec2(0.01, 0.50));\n" \
+    "    s[2] = texture2D(tex, vec2(0.01, 0.65)); s[3] = texture2D(tex, vec2(0.01, 0.80));\n" \
+    "    s[4] = texture2D(tex, vec2(0.99, 0.35)); s[5] = texture2D(tex, vec2(0.99, 0.50));\n" \
+    "    s[6] = texture2D(tex, vec2(0.99, 0.65)); s[7] = texture2D(tex, vec2(0.99, 0.80));\n" \
+    "    s[8] = texture2D(tex, vec2(0.20, 0.99)); s[9] = texture2D(tex, vec2(0.40, 0.99));\n" \
+    "    s[10] = texture2D(tex, vec2(0.60, 0.99)); s[11] = texture2D(tex, vec2(0.80, 0.99));\n" \
+    "    int best = 0;\n" \
+    "    for (int i = 0; i < 12; i++) {\n" \
+    "      if (s[i].a < 0.98) continue;\n" \
+    "      int n = 0;\n" \
+    "      for (int j = 0; j < 12; j++)\n" \
+    "        if (s[j].a >= 0.98 && dist(s[i].rgb, s[j].rgb) < tol) n++;\n" \
+    "      if (n > best) { best = n; k = s[i].rgb; }\n" \
+    "    }\n" \
+    "    have = best >= 4;\n" \
+    "  }\n" \
+    "  if (!have) { gl_FragColor = c; return; }\n" \
+    "  float f = smoothstep(tol, tol * 3.0, dist(straight(c), k));\n" \
+    "  gl_FragColor = c * mix(alpha, 1.0, f);\n" \
+    "}\n"
+
+static const char frag_key_2d_src[] =
+    "precision mediump float;\n"
+    "uniform sampler2D tex;\n"
+    KEY_BODY;
+
+static const char frag_key_ext_src[] =
+    "#extension GL_OES_EGL_image_external : require\n"
+    "precision mediump float;\n"
+    "uniform samplerExternalOES tex;\n"
+    KEY_BODY;
+
 struct program {
     GLuint id;
     GLint attr_pos, attr_texcoord, uni_tex;
     GLint uni_alpha, uni_color;   /* the strip's programs; -1 in the others */
+    GLint uni_tol;                /* the key's; -1 in the others */
     bool tried;       /* compiled once already, successfully or not */
 };
 
@@ -70,6 +127,7 @@ struct program {
 static struct wlr_renderer *owner;
 static struct program prog_2d, prog_ext;
 static struct program prog3d_2d, prog3d_ext, prog3d_solid;
+static struct program prog_key_2d, prog_key_ext;
 
 /* A different renderer than the one the programs were built on: forget them
  * without touching GL. The old context is the only thing that could free them
@@ -81,6 +139,8 @@ static void programs_forget(struct wlr_renderer *renderer) {
     memset(&prog3d_2d, 0, sizeof(prog3d_2d));
     memset(&prog3d_ext, 0, sizeof(prog3d_ext));
     memset(&prog3d_solid, 0, sizeof(prog3d_solid));
+    memset(&prog_key_2d, 0, sizeof(prog_key_2d));
+    memset(&prog_key_ext, 0, sizeof(prog_key_ext));
     owner = renderer;
 }
 
@@ -180,6 +240,7 @@ static bool program_build_from(struct program *p, const char *vsrc, const char *
     p->uni_tex = glGetUniformLocation(id, "tex");
     p->uni_alpha = glGetUniformLocation(id, "alpha");
     p->uni_color = glGetUniformLocation(id, "color");
+    p->uni_tol = glGetUniformLocation(id, "tol");
     return true;
 }
 
@@ -228,9 +289,27 @@ static void egl_leave(struct wlr_renderer *renderer, const struct egl_save *save
  * whole trick this file turns: the transform lives in the vertex array, never
  * in a matrix, so a rotation and a bend are the same draw call with different
  * numbers in it. */
+struct blit_key {
+    float color[4];   /* rgb straight; a = 1 for a given colour, 0 for auto */
+    float alpha;
+    float tol;
+};
+
+static bool blit_verts_keyed(struct wlr_renderer *renderer, struct wlr_buffer *dst,
+                             struct wlr_texture *src, const GLfloat *verts,
+                             const GLfloat *texcoords, int count, GLenum mode,
+                             const struct blit_key *key);
+
 static bool blit_verts(struct wlr_renderer *renderer, struct wlr_buffer *dst,
                        struct wlr_texture *src, const GLfloat *verts,
                        const GLfloat *texcoords, int count, GLenum mode) {
+    return blit_verts_keyed(renderer, dst, src, verts, texcoords, count, mode, NULL);
+}
+
+static bool blit_verts_keyed(struct wlr_renderer *renderer, struct wlr_buffer *dst,
+                             struct wlr_texture *src, const GLfloat *verts,
+                             const GLfloat *texcoords, int count, GLenum mode,
+                             const struct blit_key *key) {
     if (!rotate_supported(renderer) || !dst || !src) return false;
     if (owner != renderer) programs_forget(renderer);
 
@@ -243,8 +322,17 @@ static bool blit_verts(struct wlr_renderer *renderer, struct wlr_buffer *dst,
 
     bool ok = false;
 
-    struct program *p = attribs.target == GL_TEXTURE_EXTERNAL_OES ? &prog_ext : &prog_2d;
-    if (!program_build(p, p == &prog_ext ? frag_ext_src : frag_2d_src)) goto out;
+    bool ext = attribs.target == GL_TEXTURE_EXTERNAL_OES;
+    struct program *p;
+    const char *frag;
+    if (key) {
+        p = ext ? &prog_key_ext : &prog_key_2d;
+        frag = ext ? frag_key_ext_src : frag_key_2d_src;
+    } else {
+        p = ext ? &prog_ext : &prog_2d;
+        frag = ext ? frag_ext_src : frag_2d_src;
+    }
+    if (!program_build(p, frag)) goto out;
 
     GLuint fbo = wlr_gles2_renderer_get_buffer_fbo(renderer, dst);
     if (!fbo) {
@@ -280,6 +368,11 @@ static bool blit_verts(struct wlr_renderer *renderer, struct wlr_buffer *dst,
     glTexParameteri(attribs.target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(attribs.target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glUniform1i(p->uni_tex, 0);
+    if (key) {
+        glUniform4fv(p->uni_color, 1, key->color);
+        glUniform1f(p->uni_alpha, key->alpha);
+        glUniform1f(p->uni_tol, key->tol);
+    }
 
     /* Client-side arrays, so a buffer left bound by whoever ran last would be
      * read instead of ours. */
@@ -332,6 +425,35 @@ bool rotate_blit(struct wlr_renderer *renderer, struct wlr_buffer *dst,
     }
     /* Triangle fan over the corners in order: 0-1-2, 0-2-3. */
     return blit_verts(renderer, dst, src, verts, texcoords, 4, GL_TRIANGLE_FAN);
+}
+
+bool key_blit(struct wlr_renderer *renderer, struct wlr_buffer *dst,
+              struct wlr_texture *src, const float *color, float alpha) {
+    if (!dst) return false;
+    /* The whole destination, one to one. Same corner order and orientation as
+     * rotate_blit at angle 0. */
+    static const GLfloat verts[8] = {
+        -1.0f, -1.0f,  1.0f, -1.0f,  1.0f, 1.0f,  -1.0f, 1.0f,
+    };
+    static const GLfloat texcoords[8] = {
+        0.0f, 0.0f,  1.0f, 0.0f,  1.0f, 1.0f,  0.0f, 1.0f,
+    };
+    struct blit_key key = {
+        .color = { 0.0f, 0.0f, 0.0f, 0.0f },
+        .alpha = alpha,
+        /* A step of four in eight bits: tight enough that text in a colour
+         * near the background keeps its strokes, loose enough for a page that
+         * dithers its gradient by a shade. */
+        .tol = 4.0f / 255.0f,
+    };
+    if (color) {
+        key.color[0] = color[0];
+        key.color[1] = color[1];
+        key.color[2] = color[2];
+        key.color[3] = 1.0f;
+    }
+    return blit_verts_keyed(renderer, dst, src, verts, texcoords, 4,
+                            GL_TRIANGLE_FAN, &key);
 }
 
 /* Two triangles per cell of the lattice. A strip would need degenerate
@@ -549,7 +671,8 @@ void rotate_shutdown(struct wlr_renderer *renderer) {
     capture.w = capture.h = 0;
 
     struct program *all[] = { &prog_2d, &prog_ext,
-                              &prog3d_2d, &prog3d_ext, &prog3d_solid };
+                              &prog3d_2d, &prog3d_ext, &prog3d_solid,
+                              &prog_key_2d, &prog_key_ext };
     bool any = false;
     for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++)
         if (all[i]->id) any = true;
