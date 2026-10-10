@@ -615,6 +615,7 @@ void view_set_border_enabled(FwmView *view, int enabled);
 void view_dim_set(FwmView *view, double target, bool immediate);
 bool view_dim_tick(FwmView *view, double dt);
 void view_dim_apply(FwmView *view);
+void view_dim_reassert(FwmView *view);
 void view_dim_suspend(FwmView *view);
 void view_dim_restore(FwmView *view);
 

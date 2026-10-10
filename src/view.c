@@ -629,6 +629,21 @@ bool view_dim_tick(FwmView *view, double dt) {
     return true;
 }
 
+/* Once a frame, just before it is drawn, for every window drawn at less than
+ * full strength.
+ *
+ * The scene sets a surface's buffer back to its own opacity every time it
+ * reconfigures that surface — wlroots' answer for alpha-modifier-v1 — and it
+ * does so from its OWN commit listener, which runs after ours. So a window that
+ * committed once more after its dim was put on (a terminal settling into its
+ * tile, a video subsurface we never hear from at all) went back to opaque,
+ * and whether it did came down to which got the last word. Asking again here
+ * gives it to us. Cheap: a handful of buffers, and setting the value a buffer
+ * already has does nothing. */
+void view_dim_reassert(FwmView *view) {
+    if (view_alpha(view) < 1.0) view_dim_apply(view);
+}
+
 void view_dim_suspend(FwmView *view) {
     if (!view->scene_tree || view_alpha(view) >= 1.0) return;
     struct dim_ctx ctx = { .view = view, .opacity = 1.0f };

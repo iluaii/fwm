@@ -431,6 +431,12 @@ static void handle_output_frame(struct wl_listener *listener, void *data) {
      * That is a window flashing onto the screen next door for a sixtieth of a
      * second, which is precisely long enough to see. */
     server_views_clip(output->server);
+    /* The dim and [[rule]] opacity, which the scene puts back to opaque behind
+     * our back; see view_dim_reassert. */
+    {
+        FwmView *v;
+        wl_list_for_each(v, &output->server->views, link) view_dim_reassert(v);
+    }
     /* And the frost under fwm's own panels, last of all: it photographs the
      * desktop, so everything that moves this frame has to have moved. */
     glass_tick(output);
