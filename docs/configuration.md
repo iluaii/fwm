@@ -25,7 +25,7 @@ Contents: [physics](#physics) · [per-desktop physics](#per-desktop-physics) ·
 [session](#session) · [binds](#binds) · [modes](#modes) · [mouse](#mouse) ·
 [gestures](#gestures) · [wallpaper](#wallpaper) · [wallpaper_gen](#wallpaper_gen) ·
 [wallpaper_picker](#wallpaper_picker) ·
-[cava](#cava) · [grass](#grass) · [sound](#sound) · [volume](#volume) ·
+[cava](#cava) · [grass](#grass) · [liquids](#liquids) · [sound](#sound) · [volume](#volume) ·
 [mixer](#mixer) · [output](#output)
 
 ---
@@ -1267,6 +1267,51 @@ same condition that pauses a video wallpaper.
 Everything but `color` is live: `fwmctl set grass.wind 0.9`. The knobs that
 decide the blades themselves — `height`, `density`, `width` — re-grow the patch,
 so the lawn is reshuffled; the rest are applied to the patch already there.
+
+## liquids
+
+Experimental. A liquid on the desktop, poured from the command line:
+
+```console
+$ fwmctl liquid pour          # a quarter of the budget, under the pointer
+$ fwmctl liquid pour 6000     # ...or that many particles
+$ fwmctl liquid clear
+```
+
+```toml
+[liquids]
+enabled   = false
+particles = 12000     # the most one desktop may hold — and the cost
+spacing   = 6.0       # px between particles at rest; reload-only
+viscosity = 60.0      # px²/s: tens is water, hundreds oil, thousands honey
+tension   = 30.0      # px: drops under this stay round; 0 is no surface
+color     = "#3a8be0cc"
+```
+
+It is laws and nothing else: inertia, gravity, an incompressible pressure,
+viscosity and surface tension (src/liquid.h). Nothing in it knows what a splash
+or a ball is. Poured with gravity on, a blob falls, flattens on the floor,
+throws a sheet up the far wall and sloshes; switch gravity off with super+g and
+whatever was moving keeps moving while its surface pulls it into balls; switch
+it back on and they fall. Its gravity is the gravity a window on that desktop
+feels — the `[physics.<name>]` profile and the switch.
+
+Particles are how it is computed; on screen it is one body, cut from a smooth
+field the particles are blurred into, so close particles melt together and a
+lone one is a drop. It stands behind the windows, which do not feel it yet.
+
+One desktop at a time: the liquid stands on the desktop it was first poured on
+until it is cleared. It is only stepped while a monitor shows that desktop and
+nothing fullscreen covers it, and it stops altogether once it has settled.
+While it moves it costs a CPU core of its own — about 2ms a step for 3000
+particles and 5ms for 12000 — on a worker thread, so the desktop stays smooth
+even when the liquid cannot keep up; a big pour sloshes for a while before it
+settles, like a big pool would. Drawing it needs the GLES2 renderer.
+
+Live: `viscosity`, `tension`, `color`, `particles` and `enabled` are all
+`fwmctl set liquids.*`; switching it off empties it. `spacing` is reload-only,
+because particles of one size do not become particles of another, and a new one
+empties the liquid. `FWM_DEBUG_LIQUID=1` logs what a step costs, once a second.
 
 ## sound
 

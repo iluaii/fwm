@@ -612,6 +612,7 @@ static void wallpaper_rebuild_showing(FwmServer *server, const WallpaperLayer *l
         /* The new set went in above everything already in the background
          * layer, grass included. */
         if (out->grass) grass_raise(out->grass);
+        server_liquid_raise(out);
     }
 }
 
@@ -824,6 +825,7 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
                 wallpaper_update(out->wallpaper, out->camera_x);
             }
             if (out->grass) grass_raise(out->grass);
+            server_liquid_raise(out);
         }
         /* A reload that drops a video wallpaper releases the same hundreds of
          * MB as picking a new one, and takes the same cut-not-fade path. */

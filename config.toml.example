@@ -853,6 +853,35 @@ wind_speed = 260
 # while costing more than twice as much.
 fps        = 24
 
+# A liquid on the desktop, poured with `fwmctl liquid pour` — EXPERIMENTAL.
+# It is particles under the hood and one smooth body on screen: it falls,
+# splashes, runs up the walls, sloshes and settles; with gravity off (super+g)
+# whatever was moving keeps moving and its surface gathers it into balls. It
+# stands on the desktop you poured it on, behind the windows, and they do not
+# feel it yet.
+#
+# Its own CPU core while anything in it moves (about 2ms a step for 3000
+# particles, 5ms for 12000), nothing once it has settled or while nobody can
+# see it. Needs the GLES2 renderer to be drawn.
+[liquids]
+enabled   = false
+# The most one desktop may hold, and the cost: a step touches every particle.
+# The default fills about a fifth of a 1080p screen.
+particles = 12000
+# Px between particles at rest — the finest drop there can be. 8 covers nearly
+# twice the screen with the same particles, in coarser drops. Reload-only, and
+# changing it empties the liquid.
+spacing   = 6
+# Px²/s: how thick it is. Tens is water at this scale; hundreds, oil; thousands,
+# honey. Thicker also settles sooner.
+viscosity = 60
+# Px: how strongly the surface pulls, as the size below which a drop on the
+# floor stays round. 0 is no surface at all — nothing gathers it with gravity
+# off. Real water would be 0.27, which nobody could see.
+tension   = 30
+# #RRGGBB[AA]. The alpha is how much of the desktop shows through it.
+color     = "#3a8be0cc"
+
 # When a restarted fwm should put your applications back. fwm records what is
 # running and on which desktop, and relaunches it — the applications restart,
 # they do not resume, so anything unsaved inside them is still lost.

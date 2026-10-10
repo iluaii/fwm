@@ -305,6 +305,28 @@ that is GTK 3 and libadwaita apps following the wallpaper along with the tray �
 the ones already open when the wallpaper changes read the new `gtk.css` at their
 next start, not before.
 
+## The liquid
+
+`[liquids]` (experimental) is poured from here — there is no key for it yet, so
+bind one if you want one: `fwmctl liquid pour` pours under the pointer.
+
+```console
+$ fwmctl liquid pour
+{"ok":true,"desktop":0,"pouring":3000}
+$ fwmctl liquid
+{"ok":true,"enabled":true,"desktop":0,"particles":2990,"pending":0,"budget":12000,"asleep":false,"substeps":2,"step_ms":1.64,"drawn":true}
+$ fwmctl liquid clear
+```
+
+`pour` takes a number of particles and defaults to a quarter of the budget. The
+pour happens on the next tick, so the reply says what was asked for and
+`liquid` afterwards says what went in. Pouring onto liquid pours into it; it
+swells to hold what was added.
+
+The liquid stands on one desktop at a time, the one it was first poured on.
+Pouring on another is refused until `liquid clear` — what it would mean to have
+liquid waiting on two desktops is a question for later.
+
 ## Notifications, and the red desktop
 
 fwm is not a notification daemon and has no plans to become one: popups, actions

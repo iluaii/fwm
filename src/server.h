@@ -133,6 +133,10 @@ typedef struct FwmOutput {
      * is. NULL whenever [grass] is off. */
     struct FwmGrass *grass;
     struct FwmStarDraw *star_draw;
+    /* This monitor's view of the liquid, when it can see the desktop the
+     * liquid stands on (server_liquid.c). One picture, shared: the node is
+     * only where on this screen it goes and how much of it fits. */
+    struct wlr_scene_buffer *liquid_node;
     /* Its own status strip, at the top of this monitor, and where that strip's
      * islands landed — hit-testing and the modes menu's anchor both read the
      * geometry of the strip they were aimed at, never another monitor's. */
@@ -471,6 +475,9 @@ typedef struct FwmServer {
      * (FwmOutput.star_draw). Its light is not cached the way the sun's is:
      * every window gets a different answer, so there is nothing to cache. */
     FwmStar star;
+    /* The liquid, once something has been poured ([liquids], src/liquid.h).
+     * NULL until then, and again once it is switched off. */
+    struct FwmLiquidRun *liquid;
     bool star_running;
     /* The pointer has hold of it. Kept here rather than in the interactive
      * struct because a star is not a view and none of that machinery — the
@@ -906,6 +913,30 @@ void server_restack_fullscreen(FwmServer *server);
  * the keys back in the game; nothing else would, since it is not a view and so
  * never a candidate in the scan server_refocus does. */
 bool server_xwl_unmanaged_refocus(FwmServer *server, int desktop);
+/* ── liquid (server_liquid.c) ─────────────────────────────────────────────
+ * What `fwmctl liquid` reaches. Pouring and clearing are asked for here and
+ * done on the next tick, when the liquid's worker is between steps. */
+
+/* Pour `count` particles (0: a quarter of the budget) under the pointer, onto
+ * the desktop it is on. False, with the reason in `err`, when liquids are off
+ * or the liquid already stands on another desktop. */
+bool server_liquid_pour(FwmServer *server, int count, int *desktop,
+                        char *err, size_t errcap);
+void server_liquid_clear(FwmServer *server);
+
+typedef struct {
+    bool enabled;
+    int desktop;       /* -1: nothing poured */
+    int particles;     /* in it as of the last step */
+    int pending;       /* asked for and not yet poured */
+    int budget;
+    bool asleep;
+    int substeps;      /* in the last step */
+    double step_ms;    /* what the last step cost the worker */
+    bool drawn;        /* there is a picture of it */
+} FwmLiquidState;
+void server_liquid_state(FwmServer *server, FwmLiquidState *st);
+
 /* ── monitors ─────────────────────────────────────────────────────────────
  * The world is a strip of FWM_DESKTOPS columns of screen_width; each monitor
  * shows one column. These are how the rest of the compositor asks "which

@@ -1244,6 +1244,62 @@ static void cmd_urgent(FwmServer *server, const char *arg, struct Buf *b) {
                d, urgent_get(server, d) ? "true" : "false");
 }
 
+/* `liquid` — what is in it — and `liquid pour [n]` / `liquid clear`.
+ *
+ * A pour lands under the pointer, on whatever desktop that is: the same place
+ * a bind that pours would mean, so `fwmctl liquid pour` bound to a key is a
+ * tap with a hand on it. The reply says how much was ASKED for — the pour
+ * happens on the next tick, between two steps of the liquid's worker, and
+ * what fits is decided there; `liquid` afterwards says what went in. Desktops
+ * count from 0, as everywhere in the IPC. */
+static void cmd_liquid_state(FwmServer *server, struct Buf *b) {
+    FwmLiquidState st;
+    server_liquid_state(server, &st);
+    buf_printf(b, "{\"ok\":true,\"enabled\":%s,\"desktop\":",
+               st.enabled ? "true" : "false");
+    if (st.desktop >= 0) buf_printf(b, "%d", st.desktop);
+    else                 buf_puts(b, "null");
+    buf_printf(b, ",\"particles\":%d,\"pending\":%d,\"budget\":%d,"
+                  "\"asleep\":%s,\"substeps\":%d,\"step_ms\":%.2f,\"drawn\":%s}\n",
+               st.particles, st.pending, st.budget, st.asleep ? "true" : "false",
+               st.substeps, st.step_ms, st.drawn ? "true" : "false");
+}
+
+static void cmd_liquid(FwmServer *server, const char *arg, struct Buf *b) {
+    char err[160];
+    const char *rest = NULL;
+    size_t len = arg ? strcspn(arg, " ") : 0;
+    if (arg) { rest = arg + len; while (*rest == ' ') rest++; if (!*rest) rest = NULL; }
+
+    if (arg && len == 4 && strncmp(arg, "pour", 4) == 0) {
+        int count = 0;
+        if (rest) {
+            char *end = NULL;
+            long n = strtol(rest, &end, 10);
+            if (end == rest || *end || n < 1 || n > 1000000) {
+                reply_error(b, "liquid pour: the amount is a number of particles, 1 or more");
+                return;
+            }
+            count = (int)n;
+        }
+        int d = -1;
+        if (!server_liquid_pour(server, count, &d, err, sizeof err)) {
+            reply_error(b, err);
+            return;
+        }
+        FwmLiquidState st;
+        server_liquid_state(server, &st);
+        buf_printf(b, "{\"ok\":true,\"desktop\":%d,\"pouring\":%d}\n", d, st.pending);
+        return;
+    }
+    if (arg && len == 5 && strncmp(arg, "clear", 5) == 0 && !rest) {
+        server_liquid_clear(server);
+        reply_ok(b);
+        return;
+    }
+    reply_error(b, "liquid: expected `liquid`, `liquid pour [n]` or `liquid clear`");
+}
+
 /* `subscribe [events]` — everything, or a comma/space separated subset. The
  * reply names what was actually subscribed, so a client can log it instead of
  * assuming its request was understood. */
@@ -1335,6 +1391,11 @@ static void ipc_handle_command(struct IpcClient *client, const char *line, struc
         return;
     }
     if (IS("saved")) { cmd_saved(server, out); return; }
+    /* Only reading it; pouring is below the lock like everything else. */
+    if (IS("liquid") && (!arg || strcmp(arg, "state") == 0)) {
+        cmd_liquid_state(server, out);
+        return;
+    }
     /* Read-only, so it sits with the commands above the lock check: a
      * subscriber learns nothing a `windows` poll would not already tell it. */
     if (IS("subscribe")) { cmd_subscribe(client, arg, out); return; }
@@ -1377,6 +1438,10 @@ static void ipc_handle_command(struct IpcClient *client, const char *line, struc
         cmd_urgent(server, arg, out);
         return;
     }
+    if (IS("liquid")) {
+        cmd_liquid(server, arg, out);
+        return;
+    }
     if (IS("reload")) {
         server_reload_config(server);
         reply_ok(out);
@@ -1385,7 +1450,7 @@ static void ipc_handle_command(struct IpcClient *client, const char *line, struc
 
     reply_error(out, "unknown command (try: version, state, windows, window, outputs, "
                      "output, config, theme, get, set, save, unsave, saved, "
-                     "dispatch, urgent, reload, subscribe)");
+                     "dispatch, urgent, liquid, reload, subscribe)");
     #undef IS
 }
 

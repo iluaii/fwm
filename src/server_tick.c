@@ -461,6 +461,7 @@ static int server_is_busy(FwmServer *server) {
         wl_list_for_each(so, &server->outputs, link)
             if (so->enabled && so->desktop == server->config.star.desktop) return 1;
     }
+    if (server_liquid_busy(server)) return 1;
     if (server->modes_buffer && modes_menu_animating()) return 1;
     if (server->stats_buffer && stats_menu_animating()) return 1;
     /* Bars that are up must keep the tick at full rate: on the heartbeat they
@@ -1916,6 +1917,11 @@ static int physics_tick_cb(void *data) {
      * window lit by both ends up with the stronger of the two rather than
      * whichever was written last. */
     server_star_sync(server, dt);
+
+    /* And the liquid: its next step handed to its worker, its newest picture
+     * put up. After the windows and the cameras, so the picture lands where
+     * the desktop it stands on is this frame. */
+    server_liquid_sync(server, elapsed);
 
     /* Anything on a screen has been seen: the red digit goes out by ARRIVING
      * at a desktop, whichever way you got there. Here rather than in the

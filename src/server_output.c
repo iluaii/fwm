@@ -519,6 +519,7 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
     if (output->grass) grass_destroy(output->grass);
     star_draw_destroy(output->star_draw);
     output->star_draw = NULL;
+    server_liquid_output_gone(output->server, output);
     if (output->tray_buffer) cairo_overlay_destroy(output->tray_buffer);
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->destroy.link);
@@ -1298,6 +1299,7 @@ static void output_build_wallpaper(FwmOutput *out) {
      * has just been added on top of it. */
     if (out->grass) grass_raise(out->grass);
     if (out->star_draw) star_draw_raise(out->star_draw);
+    server_liquid_raise(out);
 }
 
 /* This monitor's grass, along the bottom of it. */
@@ -1316,6 +1318,8 @@ static void output_build_grass(FwmOutput *out) {
     /* Rooted on the bottom edge of this monitor, which is where the floor of
      * the desktop it shows is (physics.c, floor_y_for). */
     grass_set_origin(out->grass, out->box.x, out->box.y + out->box.height);
+    /* A pool stands on the same floor, in front of the lawn it floods. */
+    server_liquid_raise(out);
 }
 
 void server_grass_sync(FwmServer *server) {

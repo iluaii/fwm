@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### A liquid on the desktop (experimental)
+
+`[liquids] enabled = true`, then `fwmctl liquid pour`. Particles, an
+incompressible pressure solve, viscosity and surface tension — and no rule
+anywhere about what a splash or a ball should look like: a blob falls and
+splashes and sloshes because of gravity, and with gravity switched off it keeps
+flying and its own surface gathers it into balls. On screen it is one smooth
+body, behind the windows; they do not feel it yet. It runs on a worker thread,
+only while somebody can see it and only until it settles.
+
 ### When a frame reaches the screen
 
 Two settings, both per monitor, answering the same question in opposite

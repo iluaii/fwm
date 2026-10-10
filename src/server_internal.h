@@ -291,6 +291,22 @@ void server_outputs_apply_config(FwmServer *server);
  * so `fwmctl set grass.*` and a config reload both land through one path. */
 void server_grass_sync(FwmServer *server);
 
+/* ── server_liquid.c ──────────────────────────────────────────────────── */
+/* Once a tick, after the windows are placed: hand the worker its next step if
+ * the last one is done, and put the newest picture on every screen that can
+ * see it. `elapsed` is the real time the tick covers. */
+void server_liquid_sync(FwmServer *server, double elapsed);
+/* Whether the frame loop must keep running at full rate for the liquid. */
+bool server_liquid_busy(FwmServer *server);
+/* GPU reset: let go of the picture; the next tick paints a new one. */
+void server_liquid_gpu_release(FwmServer *server);
+void server_liquid_output_gone(FwmServer *server, FwmOutput *out);
+/* Keep it above the wallpaper and the grass when the background is rebuilt. */
+void server_liquid_raise(FwmOutput *out);
+/* Teardown: stop the worker and drop everything, while the renderer the
+ * picture came from is still standing. */
+void server_liquid_finish(FwmServer *server);
+
 /* ── server_pointer.c ─────────────────────────────────────────────────── */
 void server_pointer_register(FwmServer *server);
 struct FwmView *view_at(FwmServer *server, double lx, double ly,

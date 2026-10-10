@@ -1,7 +1,7 @@
 # Architecture
 
 For anyone changing the code. fwm is a single-threaded wlroots compositor in C11,
-with three worker threads that never touch compositor state and one hard rule:
+with four worker threads that never touch compositor state and one hard rule:
 **nothing blocks the event loop**, because fwm *is* the display server and a
 compositor that waits is a session that has stopped.
 
@@ -60,14 +60,16 @@ See [Physics](physics.md) for the model itself.
 
 ## Threads
 
-Three, all of them for things that block. None touches compositor state; each
-hands over data through a lock or an atomic.
+Four: three for things that block, and one for a computation too long for a
+frame. None touches compositor state; each hands over data through a lock or an
+atomic.
 
 | Thread | Why it exists |
 |---|---|
 | Video wallpaper decode (`src/video.c`) | libav decode of a clip, into a queue the compositor drains |
 | Audio capture (`src/audio.c`) | `pw_context_new()` **deadlocks** with no sound server running — measured, still stuck after 90s. Everything PipeWire happens off the main thread, setup included |
 | Sound mixer (`src/sound.c`) | `pa_simple_write` parks until the device has room |
+| Liquid (`src/server_liquid.c`) | a step of 12000 particles is 5ms calm and 20ms when a splash lands. One step in flight, handed over by an atomic `busy`; the tick never waits for it, it just shows the last picture. Joined on teardown — a step is bounded and waits on nothing |
 
 Both audio threads are **never joined**. They are told to stop and ownership is
 refcounted, so whichever of the two lets go last frees the handle. Joining cost
@@ -78,7 +80,8 @@ price to pay for turning a feature *off*.
 
 | Area | Files |
 |---|---|
-| Simulation | `physics.c` (the mirror + Box2D), `wobble.c` (drag lattice) |
+| Simulation | `physics.c` (the mirror + Box2D), `wobble.c` (drag lattice), `liquid.c` (particles and a pressure solve — no wlroots, no threads) |
+| Liquid on screen | `server_liquid.c` (the worker, the pour, where it stands), `liquid_draw.c` (particles to one smooth body, GLES2) |
 | Compositor core | `server.c`, `server_lifecycle.c`, `server_tick.c`, `server_output.c`, `server_shell.c`, `server_seat.c` |
 | Input | `server_input.c` (keyboard, binds, modes), `server_pointer.c`, `server_drag.c`, `gestures.c` + `server_gestures.c` |
 | Windows | `view.c`, `view_effects.c` (squash/wobble/fade), `snapshot.c`, `rotate.c` (raw GLES2, for the rotation and the bend the render-pass API cannot express), `group.c` (tabs) |
@@ -175,6 +178,7 @@ exists because its subject cannot be checked by hand in a running session.
 | `test_input` | bind matching, modes, mouse binds |
 | `test_physics` | the ends of the world: throws, walls, the ring join, mass scaling |
 | `test_physics_speed` | what has to keep working at speed — the drag that used to pass through windows, the world ceiling, walls under absurd throws |
+| `test_liquid` | the liquid's laws: free fall, inertia, a pool as deep as its volume that then goes still, gravity turned round, tension rounding a strip, viscosity, walls |
 | `test_ipc_events` | the event name/bit vocabulary |
 | `test_wobble` | the drag lattice, which only runs while a button is held |
 | `test_gestures` | what a swipe means, without a touchpad |

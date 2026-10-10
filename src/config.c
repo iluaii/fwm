@@ -1075,6 +1075,55 @@ static void load_grass(toml_table_t *root, FwmConfig *cfg) {
     if (g->fps > 144.0)      g->fps = 144.0;
 }
 
+/* ── liquids section ─────────────────────────────────────────────────── */
+
+static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
+    LiquidsConfig *q = &cfg->liquids;
+
+    q->enabled   = 0;      /* experimental, and a CPU core while it moves */
+    q->particles = 12000;
+    q->spacing   = 6.0;
+    /* Thin enough to splash and run like water, thick enough that a pool
+     * settles in under a minute rather than sloshing on for several. */
+    q->viscosity = 60.0;
+    /* A drop under ~30 px holds itself round, and a blob in zero gravity
+     * gathers into a ball in a few seconds rather than a few tens. */
+    q->tension   = 30.0;
+    parse_hex_color("#3a8be0cc", q->color);   /* clear blue, a little see-through */
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "liquids");
+    if (!tbl) return;
+
+    toml_datum_t e = toml_bool_in(tbl, "enabled");
+    if (e.ok) q->enabled = e.u.b ? 1 : 0;
+    toml_datum_t n = toml_int_in(tbl, "particles");
+    if (n.ok) q->particles = (int)n.u.i;
+    LOAD_DOUBLE(tbl, "spacing",   q->spacing);
+    LOAD_DOUBLE(tbl, "viscosity", q->viscosity);
+    LOAD_DOUBLE(tbl, "tension",   q->tension);
+
+    toml_datum_t c = toml_string_in(tbl, "color");
+    if (c.ok) {
+        if (!parse_hex_color(c.u.s, q->color))
+            config_report_error(cfg, "[liquids] color: \"%s\" is not #RRGGBB[AA]", c.u.s);
+        free(c.u.s);
+    }
+
+    /* The budget is the cost: every step touches every particle. Past ~40000
+     * one core cannot keep a splash in real time. */
+    if (q->particles < 0)      q->particles = 0;
+    if (q->particles > 40000)  q->particles = 40000;
+    /* Under 3 px the grid is a million cells for a screen; over 20 a drop is a
+     * thumbnail-sized blob and the surface reads as lumps. */
+    if (q->spacing < 3.0)      q->spacing = 3.0;
+    if (q->spacing > 20.0)     q->spacing = 20.0;
+    if (q->viscosity < 0.0)    q->viscosity = 0.0;
+    if (q->viscosity > 100000.0) q->viscosity = 100000.0;
+    if (q->tension < 0.0)      q->tension = 0.0;
+    if (q->tension > 500.0)    q->tension = 500.0;
+}
+
 static void load_session(toml_table_t *root, SessionConfig *s, FwmConfig *cfg) {
     s->restore = SESSION_RESTORE_CRASH;
     if (!root) return;
@@ -2117,6 +2166,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_cava(NULL, cfg);
     load_glass(NULL, cfg);
     load_grass(NULL, cfg);
+    load_liquids(NULL, cfg);
     load_sound(NULL, cfg);
     load_volume(NULL, cfg);
     load_idle(NULL, cfg);
@@ -2176,6 +2226,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_cava(root, cfg);
     load_glass(root, cfg);
     load_grass(root, cfg);
+    load_liquids(root, cfg);
     load_sound(root, cfg);
     load_volume(root, cfg);
     load_mixer(root, cfg);

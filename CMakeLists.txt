@@ -110,6 +110,8 @@ find_package(Threads REQUIRED)
 set(SOURCES
     main.c
     src/physics.c
+    src/liquid.c
+    src/liquid_draw.c
     src/bsp.c
     src/toml.c
     src/config.c
@@ -166,6 +168,7 @@ set(SOURCES
     src/server_lifecycle.c
     src/server_tick.c
     src/server_tiling.c
+    src/server_liquid.c
     src/server_shell.c
     src/server_output.c
     src/server_input.c
@@ -348,6 +351,14 @@ if(FWM_TESTS)
     target_include_directories(test_physics_speed PRIVATE src tests)
     target_link_libraries(test_physics_speed PRIVATE box2d::box2d m)
 
+    # The liquid is laws and nothing else, and none of them can be checked by
+    # looking: a pool that has lost a tenth of its volume, or a ball drifting
+    # with nothing pushing it, still looks like liquid. liquid.c reaches libm
+    # and nothing more.
+    add_executable(test_liquid tests/test_liquid.c src/liquid.c)
+    target_include_directories(test_liquid PRIVATE src tests)
+    target_link_libraries(test_liquid PRIVATE m)
+
     add_executable(test_ipc_events tests/test_ipc_events.c src/ipc_events.c)
     target_include_directories(test_ipc_events PRIVATE src tests)
 
@@ -462,6 +473,7 @@ if(FWM_TESTS)
     add_test(NAME input      COMMAND test_input)
     add_test(NAME physics    COMMAND test_physics)
     add_test(NAME physics_speed COMMAND test_physics_speed)
+    add_test(NAME liquid     COMMAND test_liquid)
     add_test(NAME ipc_events COMMAND test_ipc_events)
     add_test(NAME wobble     COMMAND test_wobble)
     add_test(NAME droplet    COMMAND test_droplet)

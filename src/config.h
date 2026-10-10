@@ -1396,6 +1396,40 @@ typedef struct {
 #define CONFIG_MAX_ERRORS 24
 #define CONFIG_ERR_LEN    200
 
+/* ── liquids ─────────────────────────────────────────────────────────── */
+
+/*
+ * A liquid on a desktop, poured with `fwmctl liquid pour` (see src/liquid.h for
+ * what it is and src/server_liquid.c for how it reaches the screen):
+ *
+ *   [liquids]
+ *   enabled   = true
+ *   particles = 12000    # the most one desktop may hold
+ *   spacing   = 6        # px between particles at rest: the finest detail
+ *   viscosity = 60       # px²/s; hundreds is oil, thousands honey
+ *   tension   = 30       # px; how strongly its surface pulls
+ *   color     = "#3a8be0cc"
+ *
+ * Off by default and experimental: it is a toy, and its simulation runs on a
+ * CPU core of its own for as long as anything in it is moving.
+ *
+ * `particles` is the budget, and the cost: a step is proportional to it.
+ * `spacing` decides how much screen that budget covers — the same particles at
+ * 8 px fill nearly twice the area of 6 px, in coarser drops. Both take effect
+ * on the next pour; a new spacing empties what is there, since particles of
+ * one size do not become particles of another.
+ */
+typedef struct {
+    int    enabled;
+    int    particles;  /* budget per desktop */
+    double spacing;    /* px between particles at rest */
+    double viscosity;  /* px²/s, kinematic */
+    double tension;    /* px, capillary length under earth gravity */
+    /* RGBA as parse_hex_color leaves it: premultiplied. The alpha is how
+     * opaque the body of the liquid is. */
+    float  color[4];
+} LiquidsConfig;
+
 typedef struct {
     char msg[CONFIG_ERR_LEN];
 } ConfigError;
@@ -1422,6 +1456,7 @@ typedef struct {
     CavaConfig      cava;
     GlassConfig     glass;
     GrassConfig     grass;
+    LiquidsConfig   liquids;
     SoundConfig     sound;
     VolumeConfig    volume;
     MixerConfig     mixer;

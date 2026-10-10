@@ -371,6 +371,9 @@ static void gpu_release_caches(FwmServer *server) {
         wallpaper_gpu_release(out->wallpaper_prev);
         star_draw_gpu_release(out->star_draw);
     }
+    /* The liquid's picture, and its shaders; the liquid itself is the CPU's
+     * and carries on. */
+    server_liquid_gpu_release(server);
 
     /* rotate.c's and star_gl.c's shader programs are static and keyed to the
      * renderer that built them; both notice the new one on their own. This
@@ -912,6 +915,10 @@ void server_destroy(FwmServer *server) {
     /* The panes under fwm's panels, while the renderer they hold buffers and
      * textures from is still standing. */
     glass_finish();
+
+    /* The liquid's worker is stopped and its picture dropped here, for the
+     * same reason: its buffers came from the renderer. */
+    server_liquid_finish(server);
 
     /* The one image every window's shadow was cut from. The windows are gone
      * by now, so nothing is left holding a lock on it. */
