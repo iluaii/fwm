@@ -959,7 +959,8 @@ void view_destroy(FwmView *view) {
         wlr_buffer_unlock(view->last_buffer);
         view->last_buffer = NULL;
     }
-    
+
+    free(view->launch_cmd);
     free(view);
 }
 
@@ -1082,6 +1083,18 @@ void view_map(FwmView *view) {
      * wins over what merely happened to be true last time. Claimed either way,
      * so that a dialog placed by its parent above does not leave the entry
      * lying around for the next window to pick up. */
+    /* Read now, while the launch is still remembered — and before the claim
+     * below, which matches on it. Once: a window that unmaps and comes back is
+     * the same application. */
+    if (!view->launch_cmd) {
+        char cmd[LAUNCHED_CMD_MAX];
+        pid_t lpid;
+        if (launched_command(view->server, view, &lpid, cmd, sizeof(cmd))) {
+            view->launch_cmd = strdup(cmd);
+            view->launch_pid = lpid;
+        }
+    }
+
     int restored = session_claim_desktop(view->server, view);
     if (restored >= 0 && !placed) {
         current_desktop = restored;

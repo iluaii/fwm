@@ -818,10 +818,10 @@ void server_dispatch_action(FwmServer *server, const char *action) {
          * Only the two actions a person launches something with: the lock
          * command and the battery command go through server_spawn too, and
          * neither has a window to place. */
-        if (cmd) launched_note(server, server_spawn(cmd), server_active_desktop(server));
+        if (cmd) launched_note(server, server_spawn(cmd), server_active_desktop(server), cmd);
     } else if (strncmp(action, "spawn:", 6) == 0) {
         const char *cmd = action + 6;
-        launched_note(server, server_spawn(cmd), server_active_desktop(server));
+        launched_note(server, server_spawn(cmd), server_active_desktop(server), cmd);
     } else if (strncmp(action, "global:", 7) == 0) {
         /* Hand the key to an external shell — "global:<app_id>:<name>", the
          * shortcut it registered over hyprland-global-shortcuts (shortcuts.h).

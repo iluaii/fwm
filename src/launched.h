@@ -15,6 +15,8 @@
 #ifndef FWM_LAUNCHED_H
 #define FWM_LAUNCHED_H
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <sys/types.h>
 
 /*
@@ -50,15 +52,33 @@ struct FwmServer;
 struct FwmView;
 
 #define LAUNCHED_TTL 120.0   /* seconds an unclaimed launch stays interesting */
+#define LAUNCHED_CMD_MAX 512 /* longest command remembered with a launch */
 
-/* Remember that `pid` was started while `desktop` was the one in front of you.
+/* Remember that `pid` was started while `desktop` was the one in front of you,
+ * by running `cmd` through sh -c (NULL when there is none worth keeping).
  * pid <= 0 is ignored, so a caller that failed to fork needs no branch. */
-void launched_note(struct FwmServer *server, pid_t pid, int desktop);
+void launched_note(struct FwmServer *server, pid_t pid, int desktop, const char *cmd);
 
 /* The desktop this window's application was launched from, or -1 when it was
  * not launched by us, when the launch has expired, or when the window's process
  * cannot be read. Does not consume the entry. */
 int launched_desktop(struct FwmServer *server, struct FwmView *view);
+
+/* The command this window's application was started with, for the session to
+ * relaunch instead of the window's own process.
+ *
+ * What owns a window is very often not something that can be started: Steam's
+ * windows belong to `./steamwebhelper` inside its container and to the client
+ * binary that only runs under steam.sh, and relaunching either after a crash
+ * does nothing. The command a person typed is what brings the application
+ * back. Only when the launched process does not own a window of its own,
+ * though, unless it is this one: a terminal is a launch too, and firefox
+ * started from inside it must not be written down as the terminal.
+ *
+ * Copies the command into `out` and the launched pid into `*pid`, and returns
+ * true; false when there is no such launch, or it has expired. */
+bool launched_command(struct FwmServer *server, struct FwmView *view,
+                      pid_t *pid, char *out, size_t cap);
 
 /* Drop the table. */
 void launched_finish(struct FwmServer *server);

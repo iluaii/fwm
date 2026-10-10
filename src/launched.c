@@ -32,6 +32,7 @@ struct LaunchEntry {
     pid_t pid;
     int desktop;
     double at;      /* CLOCK_MONOTONIC seconds */
+    char cmd[LAUNCHED_CMD_MAX];   /* "" when not known */
 };
 
 struct FwmLaunched {
@@ -78,7 +79,7 @@ static pid_t parent_pid(pid_t pid) {
     return ppid > 0 ? (pid_t)ppid : 0;
 }
 
-void launched_note(struct FwmServer *server, pid_t pid, int desktop) {
+void launched_note(struct FwmServer *server, pid_t pid, int desktop, const char *cmd) {
     if (!server || pid <= 0) return;
     if (desktop < 0 || desktop >= FWM_DESKTOPS) return;
 
@@ -100,16 +101,23 @@ void launched_note(struct FwmServer *server, pid_t pid, int desktop) {
     t->e[t->count].pid = pid;
     t->e[t->count].desktop = desktop;
     t->e[t->count].at = now;
+    /* Too long to keep whole is not kept at all: half a command relaunches
+     * something else. */
+    if (cmd && strlen(cmd) < sizeof(t->e[0].cmd))
+        snprintf(t->e[t->count].cmd, sizeof(t->e[0].cmd), "%s", cmd);
+    else
+        t->e[t->count].cmd[0] = '\0';
     t->count++;
 }
 
-int launched_desktop(struct FwmServer *server, struct FwmView *view) {
-    if (!server || !view) return -1;
+/* The launch this window descends from, or NULL. */
+static struct LaunchEntry *find_launch(struct FwmServer *server, struct FwmView *view) {
+    if (!server || !view) return NULL;
     struct FwmLaunched *t = server->launched;
-    if (!t || t->count == 0) return -1;
+    if (!t || t->count == 0) return NULL;
 
     pid_t pid = view_pid(view);
-    if (pid <= 0) return -1;
+    if (pid <= 0) return NULL;
 
     expire(t, now_sec());
 
@@ -118,12 +126,33 @@ int launched_desktop(struct FwmServer *server, struct FwmView *view) {
      * parent chain loops would otherwise be walked forever. */
     for (int hop = 0; hop < LAUNCHED_HOPS && pid > 1; hop++) {
         for (int i = t->count - 1; i >= 0; i--) {
-            if (t->e[i].pid == pid) return t->e[i].desktop;
+            if (t->e[i].pid == pid) return &t->e[i];
         }
         pid = parent_pid(pid);
         if (pid <= 0) break;
     }
-    return -1;
+    return NULL;
+}
+
+int launched_desktop(struct FwmServer *server, struct FwmView *view) {
+    struct LaunchEntry *e = find_launch(server, view);
+    return e ? e->desktop : -1;
+}
+
+bool launched_command(struct FwmServer *server, struct FwmView *view,
+                      pid_t *pid, char *out, size_t cap) {
+    struct LaunchEntry *e = find_launch(server, view);
+    if (!e || !e->cmd[0] || strlen(e->cmd) >= cap) return false;
+
+    if (view_pid(view) != e->pid) {
+        FwmView *other;
+        wl_list_for_each(other, &server->views, link) {
+            if (other != view && view_pid(other) == e->pid) return false;
+        }
+    }
+    snprintf(out, cap, "%s", e->cmd);
+    *pid = e->pid;
+    return true;
 }
 
 void launched_finish(struct FwmServer *server) {

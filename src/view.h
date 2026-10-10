@@ -55,6 +55,12 @@ typedef struct FwmView {
      * on no monitor (view_set_size). Cleared by the placement that finds it a
      * screen again — see server_place_view. */
     int xwl_parked;
+    /* The command fwm started this window's application with, when it did and
+     * it is worth relaunching by (launched_command), and the pid that command
+     * became. What the session writes down instead of the window's own
+     * process. NULL when the window is just its own process. */
+    char *launch_cmd;
+    pid_t launch_pid;
     struct wlr_scene_tree *scene_tree;
     
     struct wl_listener map;

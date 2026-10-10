@@ -33,6 +33,9 @@
 
 #define SESSION_MAX_ENTRIES 64
 #define SESSION_LINE_MAX    2048
+/* What server_spawn runs a command through, and so the argv a launched
+ * application's line is written as. */
+#define SESSION_SHELL       "/bin/sh"
 /* One write every few seconds at most. The file is tiny, but the point is to
  * avoid touching the disk on every frame while a window is being dragged. */
 #define SESSION_SAVE_PERIOD_SEC 3.0
@@ -149,9 +152,63 @@ static int is_ourselves(const char *argv_key) {
     return len == strlen(me) && strncmp(them, me, len) == 0;
 }
 
+/* Never record a game.
+ *
+ * Coming back from a crash to a game starting itself up is not restoring a
+ * session, it is a launcher, a shader cache and a minute of fans you did not
+ * ask for — and a game is the most likely thing to have been running when the
+ * crash came. Steam marks every game it starts with SteamAppId / SteamGameId
+ * in its environment, which the game and anything it forks inherit, and the
+ * client itself does not carry; so a window whose process has either is a
+ * game. Steam itself is still restored. */
+static int is_game(pid_t pid) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/environ", (int)pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+
+    char var[256];
+    size_t n = 0;
+    int game = 0, c;
+    while (!game && (c = fgetc(f)) != EOF) {
+        if (c != '\0') {
+            if (n < sizeof(var) - 1) var[n++] = (char)c;
+            continue;
+        }
+        var[n] = '\0';
+        n = 0;
+        if (strncmp(var, "SteamAppId=", 11) == 0 || strncmp(var, "SteamGameId=", 12) == 0)
+            game = 1;
+    }
+    fclose(f);
+    return game;
+}
+
+/* What the session writes down for a window, and what a relaunched window is
+ * matched back on: the command fwm started its application with when there is
+ * one (launched.h says why that is the one to keep), otherwise its process's
+ * own argv. `ident` is the process the line stands for, which is what
+ * duplicates are judged by. */
+static int view_session_key(struct FwmView *view, char *out, size_t cap, pid_t *ident) {
+    pid_t pid = view_pid(view);
+    if (!pid_argv_key(pid, out, cap)) return 0;
+    if (is_ourselves(out) || is_game(pid)) return 0;
+    *ident = pid;
+
+    const char *cmd = view->launch_cmd;
+    if (cmd && !strchr(cmd, '\t') && !strchr(cmd, '\n')) {
+        int w = snprintf(out, cap, "%s\t-c\t%s", SESSION_SHELL, cmd);
+        if (w < 0 || (size_t)w >= cap) return pid_argv_key(pid, out, cap);
+        *ident = view->launch_pid;
+    }
+    return 1;
+}
+
 /* Build the whole file contents. One line per distinct application: several
  * windows of one process (a browser, a terminal with two windows) must not
- * relaunch it several times, so entries are deduplicated by pid. */
+ * relaunch it several times, so entries are deduplicated by the process each
+ * line stands for — for Steam, whose two windows come from two processes of
+ * one launch, that is the launch. */
 static void build_snapshot(struct FwmServer *server, char *out, size_t cap) {
     out[0] = '\0';
     size_t used = 0;
@@ -161,18 +218,15 @@ static void build_snapshot(struct FwmServer *server, char *out, size_t cap) {
 
     struct FwmView *view;
     wl_list_for_each(view, &server->views, link) {
-        pid_t pid = view_pid(view);
-        if (pid <= 0) continue;
+        char key[SESSION_LINE_MAX];
+        pid_t pid;
+        if (!view_session_key(view, key, sizeof(key), &pid)) continue;
 
         int dup = 0;
         for (int i = 0; i < seen_count; i++) if (seen[i] == pid) { dup = 1; break; }
         if (dup) continue;
         if (seen_count >= SESSION_MAX_ENTRIES) break;
         seen[seen_count++] = pid;
-
-        char key[SESSION_LINE_MAX];
-        if (!pid_argv_key(pid, key, sizeof(key))) continue;
-        if (is_ourselves(key)) continue;
 
         PhysicsBody *b = physics_find_body(&server->physics, view->id);
         int desktop = b ? b->desktop_id
@@ -317,7 +371,17 @@ void session_restore(struct FwmServer *server) {
         e->claimed = 0;
         snprintf(e->argv_key, sizeof(e->argv_key), "%s", tab + 1);
 
-        spawn_argv_key(e->argv_key);
+        /* A command fwm launched goes back through the same spawn, so the
+         * relaunched application is a launch again: its windows find the
+         * command (and the desktop) the same way the first ones did, and the
+         * next snapshot writes the same line. */
+        const char *prefix = SESSION_SHELL "\t-c\t";
+        if (strncmp(e->argv_key, prefix, strlen(prefix)) == 0) {
+            const char *cmd = e->argv_key + strlen(prefix);
+            launched_note(server, server_spawn(cmd), desktop, cmd);
+        } else {
+            spawn_argv_key(e->argv_key);
+        }
     }
     fclose(f);
 
@@ -330,7 +394,8 @@ int session_claim_desktop(struct FwmServer *server, struct FwmView *view) {
     if (!st || st->pending_count == 0) return -1;
 
     char key[SESSION_LINE_MAX];
-    if (!pid_argv_key(view_pid(view), key, sizeof(key))) return -1;
+    pid_t ident;
+    if (!view_session_key(view, key, sizeof(key), &ident)) return -1;
 
     for (int i = 0; i < st->pending_count; i++) {
         struct PendingEntry *e = &st->pending[i];
@@ -376,13 +441,13 @@ void session_debug_desktop(struct FwmServer *server) {
      * run came up tiled on both desktops and showed the same half twice. What
      * this function puts on screen is its own business, not the config's. */
     server_set_desktop_mode(server, 0, DESKTOP_MODE_PHYSICS);
-    launched_note(server, server_spawn(cmd), 0);
+    launched_note(server, server_spawn(cmd), 0, cmd);
 
     /* Tiling before the window rather than after it, so the second terminal is
      * a tile from the moment it maps instead of a floating window the layout
      * takes hold of a frame later. */
     server_set_desktop_mode(server, 1, DESKTOP_MODE_TILING);
-    launched_note(server, server_spawn(cmd), 1);
+    launched_note(server, server_spawn(cmd), 1, cmd);
 
     wlr_log(WLR_INFO, "fwm -debug: no session restore, no startup commands, "
                       "two terminals (desktop 1 physics, desktop 2 tiling)");

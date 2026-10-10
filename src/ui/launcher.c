@@ -1035,7 +1035,7 @@ static void launch_selected(Launcher *l) {
      * same double fork, so that the desktop this was launched from is recorded
      * the one way it is recorded everywhere — an application picked here takes
      * just as long to appear as one started from a keybind. */
-    launched_note(l->server, server_spawn(cmd), server_active_desktop(l->server));
+    launched_note(l->server, server_spawn(cmd), server_active_desktop(l->server), cmd);
 }
 
 bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
