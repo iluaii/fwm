@@ -123,6 +123,8 @@ struct Launcher {
     LsFrec *frec;              /* launch history, loaded per open */
     char    frec_path[512];
 
+    struct wl_event_source *prewarm;  /* one-shot, see launcher_prewarm */
+
     struct wlr_scene_buffer *overlay;
     /* Panel that is fading out. It is no longer ours to draw into — the
      * animation owns and destroys it — we only keep the pointer so a reopen
@@ -934,6 +936,50 @@ static void launcher_open(Launcher *l) {
     l->dirty = true;
 }
 
+/* The first open used to be the one that read every .desktop file, decoded
+ * the icons off disk and laid out text in a face and size nothing else had
+ * asked for yet — all on the frame the panel appears, and after a boot, with
+ * a cold disk, long enough to watch. So all of it is done once, a moment after
+ * the session comes up and while nobody is waiting: the apps the empty query
+ * shows, their icons, and their names drawn once into a throwaway surface so
+ * the glyphs are cached. The open itself then has only drawing left to do. */
+static int launcher_prewarm(void *data) {
+    Launcher *l = data;
+    wl_event_source_remove(l->prewarm);
+    l->prewarm = NULL;
+    if (l->open || l->mode != LMODE_APPS) return 0;
+
+    if (!l->scanned) scan_apps(l);
+
+    /* Ranked the way the open will rank them, so the icons loaded are the
+     * ones on the first screen. The history is dropped again after: an open
+     * reads its own fresh copy. */
+    LsFrec *frec = ls_frec_load(l->frec_path);
+    time_t now = time(NULL);
+    for (int i = 0; i < l->app_count; i++)
+        l->apps[i].frec = ls_frec_score(frec, l->apps[i].exec, now);
+    ls_frec_free(frec);
+    l->query[0] = '\0';
+    refilter(l);
+
+    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *cr = cairo_create(s);
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+    PangoFontDescription *desc = pango_font_description_from_string("sans 11");
+    pango_layout_set_font_description(layout, desc);
+    pango_font_description_free(desc);
+    for (int i = 0; i < l->match_count && i < MAX_SHOW; i++) {
+        LApp *app = &l->apps[l->match[i]];
+        ensure_icon(l, app);
+        pango_layout_set_text(layout, app->name, -1);
+        pango_cairo_show_layout(cr, layout);
+    }
+    g_object_unref(layout);
+    cairo_destroy(cr);
+    cairo_surface_destroy(s);
+    return 0;
+}
+
 /* ── public api ──────────────────────────────────────────────────────── */
 
 Launcher *launcher_create(struct FwmServer *server) {
@@ -951,11 +997,18 @@ Launcher *launcher_create(struct FwmServer *server) {
         return NULL;
     }
     ls_frec_path(l->frec_path, sizeof(l->frec_path));
+    /* Later rather than now: the config, and with it the icon theme, is read
+     * after the launcher exists, and the first seconds of a session are busy
+     * enough with everything starting up. */
+    l->prewarm = wl_event_loop_add_timer(wl_display_get_event_loop(server->wl_display),
+                                         launcher_prewarm, l);
+    if (l->prewarm) wl_event_source_timer_update(l->prewarm, 3000);
     return l;
 }
 
 void launcher_destroy(Launcher *l) {
     if (!l) return;
+    if (l->prewarm) wl_event_source_remove(l->prewarm);
     launcher_close_ex(l, false);
     closing_cancel(l);
     for (int i = 0; i < l->app_count; i++) {
