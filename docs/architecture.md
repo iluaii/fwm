@@ -81,7 +81,7 @@ price to pay for turning a feature *off*.
 | Area | Files |
 |---|---|
 | Simulation | `physics.c` (the mirror + Box2D), `wobble.c` (drag lattice), `liquid.c` (particles and a pressure solve — no wlroots, no threads) |
-| Liquid on screen | `server_liquid.c` (the worker, the pour, where it stands), `liquid_draw.c` (particles to one smooth body, GLES2) |
+| Liquid on screen | `server_liquid.c` (the worker, the pour, the bucket, where it stands), `liquid_draw.c` (particles to one smooth body, GLES2), `liquid_kinds.c` (the liquids to pick from, and their state file) |
 | Compositor core | `server.c`, `server_lifecycle.c`, `server_tick.c`, `server_output.c`, `server_shell.c`, `server_seat.c` |
 | Input | `server_input.c` (keyboard, binds, modes), `server_pointer.c`, `server_drag.c`, `gestures.c` + `server_gestures.c` |
 | Windows | `view.c`, `view_effects.c` (squash/wobble/fade), `snapshot.c`, `rotate.c` (raw GLES2, for the rotation and the bend the render-pass API cannot express), `group.c` (tabs) |
@@ -113,6 +113,7 @@ cannot express that (`ui/modes.c` is the example).
 | `ui/tray.c` | the status strip, including the modes pill |
 | `ui/modes.c` | the modes menu: icons, rows, switches, segmented controls |
 | `ui/liquids_menu.c` | the liquids menu the modes menu's Liquids row opens; the bucket itself is `server_liquid.c` |
+| `ui/liquid_form.c` | the form a liquid is made or changed in: text fields, the colour wheel, the sliders |
 | `ui/launcher.c` | the application launcher |
 | `ui/hints.c` | the key hints, read from the live config |
 | `ui/errors.c` | the config-problem panel |
@@ -179,6 +180,7 @@ exists because its subject cannot be checked by hand in a running session.
 | `test_input` | bind matching, modes, mouse binds |
 | `test_physics` | the ends of the world: throws, walls, the ring join, mass scaling |
 | `test_physics_speed` | what has to keep working at speed — the drag that used to pass through windows, the world ceiling, walls under absurd throws |
+| `test_liquid_kinds` | the liquids made in the menu, through their state file and back |
 | `test_liquid` | the liquid's laws: free fall, inertia, a pool as deep as its volume that then goes still, gravity turned round, tension rounding a strip, viscosity, walls |
 | `test_ipc_events` | the event name/bit vocabulary |
 | `test_wobble` | the drag lattice, which only runs while a button is held |

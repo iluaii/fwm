@@ -127,6 +127,64 @@ static void server_state_mkdir_parents(const char *file) {
     mkdir(dir, 0755);
 }
 
+/* ── the liquids made in the menu ─────────────────────────────────────── */
+
+/* [liquids] color is premultiplied (parse_hex_color), the registry's is not. */
+static void premul_to_straight(const float in[4], float out[4]) {
+    float a = in[3], k = a > 0.0f ? 1.0f / a : 0.0f;
+    out[0] = in[0] * k; out[1] = in[1] * k; out[2] = in[2] * k; out[3] = a;
+}
+
+void server_state_apply_liquids(FwmServer *server) {
+    LiquidsConfig *cfg = &server->config.liquids;
+    float straight[4];
+    premul_to_straight(cfg->color, straight);
+    liquid_kinds_init(&server->liquid_kinds, straight, cfg->viscosity);
+
+    char sp[512];
+    server_state_path(sp, sizeof(sp), "liquids");
+    FILE *f = fopen(sp, "r");
+    if (!f) return;
+    char *text = NULL;
+    size_t cap = 0;
+    ssize_t n = getdelim(&text, &cap, '\0', f);
+    fclose(f);
+    if (n > 0) liquid_kinds_parse(&server->liquid_kinds, text);
+    free(text);
+
+    /* Water edited in the menu speaks over the file it came from, the way the
+     * modes menu's choices do — and through the same two keys, so `fwmctl get
+     * liquids.viscosity` says what water actually is. */
+    if (server->liquid_kinds.water_edited) {
+        const LiquidKind *w = &server->liquid_kinds.kind[0];
+        for (int i = 0; i < 3; i++) cfg->color[i] = w->color[i] * w->color[3];
+        cfg->color[3] = w->color[3];
+        cfg->viscosity = w->viscosity;
+    }
+}
+
+void server_state_save_liquids(FwmServer *server) {
+    /* A -debug run writes nothing; see server_state_save_modes. */
+    if (server->debug) return;
+    LiquidKinds *k = &server->liquid_kinds;
+    premul_to_straight(server->config.liquids.color, k->kind[0].color);
+    k->kind[0].viscosity = server->config.liquids.viscosity;
+    char *text = liquid_kinds_serialize(k);
+    if (!text) return;
+    char sp[512];
+    server_state_path(sp, sizeof(sp), "liquids");
+    server_state_mkdir_parents(sp);
+    FILE *f = fopen(sp, "w");
+    if (!f) {
+        wlr_log(WLR_ERROR, "cannot save the liquids to %s", sp);
+        free(text);
+        return;
+    }
+    fputs(text, f);
+    fclose(f);
+    free(text);
+}
+
 /* Leaving was asked for: say so before tearing down, with this process's pid
  * in it. Teardown is the part of a run that touches the most at once — every
  * client, the GPU, the seat — and if it crashes, the exit status alone reads
@@ -890,6 +948,7 @@ void server_reload_config(FwmServer *server) {
     server_state_apply_settings(server);
     server_state_apply_wallpaper(server);
     server_state_apply_modes(server);
+    server_state_apply_liquids(server);
 
     /* The collision sample is loaded once and then read by the mixer thread
      * without a lock, so a new [sound] path is a rebuild rather than an update.

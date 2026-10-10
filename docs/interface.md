@@ -123,9 +123,24 @@ remembered for a different reason — see above.
 ## The liquids menu and the bucket
 
 Experimental ([liquids](configuration.md#liquids)). The **Liquids** row of the
-modes menu opens a list of the liquids there are — one, for now: water — with the
-desktop it has been poured on beside it. Hover a row and a bin appears at its
-right: clicking the bin drains that liquid off its desktop.
+modes menu opens a list of the liquids there are: water, and any you have made —
+each with its thickness and density under its name, and the desktop it has been
+poured on beside it.
+
+- **+** on the LIQUIDS line makes a new one: a name, a colour — typed as hex or
+  picked off the wheel, with the brightness on the bar beside it; the drop at the
+  top shows it — and its thickness and density, each typed or dragged on its
+  slider. Enter or Create keeps it, Escape or Cancel does not.
+- **the gear**, on the row under the pointer, opens the same form on that liquid.
+  Water's colour and thickness are `[liquids] color` and `viscosity`, so changing
+  them here changes those for the session and keeps them over the config.
+- **the bin** removes a liquid you made, and takes it off the desktop with it.
+  Water has no bin.
+
+Liquids made here are kept in `~/.local/state/fwm/liquids`; your `config.toml` is
+never rewritten. Density is kept but changes nothing yet: with one liquid on a
+desktop it cancels out of the physics, and it starts to matter when windows float
+in it and liquids layer — later stages.
 
 Click the liquid itself and a bucket of it is in your hand: the pointer becomes
 the bucket, and
@@ -139,8 +154,9 @@ the bucket, and
 While the bucket is in your hand no window hears the pointer, but the keyboard is
 untouched — switch gravity off with super+g in the middle of a pour and the
 stream carries on flying. Picking up a bucket switches `[liquids]` on for the
-session if the config had it off. The liquid stands on one desktop at a time, so
-pouring onto another one is refused until the first is drained.
+session if the config had it off. The liquid stands on one desktop at a time, and
+one liquid at a time — they do not mix yet — so pouring honey where there is
+water, or onto another desktop, is refused until the first is drained.
 
 `liquids_menu` and `liquid_bucket` bind the same two things to keys.
 

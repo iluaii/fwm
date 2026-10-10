@@ -457,7 +457,10 @@ static void process_cursor_motion(FwmServer *server, uint32_t time_msec) {
         wlr_seat_pointer_clear_focus(server->seat);
         return;
     }
-    /* The liquids menu lights the row under the pointer, and its bin. */
+    /* The liquid form's wheel and sliders follow a held button, and its
+     * buttons light up under the pointer; the liquids menu lights the row
+     * under the pointer, and its gear and bin. */
+    server_liquid_form_motion(server);
     server_liquid_menu_motion(server);
 
     /* Same rule as the launcher below, for the same reason: while the desktop
@@ -678,6 +681,12 @@ static void handle_cursor_button(struct wl_listener *listener, void *data) {
 
     /* The bucket: every button is its while it is held. */
     if (server_liquid_hand_button(server, event->button,
+                                  event->state == WL_POINTER_BUTTON_STATE_PRESSED))
+        return;
+
+    /* The liquid form, over the liquids menu: before it, since the form is
+     * the thing in front. */
+    if (server_liquid_form_button(server, event->button,
                                   event->state == WL_POINTER_BUTTON_STATE_PRESSED))
         return;
 

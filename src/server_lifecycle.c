@@ -740,6 +740,7 @@ bool server_init(FwmServer *server, bool debug) {
     server_state_apply_settings(server);
     server_state_apply_wallpaper(server);
     server_state_apply_modes(server);
+    server_state_apply_liquids(server);
     /* `[tiling] default`, or the modes the last run ended in when `remember`
      * is on — server_state_apply_modes above has already put one over the
      * other. Written straight into the array instead of going through

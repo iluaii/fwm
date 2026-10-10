@@ -111,6 +111,7 @@ set(SOURCES
     main.c
     src/physics.c
     src/liquid.c
+    src/liquid_kinds.c
     src/liquid_draw.c
     src/bsp.c
     src/toml.c
@@ -187,6 +188,7 @@ set(SOURCES
     src/ui/modes.c
     src/ui/stats_menu.c
     src/ui/liquids_menu.c
+    src/ui/liquid_form.c
     src/ui/hints.c
     src/ui/errors.c
     src/ui/welcome.c
@@ -360,6 +362,11 @@ if(FWM_TESTS)
     target_include_directories(test_liquid PRIVATE src tests)
     target_link_libraries(test_liquid PRIVATE m)
 
+    # The liquids made in the menu, through the file they are kept in and back.
+    add_executable(test_liquid_kinds tests/test_liquid_kinds.c src/liquid_kinds.c src/toml.c)
+    target_include_directories(test_liquid_kinds PRIVATE src tests)
+    target_link_libraries(test_liquid_kinds PRIVATE m)
+
     add_executable(test_ipc_events tests/test_ipc_events.c src/ipc_events.c)
     target_include_directories(test_ipc_events PRIVATE src tests)
 
@@ -475,6 +482,7 @@ if(FWM_TESTS)
     add_test(NAME physics    COMMAND test_physics)
     add_test(NAME physics_speed COMMAND test_physics_speed)
     add_test(NAME liquid     COMMAND test_liquid)
+    add_test(NAME liquid_kinds COMMAND test_liquid_kinds)
     add_test(NAME ipc_events COMMAND test_ipc_events)
     add_test(NAME wobble     COMMAND test_wobble)
     add_test(NAME droplet    COMMAND test_droplet)

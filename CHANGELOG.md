@@ -5,7 +5,9 @@
 ### A liquid on the desktop (experimental)
 
 Modes menu → Liquids → Water, and a bucket of it is in your hand: hold the
-left button to pour, the right to drain, Escape to put it down. Or `fwmctl
+left button to pour, the right to drain, Escape to put it down. The + in that
+menu makes your own liquids — a name, a colour, how thick, how heavy — and
+the gear beside each changes it. Or `fwmctl
 liquid pour`. Particles, an
 incompressible pressure solve, viscosity and surface tension — and no rule
 anywhere about what a splash or a ball should look like: a blob falls and

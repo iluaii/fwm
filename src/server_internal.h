@@ -187,6 +187,12 @@ void server_state_apply_wallpaper(FwmServer *server);
  * moment one of them is clicked. */
 void server_state_apply_modes(FwmServer *server);
 void server_state_save_modes(FwmServer *server);
+/* The liquids made in the liquids menu, and water as edited there, in
+ * ~/.local/state/fwm/liquids. Applied over the config after every load (water's
+ * colour and viscosity ARE [liquids] keys); saved whenever the menu changes
+ * them. */
+void server_state_apply_liquids(FwmServer *server);
+void server_state_save_liquids(FwmServer *server);
 /* Write ~/.local/state/fwm/exit-requested with our pid; see server_config.c. */
 void server_state_note_exit(void);
 

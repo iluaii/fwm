@@ -35,6 +35,7 @@
 #include "config.h"
 #include "battery.h"
 #include "star.h"
+#include "liquid_kinds.h"
 #include "sun.h"
 #include "gestures.h"
 /* For TrayStrip: each monitor owns the geometry of the status strip drawn on
@@ -482,8 +483,12 @@ typedef struct FwmServer {
      * it; and the bucket, while one is in the hand (server_liquid.c). */
     struct wlr_scene_buffer *liquids_buffer;
     int liquids_hover;
-    bool liquids_hover_bin;
+    int liquids_hover_part;
     struct FwmLiquidHand *liquid_hand;
+    /* The liquids there are to pick: water and the ones made in the menu
+     * (src/liquid_kinds.h), and the form one is being made or changed in. */
+    LiquidKinds liquid_kinds;
+    struct FwmLiquidFormRun *liquid_form;
     bool star_running;
     /* The pointer has hold of it. Kept here rather than in the interactive
      * struct because a star is not a view and none of that machinery — the
@@ -940,6 +945,7 @@ typedef struct {
     int substeps;      /* in the last step */
     double step_ms;    /* what the last step cost the worker */
     bool drawn;        /* there is a picture of it */
+    char kind[LIQUID_NAME_MAX];   /* which liquid it is */
 } FwmLiquidState;
 void server_liquid_state(FwmServer *server, FwmLiquidState *st);
 
@@ -953,14 +959,24 @@ void server_kill_liquids_menu(FwmServer *server);
 bool server_liquid_menu_click(FwmServer *server);
 void server_liquid_menu_motion(FwmServer *server);
 
-/* A bucket of liquid `liquid` (a row of the liquids menu) in the hand: the
- * pointer becomes it until it is put down. */
-void server_liquid_take(FwmServer *server, int liquid);
+/* A bucket of the liquid whose id is `kind` (src/liquid_kinds.h) in the hand:
+ * the pointer becomes it until it is put down. */
+void server_liquid_take(FwmServer *server, int kind);
 void server_liquid_put_down(FwmServer *server);
 bool server_liquid_hand_held(FwmServer *server);
 /* A button with the bucket in the hand. True when it was the bucket's — which,
  * while one is held, is every button. */
 bool server_liquid_hand_button(FwmServer *server, uint32_t button, bool pressed);
+
+/* The form a liquid is made or changed in, opened from the liquids menu's +
+ * and gears. While it is up it owns the keyboard, and the pointer inside it. */
+bool server_liquid_form_open(FwmServer *server);
+/* A button: true if the form took it. A press outside closes the form and is
+ * not taken, so it goes on to whatever it was aimed at. */
+bool server_liquid_form_button(FwmServer *server, uint32_t button, bool pressed);
+void server_liquid_form_motion(FwmServer *server);
+void server_liquid_form_key(FwmServer *server, uint32_t sym, const char *utf8);
+void server_kill_liquid_form(FwmServer *server);
 /* Escape: puts the bucket down, or closes the liquids menu. True if it did. */
 bool server_liquid_escape(FwmServer *server);
 /* There is liquid somewhere, or a bucket in the hand: what lights the modes

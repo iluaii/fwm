@@ -1259,6 +1259,9 @@ static void cmd_liquid_state(FwmServer *server, struct Buf *b) {
                st.enabled ? "true" : "false");
     if (st.desktop >= 0) buf_printf(b, "%d", st.desktop);
     else                 buf_puts(b, "null");
+    buf_puts(b, ",\"liquid\":");
+    if (st.desktop >= 0) buf_json_string(b, st.kind);
+    else                 buf_puts(b, "null");
     buf_printf(b, ",\"particles\":%d,\"pending\":%d,\"budget\":%d,"
                   "\"asleep\":%s,\"substeps\":%d,\"step_ms\":%.2f,\"drawn\":%s}\n",
                st.particles, st.pending, st.budget, st.asleep ? "true" : "false",

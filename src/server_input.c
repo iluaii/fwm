@@ -559,6 +559,27 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
         }
     }
     
+    /* The liquid form owns the keyboard while it is up: a name is typed into
+     * it, and a key that also ran a bind would be a letter that did two
+     * things. Releases of what it took go with them. */
+    if (server_liquid_form_open(server)) {
+        if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+            uint32_t kc = event->keycode + 8;
+            xkb_keysym_t sym = xkb_state_key_get_one_sym(keyboard->wlr_keyboard->xkb_state, kc);
+            char utf8[16] = "";
+            xkb_state_key_get_utf8(keyboard->wlr_keyboard->xkb_state, kc, utf8, sizeof(utf8));
+            if (event->keycode < sizeof(server->key_consumed))
+                server->key_consumed[event->keycode] = 1;
+            server_liquid_form_key(server, sym, utf8);
+            return;
+        }
+        if (event->keycode < sizeof(server->key_consumed) &&
+            server->key_consumed[event->keycode]) {
+            server->key_consumed[event->keycode] = 0;
+            return;
+        }
+    }
+
     /* Escape puts a bucket down, or closes the liquids menu. Only Escape: the
      * rest of the keyboard stays the keyboard, so gravity can be switched off
      * under a stream in mid pour. */
