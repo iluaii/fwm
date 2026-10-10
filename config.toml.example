@@ -1495,6 +1495,8 @@ dir = "~/Pictures"
 # Match on app_id and/or title with POSIX extended regexes — the same anchored
 # style as Hyprland's `class:^(mpv)$`. A rule with both matchers needs both to
 # hit; rules are applied in file order, so a later one wins field by field.
+# Case counts: Firefox is "Firefox" on some distributions and "firefox" on
+# others, hence "^[Ff]irefox$" below. `fwmctl windows` shows the exact app_id.
 #
 # Properties: nocollide, pin (booleans) and desktop (0..9), plus what the
 # window is MADE of:
@@ -1541,11 +1543,11 @@ dir = "~/Pictures"
 #pin   = true
 #
 #[[rule]]
-#app_id  = "^firefox$"
+#app_id  = "^[Ff]irefox$"
 #opacity = 0.9             # the wallpaper shows through the whole window
 #
 #[[rule]]
-#app_id   = "^firefox$"
+#app_id   = "^[Ff]irefox$"
 #bg_alpha = 0.6            # ... or only through the page's background
 #blur     = true           # ... and frosted, so the text stays readable
 #

@@ -194,7 +194,7 @@ hardness  = 3.0        # ... but hits like a brick
 
 | Key | Meaning |
 |---|---|
-| `app_id`, `title` | Matchers. At least one is required, or the rule is reported as useless. |
+| `app_id`, `title` | Matchers: regular expressions, and case-sensitive — Firefox calls itself `Firefox` on some distributions and `firefox` on others, so `"^[Ff]irefox$"` catches both. `fwmctl windows` shows the exact app_id. At least one is required, or the rule is reported as useless. |
 | `mass` | Multiplies the desktop's `mass_density` for this window. 8 = heavy, 0.1 = skittish. |
 | `gravity` | Multiplies the desktop's gravity. 0 = weightless, negative = floats up. |
 | `bounce` | Restitution, absolute 0..1 — it replaces the desktop's, not multiplies it. |
