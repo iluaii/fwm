@@ -85,8 +85,20 @@
  * the particles' jostle was a ratchet that only ever pushed them apart, and
  * the same pool settled a sixth DEEPER, and kept rising. Gentle, because
  * against the surface tension, which packs the edge of a drop, a hard shove
- * blows particles off it. */
-#define DRIFT_FIX 0.05f
+ * blows particles off it.
+ *
+ * A rate per second, not a share per step. As a share per step it was a
+ * velocity of share/h, and h is chosen from the fastest particle — so the
+ * spreading sped the particles up, which shortened the step, which made the
+ * spreading faster still. A big pour landing in a pool near the floor ran
+ * that loop up to tens of thousands of px/s and the ceiling of steps, and the
+ * liquid went into slow motion; and the same pool swelled at a different
+ * speed on every refresh rate. Per second, a shorter step spreads less per
+ * step and exactly as much per second. The old share came to 3 to 9 a
+ * second depending on the tension and the monitor; 4.5 is low in that range,
+ * because the swelling is momentum too — at 7.5 it shoved a strip of
+ * tensionless liquid poured in overlapping blobs halfway round. */
+#define DRIFT_RATE 4.5f   /* per second */
 
 /* The pressure solve stops when nothing is left over bigger than this
  * fraction of what it started with. Tighter is invisible; looser lets a deep
@@ -872,7 +884,7 @@ static bool release_walls(FwmLiquid *l) {
 
 /* What the pressure has to cancel in each fluid cell: the flow into or out of
  * it — plus a little, where the particles have drifted, so the cell evens
- * them out again (DRIFT_FIX). The unknown is pressure times h (density is 1),
+ * them out again (DRIFT_RATE). The unknown is pressure times h (density is 1),
  * which makes the update after the solve a plain difference. */
 static void build_rhs(FwmLiquid *l, float h) {
     const int nx = l->nx, ny = l->ny;
@@ -890,7 +902,7 @@ static void build_rhs(FwmLiquid *l, float h) {
                        && l->type[c - l->cw] == FLUID && l->type[c + l->cw] == FLUID;
             float spread = 0.0f;
             if (over > 0.0f || inside)
-                spread = fmaxf(fminf(DRIFT_FIX * over, 0.5f), -0.5f) / h;
+                spread = fmaxf(fminf(DRIFT_RATE * h * over, 0.5f), -0.5f) / h;
             l->rhs[c] = -(div - spread) * dx * dx;
         }
 }

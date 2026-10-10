@@ -130,6 +130,26 @@ static void test_pour(void) {
     /* Twice the particles, twice the area: sqrt 2 the width. */
     CHECK_DBL(s.x1 - s.x0, 2 * r * sqrt(2.0), 0.15 * 2 * r * sqrt(2.0));
 
+    CASE("a big pour into a pool by the floor swells it, and nothing runs away");
+    /* The second blob is pulled up off the floor onto the first, and the
+     * cells they share start twice as full as liquid can be. Spreading them
+     * once sped the particles up, which shortened the step, which sped the
+     * spreading up — 43000 px/s and every step a frame may take. */
+    FwmLiquid *big = make(1920, 1080, 60, 30);
+    liquid_pour(big, 960, 700, 10000, 0, 0);
+    liquid_pour(big, 960, 900, 10000, 0, 0);
+    double fastest = 0;
+    int most_steps = 0;
+    for (int f = 0; f < 60; f++) {
+        liquid_step(big, DT, 0, G);
+        if (liquid_max_speed(big) > fastest) fastest = liquid_max_speed(big);
+        if (liquid_last_substeps(big) > most_steps) most_steps = liquid_last_substeps(big);
+    }
+    CHECK(fastest < 8000);
+    CHECK(most_steps < 12);
+    CHECK_INT(shape_of(big, 1920, 1080).bad, 0);
+    liquid_destroy(big);
+
     CASE("a blob poured against a wall is pulled inside it");
     liquid_clear(l);
     CHECK_INT(liquid_count(l), 0);
