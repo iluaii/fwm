@@ -141,12 +141,15 @@ Rectangle {
                 surface: root.surface; foreground: root.foreground; fill: root.fill
                 onClicked: keyboard.currentLayout = (keyboard.currentLayout + 1) % keyboard.layouts.length
             }
+            // Which session the login will start. Shown even when there is
+            // only one, so the screen says what is about to run; a click
+            // walks through the others when there are any.
             Pill {
-                visible: sessionModel.rowCount() > 1
-                text: stage.sessionsSeen >= 0 ? (stage.sessionNames[stage.sessionIndex] || "") : ""
-                clickable: true
+                visible: stage.sessionsSeen > 0
+                text: stage.sessionsSeen > 0 ? (stage.sessionNames[stage.sessionIndex] || "") : ""
+                clickable: stage.sessionsSeen > 1
                 surface: root.surface; foreground: root.foreground; fill: root.fill
-                onClicked: stage.sessionIndex = (stage.sessionIndex + 1) % sessionModel.rowCount()
+                onClicked: stage.sessionIndex = (stage.sessionIndex + 1) % stage.sessionsSeen
             }
             Pill {
                 visible: sddm.canSuspend
