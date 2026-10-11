@@ -17,6 +17,7 @@
  * renderer draws), and the two timers that pace the compositor when nothing
  * else is damaging the scene. Split out of server.c; see server_internal.h. */
 #include "server.h"
+#include "server_journal.h"
 #include "ui/toast.h"
 #include "view.h"
 #include "physics.h"
@@ -2043,6 +2044,11 @@ static int physics_tick_cb(void *data) {
      * the old unconditional schedule used to provide: should any path ever
      * change what is on screen without damaging the scene, the screen is stale
      * for at most one beat instead of forever. */
+    /* The history looks at the windows as often as this runs, at its own
+     * pace — which is why it is here and not in a timer of its own: when
+     * nothing moves this runs at the heartbeat, and there is nothing to see. */
+    server_journal_look(server);
+
     int busy = server_is_busy(server);
     server_schedule_frames(server);
 

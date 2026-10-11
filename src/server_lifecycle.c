@@ -16,6 +16,7 @@
  * it all down again in the reverse order. Split out of server.c; see
  * server_internal.h. */
 #include "server.h"
+#include "server_journal.h"
 #include "bsp.h"
 #include "clipboard.h"
 #include "view.h"
@@ -813,6 +814,9 @@ bool server_init(FwmServer *server, bool debug) {
      * Failure is non-fatal: fwm works without it, just not scriptably. */
     server->ipc = ipc_create(server, socket);
 
+    /* The session's history, named after the display for the same reason. */
+    server_journal_start(server, socket);
+
     server->running = 1;
     return true;
 }
@@ -1014,4 +1018,7 @@ void server_destroy(FwmServer *server) {
 
     wl_display_destroy_clients(server->wl_display);
     wl_display_destroy(server->wl_display);
+    /* Last: the clients going above unmapped their windows, and each of those
+     * was written down as closed, at the moment it really closed. */
+    server_journal_finish(server);
 }

@@ -14,6 +14,7 @@
 
 #include "view_internal.h"
 #include "shadow.h"
+#include "server_journal.h"
 #include "rotate.h"
 #include "snapshot.h"
 #include "expo.h"
@@ -696,8 +697,10 @@ static void handle_set_title(struct wl_listener *listener, void *data) {
     /* Clients announce a title before mapping too; reporting those would have
      * a subscriber hear about windows it was never told had opened. */
     struct wlr_surface *surface = view_surface(view);
-    if (surface && surface->mapped)
+    if (surface && surface->mapped) {
         ipc_emit_window(view->server->ipc, FWM_EV_WINDOW_TITLE, view);
+        server_journal_title(view->server, view);
+    }
 }
 
 /* ── X11 (Xwayland) handlers ──────────────────────────────────────────── */
@@ -1307,7 +1310,9 @@ void view_map(FwmView *view) {
     server_request_tray_redraw(view->server);
 
     /* Last, so a subscriber that reacts by dispatching an action finds the
-     * window already placed, tiled and focused rather than half-mapped. */
+     * window already placed, tiled and focused rather than half-mapped — and
+     * the history writes down where it was placed, not where it was asked for. */
+    server_journal_map(view->server, view);
     ipc_emit_window(view->server->ipc, FWM_EV_WINDOW_OPEN, view);
 }
 
@@ -1315,6 +1320,7 @@ void view_unmap(FwmView *view) {
     /* First, while the window is still whole: below this line its body, its
      * tile and its title are being taken apart. */
     ipc_emit_window(view->server->ipc, FWM_EV_WINDOW_CLOSE, view);
+    server_journal_unmap(view->server, view);
 
     foreign_view_unmap(view);
     /* A card on the desktop strip stands in for this window; it must go with

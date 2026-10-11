@@ -142,6 +142,20 @@ _Static_assert(FWM_DESKTOPS <= 31, "FWM_DESKTOPS must fit the tray's urgent bitm
 #define EXPO_TIME_SLIDE_MS  240.0
 #define EXPO_TIME_SLIDE_PX  48.0
 
+/* The session's history. Windows are looked at this often for where they have
+ * got to; a window on the move has a point of its way written down at most
+ * this often — five a second, enough for a timelapse to follow a drag rather
+ * than draw a straight line from where it began to where it ended; and one
+ * that has not moved for this long has come to rest. */
+#define JOURNAL_LOOK_MS     100
+#define JOURNAL_PATH_MS     200
+#define JOURNAL_REST_MS     300
+/* ...and only once it has gone this far since the last point. A hand or a
+ * throw covers it in a frame; a window drifting in zero-g by a pixel or two a
+ * tick would otherwise write five lines a second for as long as it drifts, and
+ * push everything else out of the history. */
+#define JOURNAL_PATH_PX     6
+
 /* ── expo, the desktop strip ──────────────────────────────────────────── */
 /* Resolution the strip's snapshots are taken at, as a fraction of the real
  * thing. Ten screen-sized cards at 1:1 is most of a hundred megabytes of

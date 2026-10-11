@@ -200,6 +200,8 @@ set(SOURCES
     src/server_config.c
     src/server_desktop.c
     src/server_actions.c
+    src/server_journal.c
+    src/journal.c
     src/ui/cairo_overlay.c
     src/ui/tray.c
     src/ui/modes.c
@@ -388,6 +390,12 @@ if(FWM_TESTS)
     add_executable(test_ipc_events tests/test_ipc_events.c src/ipc_events.c)
     target_include_directories(test_ipc_events PRIVATE src tests)
 
+    # The session's history: kept, read back after a crash with the windows
+    # that went down with the compositor closed when it was last heard from,
+    # and bounded in memory and on disk. Plain C over a temporary file.
+    add_executable(test_journal tests/test_journal.c src/journal.c)
+    target_include_directories(test_journal PRIVATE src tests)
+
     # The drag wobble's lattice is springs over doubles. It only ever runs with
     # a mouse button held down, which is exactly when nobody can inspect it —
     # so it is asserted here instead.
@@ -512,6 +520,7 @@ if(FWM_TESTS)
     add_test(NAME ram        COMMAND test_ram)
     add_test(NAME wav        COMMAND test_wav)
     add_test(NAME stats      COMMAND test_stats)
+    add_test(NAME journal    COMMAND test_journal)
     add_test(NAME launcher   COMMAND test_launcher)
     add_test(NAME theme      COMMAND test_theme)
 endif()

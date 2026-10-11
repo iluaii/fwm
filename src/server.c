@@ -19,6 +19,7 @@
  * server_lifecycle.c, the layout server_tiling.c; see server_internal.h for the
  * whole map. */
 #include "server.h"
+#include "server_journal.h"
 #include "view.h"
 #include "physics.h"
 #include "bsp.h"
@@ -276,6 +277,7 @@ void server_focus_view(FwmServer *server, struct FwmView *view) {
         server_keyboard_clear(server);
     }
     ipc_emit_window(server->ipc, FWM_EV_WINDOW_FOCUS, view);
+    server_journal_focus(server, view);
 
     /* prev_focus == view when the keyboard is being taken back from an
      * unmanaged surface: the window never stopped being the focused one, so

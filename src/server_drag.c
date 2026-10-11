@@ -20,6 +20,7 @@
  * swapping two tiles — and all of it ends by handing momentum to the
  * simulation, which is why it belongs together and away from the plumbing. */
 #include "server.h"
+#include "server_journal.h"
 #include "view.h"
 #include "physics.h"
 #include "bsp.h"
@@ -1284,6 +1285,7 @@ void server_drag_release(FwmServer *server, double lx, double ly) {
                     } else if (!pb->floating) {
                         physics_push_overlapping(&server->physics, view->id, 280.0);
                         physics_throw_body(&server->physics, view->id, server->interactive.vx, server->interactive.vy);
+                        server_journal_throw(server, view);
                     }
                 }
             }

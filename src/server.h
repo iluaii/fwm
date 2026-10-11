@@ -647,6 +647,11 @@ typedef struct FwmServer {
     /* Control socket (src/ipc.h). NULL if it could not be created. */
     struct FwmIpc *ipc;
 
+    /* The session's history (src/journal.h, kept by src/server_journal.c),
+     * and when the windows were last looked at for where they had got to. */
+    struct FwmJournal *journal;
+    int64_t journal_looked_ms;
+
     /* Session save/restore bookkeeping (src/session.c); opaque here. Not to be
      * confused with `session` above, which is the libseat/VT session. */
     void *session_state;

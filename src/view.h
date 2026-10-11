@@ -23,6 +23,7 @@
 #include <stdbool.h>
 
 #include "droplet.h"
+#include "journal.h"
 #include "wobble.h"
 #include "sun.h"
 
@@ -161,6 +162,16 @@ typedef struct FwmView {
     const void *border_palette;   /* const FwmTheme *, kept opaque here */
     unsigned border_palette_gen;
     int border_palette_focused;
+
+    /* This window in the session's history (src/server_journal.c): its number
+     * there, 0 while it is not mapped; where it was when last looked at and
+     * when that last changed; where it was last written down and when; and
+     * whether it is on the move — 1 moving, 2 moving with points of its way
+     * already written down. */
+    uint32_t journal_wid;
+    JournalGeom journal_seen, journal_kept;
+    int64_t journal_changed_ms, journal_kept_ms;
+    int journal_moving;
 
     /* The shadow this window casts from wherever the sun is, as nodes at the
      * bottom of the same tree and for the same reason. NULL when [sun] is off
