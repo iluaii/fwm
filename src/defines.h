@@ -129,6 +129,19 @@ _Static_assert(FWM_DESKTOPS <= 31, "FWM_DESKTOPS must fit the tray's urgent bitm
 #define EXPO_HINT_LINGER_S  0.8
 #define EXPO_HINT_SLIDE     14.0   /* 1/s, exponential like everything else */
 
+/* The strip's time view. The page comes up from below and fades in, and goes
+ * back the same way a little quicker — leaving should never be the slow half.
+ * The section pill follows it a beat behind (LAG, as a fraction of the way),
+ * so the two read as arriving rather than as switched on. A change of section
+ * slides the words SLIDE_PX across the page while the pill's accent travels
+ * to the new name. */
+#define EXPO_TIME_OPEN_MS   280.0
+#define EXPO_TIME_CLOSE_MS  200.0
+#define EXPO_TIME_RISE_PX   40.0
+#define EXPO_TIME_TABS_LAG  0.25
+#define EXPO_TIME_SLIDE_MS  240.0
+#define EXPO_TIME_SLIDE_PX  48.0
+
 /* ── expo, the desktop strip ──────────────────────────────────────────── */
 /* Resolution the strip's snapshots are taken at, as a fraction of the real
  * thing. Ten screen-sized cards at 1:1 is most of a hundred megabytes of

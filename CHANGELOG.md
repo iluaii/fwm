@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A time view in the desktop strip
+
+The strip has a **time** button in its bottom-left corner, and `t` does the
+same: a page over the strip about the session rather than the desktops, with a
+log, stats and a timelapse picked from a pill along the bottom. Only the page
+so far — nothing is recorded yet, and each section says what it will hold.
+
 ### A sponge that dries every liquid
 
 The liquids menu has a dry sponge on its caption line, left of the +: one

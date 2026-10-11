@@ -37,6 +37,7 @@ static const struct hint base[] = {
     { "Super+drag",  "move window" },
     { "right-click", "menu" },
     { "x",           "ring" },
+    { "t",           "time" },
     { NULL, NULL },
 };
 
@@ -49,6 +50,7 @@ static const struct hint flight_set[] = {
     { "wheel",            "in / out" },
     { "↑ ↓",              "tilt" },
     { "x",                "ring" },
+    { "t",                "time" },
     { NULL, NULL },
 };
 

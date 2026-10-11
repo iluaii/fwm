@@ -25,7 +25,7 @@
 #include <wlr/types/wlr_scene.h>
 #include <wlr/util/box.h>
 
-/* The desktop strip, shared between the four files it is split across:
+/* The desktop strip, shared between the files it is split across:
  *
  *   expo.c        opening, closing, the frame tick, and the camera policy
  *                 that says when the view may leave its canonical seat
@@ -34,6 +34,8 @@
  *   expo_cards.c  the pictures — taking them, keeping the front one alive,
  *                 and following windows that come and go
  *   expo_draw.c   turning all that into a frame, on either rendering path
+ *   expo_input.c  the keys, the pointer and the wheel
+ *   expo_time.c   the time view: the session along the other axis
  *
  * Nothing here is public: expo.h is what the rest of the compositor sees. */
 
@@ -195,6 +197,30 @@ struct FwmExpo {
      * long it has left before it takes itself away. */
     double hints_reveal, hints_reveal_target, hints_timer;
     ExpoItem *menu_item;
+
+    /* The time view: the button in the bottom-left corner that opens it, and
+     * — only while it is up, or on its way out — the page, the section pill and
+     * the words of the section on the page. All in layer_overlay with the
+     * hints, for the hints' reason. */
+    struct wlr_scene_buffer *time_button, *time_page, *time_tabs;
+    /* The section's words, and while a change of section is sliding past, the
+     * words of the one before it on their way out. */
+    struct wlr_scene_buffer *time_content, *time_content_old;
+    int time_open;                 /* has the input; the pictures may lag it */
+    int time_section;              /* EXPO_TIME_LOG and on, ui/expo_time.h */
+    int time_tab_hover;            /* the section under the cursor, or none */
+    double time_reveal, time_reveal_target;   /* the button's slide, as hints_* */
+    /* How far the page has come up, 0..1, linear; it runs back down when the
+     * view closes, and turns round if it is opened again on the way. */
+    double time_show;
+    /* The latest change of section: how far it has got (0..1, 1 at rest),
+     * which way it went, where the pill's accent left from, and where the
+     * outgoing words were when they started to leave. */
+    double time_slide;
+    int time_slide_dir;
+    double time_tab_from;
+    double time_old_x0, time_old_a0;
+    int time_page_x, time_page_y, time_tabs_x, time_tabs_y;   /* at rest */
 };
 
 
@@ -262,5 +288,23 @@ void expo_set_world_visible(FwmServer *server, FwmOutput *out, bool visible);
 /* ── expo_input.c ─────────────────────────────────────────────────────── */
 void expo_clamp_pan(FwmExpo *e);
 void expo_drag_to(FwmExpo *e, double lx, double ly);
+
+/* ── expo_time.c ──────────────────────────────────────────────────────── */
+/* The button goes up with the strip and down with it; the view it opens is a
+ * page over the strip, opened and closed from inside it. */
+void expo_time_button_create(FwmExpo *e);
+void expo_time_open(FwmExpo *e);
+void expo_time_close(FwmExpo *e);
+void expo_time_toggle(FwmExpo *e);
+void expo_time_teardown(FwmExpo *e);
+void expo_time_tick(FwmExpo *e, double dt);
+bool expo_time_animating(FwmExpo *e);
+/* Asked first by the strip's own handlers. Same answers as theirs: the key
+ * entry is true when it ACTED, the pointer entries when they consumed the
+ * event — which, while the view is open, is every event. */
+bool expo_time_handle_key(FwmExpo *e, xkb_keysym_t sym);
+bool expo_time_handle_motion(FwmExpo *e, double lx, double ly);
+bool expo_time_handle_button(FwmExpo *e, uint32_t button, bool pressed,
+                             double lx, double ly);
 
 #endif /* FWM_EXPO_INTERNAL_H */

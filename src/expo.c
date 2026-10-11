@@ -98,6 +98,7 @@ static void expo_teardown(FwmServer *server) {
     server->expo = NULL;    /* before anything else: nothing may re-enter here */
 
     expo_menu_close(e);
+    expo_time_teardown(e);
     if (e->hints) cairo_overlay_destroy(e->hints);
     for (int i = 0; i < e->n_items; i++) {
         if (e->items[i].tex) wlr_texture_destroy(e->items[i].tex);
@@ -138,6 +139,7 @@ bool expo_animating(FwmServer *server) {
               || fabs(e->pan - e->pan_target) > 0.5
               || fabs(e->seam - e->seam_target) > 0.001
               || fabs(e->hints_reveal - e->hints_reveal_target) > 0.002
+              || expo_time_animating(e)
               || fabs(e->spin) > EXPO_SPIN_MIN
               || fabs(e->tilt - e->tilt_target) > 0.0005
               || fabs(e->dist - e->dist_target) > 0.0005);
@@ -246,12 +248,18 @@ static void expo_open(FwmServer *server) {
     e->hints_reveal = e->hints_reveal_target = 1.0;
     e->hints_timer = EXPO_HINT_SHOW_S;
 
+    /* The way to the time view, in the corner the hints leave free. */
+    expo_time_button_create(e);
+
     /* FWM_TEST_ORRERY=1 opens straight into the orrery. Its own key is `o` and
      * a nested run cannot be sent one — the headless backend has no keyboard —
      * so without this the ring, the star in the middle of it and everything
      * that happens when the strip closes over the top of them can only be
      * looked at by hand. Same bargain as FWM_TEST_ORBIT above. */
     if (getenv("FWM_TEST_ORRERY")) expo_orrery_toggle(server);
+    /* FWM_TEST_TIME=1 opens straight onto the time view, for the same reason:
+     * `t` cannot be sent to a headless run either. */
+    if (getenv("FWM_TEST_TIME")) expo_time_open(e);
 }
 
 void expo_close(FwmServer *server, int desktop) {
@@ -271,6 +279,7 @@ void expo_close(FwmServer *server, int desktop) {
     e->hover = NULL;
     e->drag = NULL;
     expo_menu_close(e);
+    expo_time_close(e);
 
     /* Put the live camera on the destination NOW, while it is still hidden:
      * the closing animation is written against camera_x (expo_center), so the
@@ -825,7 +834,12 @@ void expo_tick(FwmServer *server, double dt) {
      * once there has been time to read them, and come back when the cursor
      * goes looking for them along the bottom. */
     if (e->hints) {
-        if (!e->leaving) {
+        /* Not while the time view is up: its section pill stands where the
+         * bar does, and the strip's keys do nothing on its page. */
+        if (e->time_open) {
+            e->hints_reveal_target = 0.0;
+            e->hints_timer = 0.0;
+        } else if (!e->leaving) {
             /* The cursor in THIS monitor's frame: the bar is along the bottom
              * of the strip's screen, not of the layout. */
             if (expo_hints_hit(e->out->box.height,
@@ -845,6 +859,7 @@ void expo_tick(FwmServer *server, double dt) {
         expo_hints_place(e->hints, e->out->box.width, e->out->box.height,
                          e->hints_reveal);
     }
+    expo_time_tick(e, dt);
 
     /* Read from the config every frame rather than tracked: `x`, a `fwmctl set`
      * and a config reload all mean the same thing here, and none of them has to

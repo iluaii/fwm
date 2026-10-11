@@ -462,10 +462,17 @@ in a browser still works.
 | `↑` `↓` | lift the camera over the ring (far view only) |
 | `PgUp` `PgDn` | closer / further (far view only) |
 | `Return`, knob press | enter the desktop you are looking at |
+| `t` | the time view (the **time** button in the bottom-left corner does the same) |
 | `Escape` | leave the strip |
 
 Windows can be dragged between cards with the mouse, and clicking a card enters
 that desktop.
+
+The time view is a page over the strip about the session rather than the
+desktops, in three sections picked by the pill along the bottom: **log**,
+**stats** and **timelapse**. They are empty for now — nothing is recorded yet.
+Inside it `←` `→` (or `Tab`) step between the sections, `1` `2` `3` jump to one,
+and `t` or `Escape` go back to the strip.
 
 The knob does here what it does in [the radial menu](#the-radial-menu) — turn to
 choose, press to commit — and on the same terms: while the strip is up those

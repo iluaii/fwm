@@ -153,6 +153,10 @@ bool expo_goto_desktop(FwmServer *server, int d) {
 bool expo_handle_key(FwmServer *server, xkb_keysym_t sym) {
     FwmExpo *e = server->expo;
     if (!e) return false;
+    /* The time view first: open, it has the keyboard to itself; closed, it
+     * only wants its `t`. */
+    if (e->time_open) return expo_time_handle_key(e, sym);
+    if (expo_time_handle_key(e, sym)) return true;
 
     switch (sym) {
     case XKB_KEY_Escape:
@@ -300,6 +304,8 @@ bool expo_handle_motion(FwmServer *server, double lx, double ly) {
         return true;
     }
 
+    if (expo_time_handle_motion(e, lx, ly)) return true;
+
     if (e->drag) {
         expo_drag_to(e, lx, ly);
     } else {
@@ -392,6 +398,8 @@ bool expo_handle_button(FwmServer *server, uint32_t button, bool pressed,
         }
         return true;
     }
+
+    if (expo_time_handle_button(e, button, pressed, lx, ly)) return true;
 
     struct wlr_keyboard *kb = wlr_seat_get_keyboard(server->seat);
     uint32_t mods = kb ? wlr_keyboard_get_modifiers(kb) : 0;
@@ -492,6 +500,8 @@ bool expo_handle_button(FwmServer *server, uint32_t button, bool pressed,
 bool expo_handle_axis(FwmServer *server, double delta) {
     FwmExpo *e = server->expo;
     if (!e) return false;
+    /* Not the strip's, behind the page. */
+    if (e->time_open) return true;
     if (e->orbiting) {
         /* Mid-flight the wheel is the one thing left to ask for: closer or
          * further. Panning as well would fight the hand already turning it. */

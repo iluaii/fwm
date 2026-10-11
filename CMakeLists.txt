@@ -165,6 +165,7 @@ set(SOURCES
     src/expo_cards.c
     src/expo_draw.c
     src/expo_input.c
+    src/expo_time.c
     src/wobble.c
     src/droplet.c
     src/layer.c
@@ -218,6 +219,7 @@ set(SOURCES
     src/ui/logo.c
     src/ui/expo_menu.c
     src/ui/expo_hints.c
+    src/ui/expo_time.c
 )
 
 # wlroots ships the C headers for the wlr-* protocols but not the generated
