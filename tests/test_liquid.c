@@ -744,6 +744,119 @@ static void test_bodies(void) {
     liquid_destroy(l);
 }
 
+/* ── several liquids ─────────────────────────────────────────────────── */
+
+/* Of liquid `kind`: how many particles, their mean height, and the share of
+ * them above `y`. */
+static void kind_stats(const FwmLiquid *l, unsigned kind, double y, int *n, double *mean,
+                       double *above) {
+    int st, sk, c = 0, up = 0;
+    double sum = 0.0;
+    const float *p = liquid_positions(l, &st);
+    const unsigned *k = liquid_kinds_of(l, &sk);
+    for (int i = 0; i < liquid_count(l); i++) {
+        if (k[i * sk] != kind) continue;
+        c++;
+        sum += p[i * st + 1];
+        up += p[i * st + 1] < y;
+    }
+    *n = c;
+    *mean = c ? sum / c : 0.0;
+    *above = c ? (double)up / c : 0.0;
+}
+
+static void test_layers(void) {
+    const double W = 1200, H = 700;
+    const LiquidMaterial oil = { .viscosity = 60, .density = 0.6 };
+    const LiquidMaterial mercury = { .viscosity = 30, .density = 13.0 };
+
+    CASE("a lighter liquid poured under a heavier one comes up through it");
+    FwmLiquid *l = make(W, H, 60, 30);
+    liquid_set_kind(l, 1, &oil);
+    int no = 0, nw = 0;
+    for (int k = 0; k < 4; k++) no += liquid_pour_kind(l, 1, 150 + k * 300, 560, 1200, 0, 0);
+    run(l, 2.0, 0, G);
+    for (int k = 0; k < 4; k++) nw += liquid_pour(l, 150 + k * 300, 200, 1500, 0, 0);
+    run(l, 25.0, 0, G);
+    /* The water's own depth, from the bottom: the oil above that. */
+    double interface = H - nw * SPACING * SPACING / W;
+    int n;
+    double mo, mw, up;
+    kind_stats(l, 1, interface + SPACING, &n, &mo, &up);
+    CHECK_INT(n, no);
+    CHECK(up > 0.9);
+    kind_stats(l, 0, interface + SPACING, &n, &mw, &up);
+    CHECK_INT(n, nw);
+    CHECK(up < 0.1);
+    CHECK(mo < mw);
+    CHECK_INT(shape_of(l, W, H).bad, 0);
+    liquid_destroy(l);
+
+    CASE("a heavy liquid poured onto water sinks to the bottom of it");
+    l = make(W, H, 60, 30);
+    liquid_set_kind(l, 2, &mercury);
+    nw = 0;
+    for (int k = 0; k < 4; k++) nw += liquid_pour(l, 150 + k * 300, 400, 1500, 0, 0);
+    run(l, 2.0, 0, G);
+    int nm = liquid_pour_kind(l, 2, 600, 150, 1500, 0, 0);
+    run(l, 15.0, 0, G);
+    double floor_layer = H - nm * SPACING * SPACING / W;
+    kind_stats(l, 2, floor_layer - 2 * SPACING, &n, &mo, &up);
+    CHECK_INT(n, nm);
+    CHECK(up < 0.1);
+    kind_stats(l, 0, floor_layer - 2 * SPACING, &n, &mw, &up);
+    CHECK(up > 0.9);
+    CHECK_INT(shape_of(l, W, H).bad, 0);
+    liquid_destroy(l);
+
+    CASE("a window between the two densities floats on the edge between them");
+    /* 0.8, between oil's 0.6 and water's 1: wholly in the liquids, it hangs
+     * across the edge, half in each — to the grid's cell, which the small
+     * difference between the two makes worth some tens of px here: what the
+     * window floats on is only 0.4 heavier than what it sinks through, and a
+     * cell's worth of push on its faces moves it 2.5 times as far as in water
+     * alone. It comes out sitting in the water by a few px rather than half
+     * its height; that it stops at the edge is the law, and what is held. */
+    l = make(W, H, 60, 30);
+    liquid_set_kind(l, 1, &oil);
+    nw = no = 0;
+    for (int k = 0; k < 4; k++) nw += liquid_pour(l, 150 + k * 300, 450, 1500, 0, 0);
+    run(l, 2.0, 0, G);
+    for (int k = 0; k < 4; k++) no += liquid_pour_kind(l, 1, 150 + k * 300, 150, 1500, 0, 0);
+    settle(l, 30);
+    interface = H - nw * SPACING * SPACING / W;
+    LiquidSolid raft = { .id = 12, .x = 450, .y = interface - 140, .w = 300, .h = 100,
+                         .density = 0.8 };
+    double sum = 0;
+    int f, frames = 0;
+    for (f = 0; f < 1200; f++) {
+        body_frame(l, &raft, W, H, G);
+        if (f < 720) continue;
+        sum += raft.y + raft.h - interface;
+        frames++;
+    }
+    /* Through the oil and onto the water: its top under the oil's surface,
+     * its bottom no further than three cells either side of where the two
+     * meet. */
+    double under = sum / frames;
+    double oil_top = interface - no * SPACING * SPACING / W;
+    CHECK(raft.y > oil_top);
+    CHECK(fabs(under) < 36.0);
+    CHECK_INT(inside(l, raft, 1.0), 0);
+    liquid_destroy(l);
+
+    CASE("taking a liquid out leaves the others");
+    l = make(W, H, 60, 30);
+    liquid_set_kind(l, 1, &oil);
+    nw = liquid_pour(l, 400, 300, 1000, 0, 0);
+    no = liquid_pour_kind(l, 1, 800, 300, 1000, 0, 0);
+    CHECK_INT(liquid_count_kind(l, 1), no);
+    CHECK_INT(liquid_remove_kind(l, 1), no);
+    CHECK_INT(liquid_count_kind(l, 1), 0);
+    CHECK_INT(liquid_count(l), nw);
+    liquid_destroy(l);
+}
+
 /* ── threads ─────────────────────────────────────────────────────────── */
 
 static void test_threads(void) {
@@ -807,6 +920,7 @@ int main(void) {
         test_walls();
         test_solids();
         test_bodies();
+        test_layers();
     }
     return t_report("test_liquid");
 }

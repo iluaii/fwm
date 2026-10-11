@@ -31,7 +31,12 @@
 
 #define MENU_W        320
 #define MENU_PAD      12.0
+/* A row, and a row when the list is long — the name and the line under it
+ * closer together — so a list of a couple of dozen liquids still fits a
+ * 1080p screen under the tray. */
 #define MENU_ROW_H    46.0
+#define MENU_ROW_H_LONG 36.0
+#define LONG_LIST     12
 /* The caption over the rows — with the + that makes a new liquid at its right
  * — and the line under them that says what the buttons do: the bucket takes
  * the pointer over, and a mode that does not say how to leave it is a trap. */
@@ -39,7 +44,9 @@
 #define FOOTER_H      28.0
 #define ICON_W        28.0     /* the gear's and the bin's columns, and the + */
 
-#define MENU_H_FOR(n) ((int)(MENU_PAD * 2 + CAPTION_H + FOOTER_H + MENU_ROW_H * ((n) > 0 ? (n) : 1)))
+static double row_h(int count) { return count > LONG_LIST ? MENU_ROW_H_LONG : MENU_ROW_H; }
+
+#define MENU_H_FOR(n) ((int)(MENU_PAD * 2 + CAPTION_H + FOOTER_H + row_h(n) * ((n) > 0 ? (n) : 1)))
 
 #define ANIM_EPS 0.002
 
@@ -57,7 +64,7 @@ void liquids_menu_size(int count, int *w, int *h) {
     if (h) *h = MENU_H_FOR(count);
 }
 
-static double row_y(int row) { return MENU_PAD + CAPTION_H + MENU_ROW_H * row; }
+static double row_y(int row, int count) { return MENU_PAD + CAPTION_H + row_h(count) * row; }
 static double bin_x(void)  { return MENU_W - MENU_PAD - ICON_W; }
 static double gear_x(void) { return MENU_W - MENU_PAD - 2.0 * ICON_W; }
 
@@ -69,8 +76,8 @@ int liquids_menu_hit(int count, double x, double y, int *part) {
         return -1;
     }
     for (int r = 0; r < count; r++) {
-        double ry = row_y(r);
-        if (y < ry || y >= ry + MENU_ROW_H) continue;
+        double ry = row_y(r, count);
+        if (y < ry || y >= ry + row_h(count)) continue;
         if (part) *part = x >= bin_x()  ? LIQUIDS_PART_BIN
                         : x >= gear_x() ? LIQUIDS_PART_GEAR : LIQUIDS_PART_ROW;
         return r;
@@ -196,7 +203,9 @@ static void draw_menu(cairo_t *cr, int w, int h, void *user) {
 
     for (int r = 0; r < st->count; r++) {
         const LiquidsMenuItem *it = &st->item[r];
-        double ry = row_y(r);
+        const double rh = row_h(st->count);
+        const bool tight = rh < MENU_ROW_H;
+        double ry = row_y(r, st->count);
         double rev = g_anim.live ? row_reveal(r, st->count) : 1.0;
         if (rev <= 0.001) continue;
         cairo_push_group(cr);
@@ -206,43 +215,44 @@ static void draw_menu(cairo_t *cr, int w, int h, void *user) {
         bool hover = r == st->hover;
         if (hover) {
             cairo_set_source_rgba(cr, thm->accent[0], thm->accent[1], thm->accent[2], 0.14);
-            cairo_rectangle(cr, MENU_PAD * 0.5, ry + 2.0, MENU_W - MENU_PAD, MENU_ROW_H - 4.0);
+            cairo_rectangle(cr, MENU_PAD * 0.5, ry + 2.0, MENU_W - MENU_PAD, rh - 4.0);
             cairo_fill(cr);
         }
 
         /* The drop in the liquid's own colour: that IS the swatch. */
         double icon_s = 18.0;
         cairo_set_source_rgb(cr, it->color[0], it->color[1], it->color[2]);
-        modes_icon(cr, MODE_ICON_LIQUID, MENU_PAD, ry + (MENU_ROW_H - icon_s) / 2.0, icon_s);
+        modes_icon(cr, MODE_ICON_LIQUID, MENU_PAD, ry + (rh - icon_s) / 2.0, icon_s);
 
         double tx = MENU_PAD + icon_s + 12.0;
         double text_right = gear_x() - 6.0;
         cairo_save(cr);
-        cairo_rectangle(cr, tx, ry, text_right - tx, MENU_ROW_H);
+        cairo_rectangle(cr, tx, ry, text_right - tx, rh);
         cairo_clip(cr);
         set_font(layout, "sans 10");
         cairo_set_source_rgb(cr, thm->text[0], thm->text[1], thm->text[2]);
         int nw = 0;
-        text_at(cr, layout, it->name, tx, ry + 4.0, 20.0, &nw);
+        const double name_y = ry + (tight ? 1.0 : 4.0), desc_y = ry + (tight ? 18.0 : 22.0);
+        text_at(cr, layout, it->name, tx, name_y, 20.0, &nw);
         set_font(layout, "sans 8");
         if (r == st->in_hand) {
             cairo_set_source_rgb(cr, thm->accent[0], thm->accent[1], thm->accent[2]);
-            text_at(cr, layout, "in hand", tx + nw + 10.0, ry + 4.0, 20.0, NULL);
+            text_at(cr, layout, "in hand", tx + nw + 10.0, name_y, 20.0, NULL);
         } else if (it->desktop >= 0) {
             char where[32];
             snprintf(where, sizeof where, "on desktop %d", it->desktop + 1);
             cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
-            text_at(cr, layout, where, tx + nw + 10.0, ry + 4.0, 20.0, NULL);
+            text_at(cr, layout, where, tx + nw + 10.0, name_y, 20.0, NULL);
         }
         cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
-        text_at(cr, layout, it->desc, tx, ry + 22.0, 18.0, NULL);
+        text_at(cr, layout, it->desc, tx, desc_y, 18.0, NULL);
         cairo_restore(cr);
 
         if (hover) {
             /* The gear and the bin only on the row under the pointer, so a
              * list of liquids is not a column of bins waiting for a slip of
              * the hand. */
-            double is = 15.0, iy = ry + (MENU_ROW_H - is) / 2.0;
+            double is = 15.0, iy = ry + (rh - is) / 2.0;
             const double *gc = st->hover_part == LIQUIDS_PART_GEAR ? thm->accent : thm->muted;
             cairo_set_source_rgb(cr, gc[0], gc[1], gc[2]);
             draw_gear(cr, gear_x() + (ICON_W - is) / 2.0, iy, is);

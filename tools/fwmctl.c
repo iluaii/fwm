@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
             "  dispatch <action>  run a keybind action (same names as config.toml)\n"
             "  urgent <d> [on|off]  light desktop d's number red until you go there\n"
             "  liquid             the liquid: where it is, how much, whether it moves\n"
-            "  liquid pour [n]    pour n particles under the pointer ([liquids])\n"
+            "  liquid pour [n] [liquid]   pour n particles of it under the pointer\n"
             "  liquid clear       drain it\n"
             "  reload             reload the config, discarding every `set`\n"
             "  version            the running fwm, its binary and the IPC version\n"

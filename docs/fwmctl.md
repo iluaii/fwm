@@ -319,10 +319,12 @@ $ fwmctl liquid
 $ fwmctl liquid clear
 ```
 
-`pour` takes a number of particles and defaults to a quarter of the budget. The
-pour happens on the next tick, so the reply says what was asked for and
-`liquid` afterwards says what went in. Pouring onto liquid pours into it; it
-swells to hold what was added.
+`pour` takes a number of particles and defaults to a quarter of the budget, and
+then which liquid, by its name in the liquids menu — `fwmctl liquid pour 4000
+honey` — water when it names none. The pour happens on the next tick, so the
+reply says what was asked for and `liquid` afterwards says what went in, and
+which liquids are in it. Pouring onto liquid pours into it; it swells to hold
+what was added, and a different liquid finds its layer.
 
 The liquid stands on one desktop at a time, the one it was first poured on.
 Pouring on another is refused until `liquid clear` — what it would mean to have

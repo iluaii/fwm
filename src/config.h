@@ -1464,6 +1464,25 @@ typedef struct {
     double window_density;
 } LiquidsConfig;
 
+/* The liquids ready to pick in the liquids menu beside water and the ones
+ * made there: [[liquid]] tables, or, with none in the config, the ones built
+ * in — oil, honey, milk, coffee, wine, syrup, brine, spirit, slime, tar,
+ * lava and mercury.
+ *
+ *   [[liquid]]
+ *   name      = "Oil"
+ *   color     = "#D9A32ECC"   # straight, alpha is how see-through
+ *   viscosity = 300           # px²/s
+ *   density   = 0.9           # against water
+ */
+#define CONFIG_MAX_LIQUIDS 16
+typedef struct {
+    char   name[32];
+    float  color[4];     /* straight */
+    double viscosity;
+    double density;
+} ConfigLiquid;
+
 typedef struct {
     char msg[CONFIG_ERR_LEN];
 } ConfigError;
@@ -1502,6 +1521,8 @@ typedef struct {
     RadialConfig    radial;
     WallpaperLayer *wallpapers;
     int             wallpaper_count;
+    ConfigLiquid    liquids_ready[CONFIG_MAX_LIQUIDS];
+    int             liquid_ready_count;
     ConfigMaterial  materials[CONFIG_MAX_MATERIALS];
     int             material_count;
     ConfigRule     *rules;

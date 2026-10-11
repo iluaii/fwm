@@ -10,6 +10,16 @@ window's own surfaces. A terminal's alpha or a browser made transparent by its
 own stylesheet then reads as glass, and the text on it as text. `blur_radius`
 sets the reach; `[glass] tint` and `brightness` colour it.
 
+### Several liquids at once
+
+Up to eight liquids share a desktop, and find their own order: honey sinks
+through water, oil comes up through it, mercury goes under everything, and a
+swirl of two clears into layers as its drops come out of each other. A
+window floats on whichever it is lighter than. Twelve are ready in the
+liquids menu beside water — oil, honey, milk, coffee, wine, syrup, brine,
+spirit, slime, tar, lava and mercury — or whichever `[[liquid]]` in the config
+names instead, and `fwmctl liquid pour 4000 honey` pours one by name.
+
 ### Planes
 
 Super+ctrl+minus and super+ctrl+equal move a window back and forward through

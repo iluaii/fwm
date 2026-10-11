@@ -958,7 +958,7 @@ int plane_parse(const char *s);
 /* Pour `count` particles (0: a quarter of the budget) under the pointer, onto
  * the desktop it is on. False, with the reason in `err`, when liquids are off
  * or the liquid already stands on another desktop. */
-bool server_liquid_pour(FwmServer *server, int count, int *desktop,
+bool server_liquid_pour(FwmServer *server, int count, const char *liquid, int *desktop,
                         char *err, size_t errcap);
 void server_liquid_clear(FwmServer *server);
 
@@ -973,7 +973,7 @@ typedef struct {
     double step_ms;    /* what the last step cost the worker */
     int threads;       /* the step is split across */
     bool drawn;        /* there is a picture of it */
-    char kind[LIQUID_NAME_MAX];   /* which liquid it is */
+    char kind[4 * LIQUID_NAME_MAX];   /* the liquids in it, by name */
 } FwmLiquidState;
 void server_liquid_state(FwmServer *server, FwmLiquidState *st);
 

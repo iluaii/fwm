@@ -1331,6 +1331,36 @@ Particles are how it is computed; on screen it is one body, cut from a smooth
 field the particles are blurred into, so close particles melt together and a
 lone one is a drop.
 
+Up to eight liquids share a desktop, each particle staying the liquid it was
+poured as. Nothing tells them to lie in layers: the pressure is solved with
+every cell as heavy as the liquids in it, so a heavier one sinks under a
+lighter one the way a stone sinks in water — honey goes to the bottom, oil comes
+up to the top, mercury sinks through all of them. Where they are churned
+together, drops of one inside another come out of it at the speed their
+weight against the liquid around them is held back by its thickness (Stokes),
+so a swirl of oil and water clears into two layers over some tens of seconds —
+more slowly the thicker the liquid the drops have to cross. Each has its own
+thickness; the surface's pull against air is `tension` for all of them, and
+there is none between two liquids. On screen each is its own colour, mixed
+where they meet.
+
+The liquids to pick in the liquids menu are water, the ones made there, and
+these ready-made ones — `[[liquid]]` tables, or with none in the config, oil,
+honey, milk, coffee, wine, syrup, brine, spirit, slime, tar, lava and mercury:
+
+```toml
+[[liquid]]
+name      = "Brine"
+color     = "#2F9C8FBF"   # alpha is how see-through
+viscosity = 70            # px²/s, as [liquids] viscosity
+density   = 1.2           # against water
+```
+
+Thickness here is not the real thing's: water to tar is ten thousand times in
+life, and a thickness is worked out a step at a time, so a liquid much thicker
+than the built-in tar takes many steps a frame and runs the desktop in slow
+motion. Up to 16; one changed in the menu is yours from then on.
+
 The windows on its desktop stand in it, as moving walls: it runs round them
 and lies on them, a window dropped in splashes it and raises it by what it
 displaces, one dragged through it pushes it along, and one lifted out comes out

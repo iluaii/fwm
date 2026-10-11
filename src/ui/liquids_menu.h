@@ -34,7 +34,7 @@
 
 #define LIQUIDS_MENU_ANIM_MS 170.0
 #define LIQUIDS_MENU_RISE_PX  14.0
-#define LIQUIDS_MENU_MAX 16
+#define LIQUIDS_MENU_MAX 32
 
 typedef struct {
     char  name[32];

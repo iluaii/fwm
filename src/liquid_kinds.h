@@ -31,7 +31,7 @@
  * that file into a list and back; reading and writing it is the caller's. No
  * wlroots, so the round trip is tested on its own (tests/test_liquid_kinds.c). */
 
-#define LIQUID_KINDS_MAX 16
+#define LIQUID_KINDS_MAX 32
 #define LIQUID_NAME_MAX  32
 
 typedef struct {
@@ -40,7 +40,16 @@ typedef struct {
     float  color[4];                /* straight RGB and alpha, 0..1 */
     double viscosity;               /* px²/s */
     double density;                 /* relative to water */
+    /* One of the config's ready-made liquids ([[liquid]], or the ones built
+     * in), as the config has it: not in the file, and not removable. Edited
+     * in the menu it becomes the user's, and the file's from then on. */
+    bool   preset;
 } LiquidKind;
+
+/* Ready-made liquids take ids from here up, one per place in the config's
+ * list, so a reload hands each the id it had and what was poured of it
+ * stays what it was. Liquids made in the menu are numbered below. */
+#define LIQUID_PRESET_ID 1000000
 
 typedef struct {
     LiquidKind kind[LIQUID_KINDS_MAX];
@@ -69,7 +78,11 @@ char *liquid_kinds_serialize(const LiquidKinds *k);
 int liquid_kinds_add(LiquidKinds *k, const LiquidKind *kind);
 /* Replace the fields of liquid `id` (keeping its id). False if there is none. */
 bool liquid_kinds_update(LiquidKinds *k, int id, const LiquidKind *kind);
-/* Remove one. Water cannot be removed. */
+/* Add a ready-made one under `id`, unless a liquid of that name (in any
+ * case) is there already — the user's own, or their edit of it, speaks for
+ * it. False if it was not added. */
+bool liquid_kinds_add_preset(LiquidKinds *k, const LiquidKind *kind, int id);
+/* Remove one. Water and the ready-made ones cannot be removed. */
 bool liquid_kinds_remove(LiquidKinds *k, int id);
 const LiquidKind *liquid_kinds_find(const LiquidKinds *k, int id);
 int liquid_kinds_index(const LiquidKinds *k, int id);

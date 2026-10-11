@@ -60,15 +60,20 @@
 
 /* u_mirror reflects the particle across a wall: x' = x * m.x + m.y, and the
  * same for y with m.z, m.w. Identity is (1, 0, 1, 0). */
+/* a_kind picks the particle's liquid out of u_palette (straight rgb, alpha). */
 static const char splat_vert_src[] =
     "attribute vec2 a_pos;\n"
+    "attribute float a_kind;\n"
     "uniform vec2 u_scale;\n"
     "uniform float u_size;\n"
     "uniform vec4 u_mirror;\n"
+    "uniform vec4 u_palette[8];\n"
+    "varying vec4 v_col;\n"
     "void main() {\n"
     "    vec2 p = a_pos * u_mirror.xz + u_mirror.yw;\n"
     "    gl_Position = vec4(p * u_scale - 1.0, 0.0, 1.0);\n"
     "    gl_PointSize = u_size;\n"
+    "    v_col = u_palette[int(a_kind + 0.5)];\n"
     "}\n";
 
 /* A smooth bump that is exactly zero at its rim, so adjacent splats join
@@ -76,11 +81,14 @@ static const char splat_vert_src[] =
 static const char splat_frag_src[] =
     "precision mediump float;\n"
     "uniform float u_gain;\n"
+    "uniform float u_alpha;\n"   /* 0: colour and amount; 1: how opaque */
+    "varying vec4 v_col;\n"
     "void main() {\n"
     "    vec2 d = gl_PointCoord * 2.0 - 1.0;\n"
     "    float k = 1.0 - dot(d, d);\n"
     "    if (k <= 0.0) discard;\n"
-    "    gl_FragColor = vec4(k * k * k * u_gain);\n"
+    "    float w = k * k * k * u_gain;\n"
+    "    gl_FragColor = u_alpha > 0.5 ? vec4(v_col.a * w) : vec4(v_col.rgb * w, w);\n"
     "}\n";
 
 static const char shade_vert_src[] =
@@ -93,30 +101,40 @@ static const char shade_vert_src[] =
 
 /* Cut the field at the surface. The edge is softened over a band as wide as
  * the field changes across a pixel, which is what keeps it from stair-
- * stepping; the body is the liquid's own colour, and a band just inside the
- * edge is lifted toward white — the bright line where a surface turns away
- * from you, which is most of what makes a flat fill read as a liquid. */
+ * stepping; the body is the colour of the liquids there, as much of each as
+ * there is of it, and a band just inside the edge is lifted toward white —
+ * the bright line where a surface turns away from you, which is most of what
+ * makes a flat fill read as a liquid. How opaque is the same mix, read off a
+ * field of its own when the liquids are not all equally so, and otherwise
+ * u_opaque. */
 static const char shade_frag_src[] =
     "precision mediump float;\n"
     "varying vec2 v_uv;\n"
     "uniform sampler2D u_field;\n"
-    "uniform vec4 u_color;\n"   /* straight rgb, alpha */
+    "uniform sampler2D u_opacity;\n"
+    "uniform float u_opaque;\n"   /* < 0: read u_opacity */
     "uniform float u_level;\n"
     "uniform float u_soft;\n"
     "uniform float u_rim;\n"
     "void main() {\n"
-    "    float f = texture2D(u_field, v_uv).r;\n"
+    "    vec4 fc = texture2D(u_field, v_uv);\n"
+    "    float f = fc.a;\n"
     "    float a = smoothstep(u_level - u_soft, u_level + u_soft, f);\n"
     "    if (a <= 0.0) { gl_FragColor = vec4(0.0); return; }\n"
+    "    vec3 body = fc.rgb / max(f, 1e-4);\n"
+    "    float op = u_opaque >= 0.0 ? u_opaque\n"
+    "             : clamp(texture2D(u_opacity, v_uv).r / max(f, 1e-4), 0.0, 1.0);\n"
     "    float inner = smoothstep(u_level, u_level + u_rim, f);\n"
-    "    vec3 c = mix(mix(u_color.rgb, vec3(1.0), 0.45), u_color.rgb, inner);\n"
-    "    float alpha = a * mix(min(u_color.a + 0.25, 1.0), u_color.a, inner);\n"
+    "    vec3 c = mix(mix(body, vec3(1.0), 0.45), body, inner);\n"
+    "    float alpha = a * mix(min(op + 0.25, 1.0), op, inner);\n"
     "    gl_FragColor = vec4(c * alpha, alpha);\n"
     "}\n";
 
+#define UNIFORMS 8
+
 struct program {
     GLuint id;
-    GLint u[5];
+    GLint u[UNIFORMS];
 };
 
 /* Rebuilt if the renderer is ever replaced — a GL object belongs to the
@@ -134,6 +152,10 @@ struct FwmLiquidPaint {
     int fw, fh;            /* the field */
     struct wlr_buffer *field;
     struct wlr_texture *field_tex;
+    /* How opaque, beside it: only made once liquids that are not equally so
+     * share the box. */
+    struct wlr_buffer *opacity;
+    struct wlr_texture *opacity_tex;
     struct wlr_buffer *out[2];
     int next;              /* which of `out` the next picture goes into */
     struct wlr_buffer *current;
@@ -162,7 +184,7 @@ static GLuint compile(GLenum type, const char *src) {
 }
 
 static bool link(struct program *p, const char *vsrc, const char *fsrc,
-                 const char *const names[5]) {
+                 const char *const names[UNIFORMS]) {
     GLuint vs = compile(GL_VERTEX_SHADER, vsrc);
     GLuint fs = compile(GL_FRAGMENT_SHADER, fsrc);
     if (!vs || !fs) {
@@ -174,6 +196,7 @@ static bool link(struct program *p, const char *vsrc, const char *fsrc,
     glAttachShader(id, vs);
     glAttachShader(id, fs);
     glBindAttribLocation(id, 0, "a_pos");
+    glBindAttribLocation(id, 1, "a_kind");
     glLinkProgram(id);
     glDetachShader(id, vs);
     glDetachShader(id, fs);
@@ -189,7 +212,7 @@ static bool link(struct program *p, const char *vsrc, const char *fsrc,
         return false;
     }
     p->id = id;
-    for (int i = 0; i < 5; i++)
+    for (int i = 0; i < UNIFORMS; i++)
         p->u[i] = names[i] ? glGetUniformLocation(id, names[i]) : -1;
     return true;
 }
@@ -205,8 +228,10 @@ static bool programs_ready(struct wlr_renderer *renderer) {
     if (gl.tried) return gl.ok;
     gl.tried = true;
 
-    static const char *const splat_u[5] = { "u_scale", "u_size", "u_gain", "u_mirror", NULL };
-    static const char *const shade_u[5] = { "u_field", "u_color", "u_level", "u_soft", "u_rim" };
+    static const char *const splat_u[UNIFORMS] = {
+        "u_scale", "u_size", "u_gain", "u_mirror", "u_palette", "u_alpha", NULL, NULL };
+    static const char *const shade_u[UNIFORMS] = {
+        "u_field", "u_opacity", "u_opaque", "u_level", "u_soft", "u_rim", NULL, NULL };
     if (!link(&gl.splat, splat_vert_src, splat_frag_src, splat_u)) return false;
     if (!link(&gl.shade, shade_vert_src, shade_frag_src, shade_u)) return false;
 
@@ -281,6 +306,8 @@ void liquid_paint_destroy(FwmLiquidPaint *p) {
     if (!p) return;
     if (p->field_tex) wlr_texture_destroy(p->field_tex);
     if (p->field) wlr_buffer_drop(p->field);
+    if (p->opacity_tex) wlr_texture_destroy(p->opacity_tex);
+    if (p->opacity) wlr_buffer_drop(p->opacity);
     for (int i = 0; i < 2; i++)
         if (p->out[i]) wlr_buffer_drop(p->out[i]);
     free(p);
@@ -306,10 +333,52 @@ static void box_union(struct wlr_box *a, const struct wlr_box *b) {
     *a = (struct wlr_box){ x0, y0, x1 - x0, y1 - y0 };
 }
 
-struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, int count,
-                                     double spacing, const float color[4],
+/* The splats of every particle, into the framebuffer bound: nine times, the
+ * last eight reflected in the walls (see below). */
+static void splat_all(FwmLiquidPaint *p, const float *xy, const float *kinds, int count,
+                      double reach, double spacing, float alpha_pass) {
+    double r_field = reach * FIELD_SCALE;
+    float size = (float)(2.0 * r_field);
+    if (size > gl.max_point) size = gl.max_point;
+    /* The bumps of a liquid at rest — one every spacing² of area — add up to
+     * pi*R²/4 per spacing² of (1 - r²)³ each; scaled so that comes to
+     * FIELD_INSIDE. */
+    double sum = M_PI * reach * reach / 4.0 / (spacing * spacing);
+    glUniform2f(gl.splat.u[0], 2.0f / (float)p->w, 2.0f / (float)p->h);
+    glUniform1f(gl.splat.u[1], size);
+    glUniform1f(gl.splat.u[2], (float)(FIELD_INSIDE / sum));
+    glUniform1f(gl.splat.u[5], alpha_pass);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, xy);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 0, kinds);
+    glEnableVertexAttribArray(1);
+    /* Nine times: where it is, and reflected in each wall and in each
+     * corner. Liquid against a wall is liquid right up to it, but a splat
+     * there has half its reach in the wall where no particle can be, so the
+     * field along a wall read like a free surface: at the level, dipping
+     * under it wherever the particles happened to lie a little high — a row
+     * of bubbles along the floor, with the bright rim of a surface drawn
+     * around each. With every particle mirrored behind the wall the field
+     * there is whole, and the rim is left where it belongs, on the surface. A
+     * mirror image far from its wall lands outside the picture and costs
+     * nothing. */
+    const float W = (float)p->w, H = (float)p->h;
+    const float xs[3][2] = { { 1.0f, 0.0f }, { -1.0f, 0.0f }, { -1.0f, 2.0f * W } };
+    const float ys[3][2] = { { 1.0f, 0.0f }, { -1.0f, 0.0f }, { -1.0f, 2.0f * H } };
+    for (int m = 0; m < 9; m++) {
+        const float mirror[4] = { xs[m % 3][0], xs[m % 3][1], ys[m / 3][0], ys[m / 3][1] };
+        glUniform4fv(gl.splat.u[3], 1, mirror);
+        glDrawArrays(GL_POINTS, 0, count);
+    }
+    glDisableVertexAttribArray(1);
+    glDisableVertexAttribArray(0);
+}
+
+struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, const float *kinds,
+                                     int count, double spacing,
+                                     const float palette[LIQUID_PAINT_KINDS][4],
                                      struct wlr_box *damage) {
-    if (!p || !color || spacing <= 0.0) return NULL;
+    if (!p || !palette || spacing <= 0.0) return NULL;
     struct wlr_renderer *renderer = p->server ? p->server->wlr_renderer : NULL;
     if (!liquid_paint_supported(renderer)) return NULL;
 
@@ -349,57 +418,61 @@ struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, int cou
     bool ok = false;
     if (!programs_ready(renderer)) goto out;
 
+    /* The palette straight, as the shaders mix it; and whether the liquids
+     * in it are all as opaque as each other, in which case one number says
+     * how opaque and the second field is not drawn. */
+    float straight[LIQUID_PAINT_KINDS][4];
+    bool one_opacity = true;
+    for (int k = 0; k < LIQUID_PAINT_KINDS; k++) {
+        float a = palette[k][3], inv = a > 0.0f ? 1.0f / a : 0.0f;
+        for (int c = 0; c < 3; c++) straight[k][c] = palette[k][c] * inv;
+        straight[k][3] = a;
+    }
+    float opaque = -1.0f;
+    if (count > 0) {
+        unsigned seen = 0;
+        for (int i = 0; i < count; i++) seen |= 1u << ((int)kinds[i] & 7);
+        for (int k = 0; k < LIQUID_PAINT_KINDS; k++) {
+            if (!(seen & (1u << k))) continue;
+            if (opaque < 0.0f) opaque = straight[k][3];
+            else if (fabsf(straight[k][3] - opaque) > 1e-3f) one_opacity = false;
+        }
+    }
+    if (!one_opacity && !p->opacity) {
+        p->opacity = snapshot_alloc(p->server, p->fw, p->fh);
+        if (p->opacity) p->opacity_tex = wlr_texture_from_buffer(renderer, p->opacity);
+        if (!p->opacity_tex) one_opacity = true;
+    }
+
     GLuint field_fbo = wlr_gles2_renderer_get_buffer_fbo(renderer, p->field);
     GLuint out_fbo = wlr_gles2_renderer_get_buffer_fbo(renderer, target);
-    if (!field_fbo || !out_fbo) {
+    GLuint opacity_fbo = !one_opacity ? wlr_gles2_renderer_get_buffer_fbo(renderer, p->opacity) : 0;
+    if (!field_fbo || !out_fbo || (!one_opacity && !opacity_fbo)) {
         wlr_log(WLR_ERROR, "liquid: no FBO to draw into");
         goto out;
     }
     glDisable(GL_SCISSOR_TEST);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    /* 1. The field: every particle a soft bump, added up. */
+    /* 1. The field: every particle a soft bump in its liquid's colour, added
+     * up — the colours times the amount, and the amount. Box px to clip
+     * space, with y=0 at -1: the same way up as wlroots' own buffers, so the
+     * field and the picture agree without a flip. */
     glBindFramebuffer(GL_FRAMEBUFFER, field_fbo);
     glViewport(0, 0, p->fw, p->fh);
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     if (count > 0) {
-        double r_field = reach * FIELD_SCALE;
-        float size = (float)(2.0 * r_field);
-        if (size > gl.max_point) size = gl.max_point;
-        /* The bumps of a liquid at rest — one every spacing² of area — add up
-         * to pi*R²/4 per spacing² of (1 - r²)³ each; scaled so that comes to
-         * FIELD_INSIDE. */
-        double sum = M_PI * reach * reach / 4.0 / (spacing * spacing);
         glEnable(GL_BLEND);
         glBlendFunc(GL_ONE, GL_ONE);
         glUseProgram(gl.splat.id);
-        /* Box px to clip space, with y=0 at -1: the same way up as wlroots'
-         * own buffers, so the field and the picture agree without a flip. */
-        glUniform2f(gl.splat.u[0], 2.0f / (float)p->w, 2.0f / (float)p->h);
-        glUniform1f(gl.splat.u[1], size);
-        glUniform1f(gl.splat.u[2], (float)(FIELD_INSIDE / sum));
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, xy);
-        glEnableVertexAttribArray(0);
-        /* Nine times: where it is, and reflected in each wall and in each
-         * corner. Liquid against a wall is liquid right up to it, but a splat
-         * there has half its reach in the wall where no particle can be, so
-         * the field along a wall read like a free surface: at the level,
-         * dipping under it wherever the particles happened to lie a little
-         * high — a row of bubbles along the floor, with the bright rim of a
-         * surface drawn around each. With every particle mirrored behind the
-         * wall the field there is whole, and the rim is left where it
-         * belongs, on the surface. A mirror image far from its wall lands
-         * outside the picture and costs nothing. */
-        const float W = (float)p->w, H = (float)p->h;
-        const float xs[3][2] = { { 1.0f, 0.0f }, { -1.0f, 0.0f }, { -1.0f, 2.0f * W } };
-        const float ys[3][2] = { { 1.0f, 0.0f }, { -1.0f, 0.0f }, { -1.0f, 2.0f * H } };
-        for (int m = 0; m < 9; m++) {
-            const float mirror[4] = { xs[m % 3][0], xs[m % 3][1], ys[m / 3][0], ys[m / 3][1] };
-            glUniform4fv(gl.splat.u[3], 1, mirror);
-            glDrawArrays(GL_POINTS, 0, count);
+        glUniform4fv(gl.splat.u[4], LIQUID_PAINT_KINDS, &straight[0][0]);
+        splat_all(p, xy, kinds, count, reach, spacing, 0.0f);
+        if (!one_opacity) {
+            glBindFramebuffer(GL_FRAMEBUFFER, opacity_fbo);
+            glClear(GL_COLOR_BUFFER_BIT);
+            splat_all(p, xy, kinds, count, reach, spacing, 1.0f);
         }
-        glDisableVertexAttribArray(0);
         glDisable(GL_BLEND);
     }
 
@@ -416,23 +489,37 @@ struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, int cou
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glUniform1i(gl.shade.u[0], 0);
-        /* The config's colour is premultiplied; the shader wants it straight. */
-        float a = color[3];
-        float k = a > 0.0f ? 1.0f / a : 0.0f;
-        glUniform4f(gl.shade.u[1], color[0] * k, color[1] * k, color[2] * k, a);
+        if (!one_opacity) {
+            struct wlr_gles2_texture_attribs ot = {0};
+            wlr_gles2_texture_get_attribs(p->opacity_tex, &ot);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, ot.tex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glActiveTexture(GL_TEXTURE0);
+        }
+        glUniform1i(gl.shade.u[1], 1);
+        glUniform1f(gl.shade.u[2], one_opacity ? (opaque < 0.0f ? 1.0f : opaque) : -1.0f);
         float level = SURFACE_LEVEL * FIELD_INSIDE;
-        glUniform1f(gl.shade.u[2], level);
+        glUniform1f(gl.shade.u[3], level);
         /* At a flat surface the field falls from about half the inside to
          * nothing across one reach; a band that wide per pixel, either side
          * of the level, is one pixel of antialiasing. */
-        glUniform1f(gl.shade.u[3], (float)(0.5 * FIELD_INSIDE / reach));
-        glUniform1f(gl.shade.u[4], RIM_DEPTH * FIELD_INSIDE);
+        glUniform1f(gl.shade.u[4], (float)(0.5 * FIELD_INSIDE / reach));
+        glUniform1f(gl.shade.u[5], RIM_DEPTH * FIELD_INSIDE);
         static const GLfloat quad[8] = { -1.0f, -1.0f,  1.0f, -1.0f,  -1.0f, 1.0f,  1.0f, 1.0f };
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad);
         glEnableVertexAttribArray(0);
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         glDisableVertexAttribArray(0);
         glBindTexture(GL_TEXTURE_2D, 0);
+        if (!one_opacity) {
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glActiveTexture(GL_TEXTURE0);
+        }
     }
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);

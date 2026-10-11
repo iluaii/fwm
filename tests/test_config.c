@@ -424,6 +424,41 @@ static void test_gestures(void) {
  * value the file may simply not mention — and both get it wrong in the same
  * way if the "unset" state is ever confused with a real number, so the tests
  * lean on the cases where 0 and -1 are meaningful values. */
+static void test_liquids_ready(void) {
+    CASE("with no [[liquid]], the built-in liquids are ready");
+    FwmConfig cfg;
+    const char *p = write_config("[binds]\n\"super+q\" = \"killclient\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.liquid_ready_count, 12);
+    CHECK_STR(cfg.liquids_ready[0].name, "Oil");
+    CHECK_STR(cfg.liquids_ready[1].name, "Honey");
+    CHECK_STR(cfg.liquids_ready[11].name, "Mercury");
+    CHECK_DBL(cfg.liquids_ready[11].density, 13.5, 1e-9);
+    /* None so thick that the step would run the desktop in slow motion. */
+    for (int i = 0; i < cfg.liquid_ready_count; i++)
+        CHECK(cfg.liquids_ready[i].viscosity * cfg.liquids_ready[i].density <= 7000.0);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("[[liquid]] says which instead");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[[liquid]]\n"
+        "name      = \"Brine\"\n"
+        "color     = \"#33AA88CC\"\n"
+        "viscosity = 40\n"
+        "density   = 1.2\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_INT(cfg.liquid_ready_count, 1);
+    CHECK_STR(cfg.liquids_ready[0].name, "Brine");
+    CHECK_DBL(cfg.liquids_ready[0].viscosity, 40.0, 1e-9);
+    CHECK_DBL(cfg.liquids_ready[0].color[3], 0.8, 0.01);
+    CHECK_DBL(cfg.liquids_ready[0].color[1], 0.667, 0.01);   /* straight, not premultiplied */
+    config_free(&cfg);
+    drop_config();
+}
+
 static void test_materials(void) {
     CASE("[[material]] and a rule's material");
     const char *p = write_config(
@@ -1899,6 +1934,7 @@ int main(void) {
     test_gestures();
     test_rule_material();
     test_materials();
+    test_liquids_ready();
     test_physics_profiles();
     test_mass_mode();
     test_every_dispatchable_action_binds();

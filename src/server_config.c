@@ -136,6 +136,18 @@ static void premul_to_straight(const float in[4], float out[4]) {
     out[0] = in[0] * k; out[1] = in[1] * k; out[2] = in[2] * k; out[3] = a;
 }
 
+/* The config's ready-made liquids, after the user's own: one they made or
+ * edited under the same name is theirs and stays. */
+static void liquids_ready_add(FwmServer *server) {
+    for (int i = 0; i < server->config.liquid_ready_count; i++) {
+        const ConfigLiquid *q = &server->config.liquids_ready[i];
+        LiquidKind kind = { .viscosity = q->viscosity, .density = q->density };
+        snprintf(kind.name, sizeof(kind.name), "%s", q->name);
+        memcpy(kind.color, q->color, sizeof(kind.color));
+        liquid_kinds_add_preset(&server->liquid_kinds, &kind, LIQUID_PRESET_ID + i);
+    }
+}
+
 void server_state_apply_liquids(FwmServer *server) {
     LiquidsConfig *cfg = &server->config.liquids;
     float straight[4];
@@ -145,13 +157,17 @@ void server_state_apply_liquids(FwmServer *server) {
     char sp[512];
     server_state_path(sp, sizeof(sp), "liquids");
     FILE *f = fopen(sp, "r");
-    if (!f) return;
+    if (!f) {
+        liquids_ready_add(server);
+        return;
+    }
     char *text = NULL;
     size_t cap = 0;
     ssize_t n = getdelim(&text, &cap, '\0', f);
     fclose(f);
     if (n > 0) liquid_kinds_parse(&server->liquid_kinds, text);
     free(text);
+    liquids_ready_add(server);
 
     /* Water edited in the menu speaks over the file it came from, the way the
      * modes menu's choices do — and through the same two keys, so `fwmctl get

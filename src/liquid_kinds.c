@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "toml.h"
 
@@ -115,12 +116,15 @@ int liquid_kinds_parse(LiquidKinds *k, const char *text) {
         };
         if (!read_kind(t, &kind)) continue;
         toml_datum_t id = toml_int_in(t, "id");
-        kind.id = (id.ok && id.u.i > 0 && id.u.i < 1000000) ? (int)id.u.i : k->next_id;
+        /* A ready-made liquid edited in the menu keeps its id, so that what
+         * was poured of it is still it; new ones are numbered below those. */
+        kind.id = (id.ok && id.u.i > 0 && id.u.i < LIQUID_PRESET_ID + 1000) ? (int)id.u.i
+                                                                           : k->next_id;
         /* An id the file repeats would make two liquids one; the second gets
          * a new one. */
         if (liquid_kinds_find(k, kind.id)) kind.id = k->next_id;
         k->kind[k->count++] = kind;
-        if (kind.id >= k->next_id) k->next_id = kind.id + 1;
+        if (kind.id >= k->next_id && kind.id < LIQUID_PRESET_ID) k->next_id = kind.id + 1;
         made++;
     }
     toml_free(root);
@@ -160,6 +164,7 @@ char *liquid_kinds_serialize(const LiquidKinds *k) {
         put_kind(f, &k->kind[0], false);
     }
     for (int i = 1; i < k->count; i++) {
+        if (k->kind[i].preset) continue;
         fputs("\n[[liquid]]\n", f);
         put_kind(f, &k->kind[i], true);
     }
@@ -187,11 +192,25 @@ int liquid_kinds_add(LiquidKinds *k, const LiquidKind *kind) {
     return copy.id;
 }
 
+bool liquid_kinds_add_preset(LiquidKinds *k, const LiquidKind *kind, int id) {
+    if (!k || !kind || !kind->name[0] || k->count >= LIQUID_KINDS_MAX) return false;
+    for (int i = 0; i < k->count; i++)
+        if (strcasecmp(k->kind[i].name, kind->name) == 0) return false;
+    if (liquid_kinds_find(k, id)) return false;
+    LiquidKind copy = *kind;
+    copy.id = id;
+    copy.preset = true;
+    clamp_kind(&copy);
+    k->kind[k->count++] = copy;
+    return true;
+}
+
 bool liquid_kinds_update(LiquidKinds *k, int id, const LiquidKind *kind) {
     int i = liquid_kinds_index(k, id);
     if (i < 0 || !kind->name[0]) return false;
     LiquidKind copy = *kind;
     copy.id = id;
+    copy.preset = false;   /* changed, it is the user's now */
     clamp_kind(&copy);
     k->kind[i] = copy;
     if (id == 0) k->water_edited = true;
@@ -201,7 +220,7 @@ bool liquid_kinds_update(LiquidKinds *k, int id, const LiquidKind *kind) {
 bool liquid_kinds_remove(LiquidKinds *k, int id) {
     if (id == 0) return false;
     int i = liquid_kinds_index(k, id);
-    if (i < 0) return false;
+    if (i < 0 || k->kind[i].preset) return false;
     memmove(&k->kind[i], &k->kind[i + 1], sizeof(k->kind[0]) * (size_t)(k->count - i - 1));
     k->count--;
     return true;

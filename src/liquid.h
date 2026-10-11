@@ -67,7 +67,15 @@
  * whole thing be stepped in a loop by tests/test_liquid.c, and moved to the
  * GPU later without anything outside noticing.
  *
- * Units are px and seconds throughout, and the density is 1. */
+ * Units are px and seconds throughout, and densities are against water's 1.
+ *
+ * Several liquids may stand in one box at once, up to LIQUID_MAX_KINDS, each
+ * particle being of one of them. They do not mix — a particle is the liquid
+ * it was poured as for good — and they are not told to lie in layers: the
+ * pressure is solved for with each cell as heavy as the liquids in it, and a
+ * heavier one sinks under a lighter one for the same reason a stone sinks in
+ * water. Each has its own thickness; the surface's pull, against air, is the
+ * same for all of them. */
 
 typedef struct {
     /* px²/s, kinematic: how thick it is. Tens is water at this scale; the
@@ -79,7 +87,11 @@ typedef struct {
      * is no tension anyone could see; a few tens is a liquid that beads, and
      * the only kind that gathers into a ball with gravity off. 0 is none. */
     double tension;
+    /* Against water's 1: how heavy it is. 0 is taken for 1. */
+    double density;
 } LiquidMaterial;
+
+#define LIQUID_MAX_KINDS 8
 
 typedef struct FwmLiquid FwmLiquid;
 
@@ -95,7 +107,12 @@ void liquid_destroy(FwmLiquid *l);
  * it pushes that liquid in with it, and what no longer fits in it at all runs
  * over the top and is gone. */
 void liquid_set_box(FwmLiquid *l, double w, double h);
+/* The surface's pull for all of them, and what liquid 0 is. */
 void liquid_set_material(FwmLiquid *l, const LiquidMaterial *m);
+/* What liquid `kind` (0 .. LIQUID_MAX_KINDS - 1) is: its thickness and its
+ * density; its tension is ignored. Changed under liquid already poured as
+ * it, that liquid becomes the new one. */
+void liquid_set_kind(FwmLiquid *l, int kind, const LiquidMaterial *m);
 
 /* Something solid standing in the liquid: a box `w` x `h` whose unturned
  * top-left is (x, y), turned `angle` radians about its centre (y-down, the
@@ -180,6 +197,13 @@ int liquid_threads(const FwmLiquid *l);
  * exactly. */
 int liquid_pour(FwmLiquid *l, double cx, double cy, int count,
                 double vx, double vy);
+/* The same, of liquid `kind`; liquid_pour pours liquid 0. */
+int liquid_pour_kind(FwmLiquid *l, int kind, double cx, double cy, int count,
+                     double vx, double vy);
+/* How many particles of liquid `kind` there are, and taking every one of
+ * them out — the liquid no longer exists. */
+int liquid_count_kind(const FwmLiquid *l, int kind);
+int liquid_remove_kind(FwmLiquid *l, int kind);
 void liquid_clear(FwmLiquid *l);
 
 /* Take out up to `max` particles standing within `r` px of (cx, cy) — a drain
@@ -208,6 +232,8 @@ double liquid_spacing(const FwmLiquid *l);
  * x to the next one's (x then y). Valid until the next call that changes the
  * liquid. */
 const float *liquid_positions(const FwmLiquid *l, int *stride);
+/* Which liquid each particle is, `stride` unsigneds from one to the next. */
+const unsigned *liquid_kinds_of(const FwmLiquid *l, int *stride);
 
 /* Settled: the liquid has crawled for long enough that the step has stopped
  * running. A pour, a clear, a new box, a new material or a change of gravity

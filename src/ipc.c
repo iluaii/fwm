@@ -1288,18 +1288,25 @@ static void cmd_liquid(FwmServer *server, const char *arg, struct Buf *b) {
     if (arg) { rest = arg + len; while (*rest == ' ') rest++; if (!*rest) rest = NULL; }
 
     if (arg && len == 4 && strncmp(arg, "pour", 4) == 0) {
+        /* pour [n] [liquid]: the amount, if the first word is a number, and
+         * the rest is which liquid, by its name in the liquids menu. */
         int count = 0;
+        const char *name = rest;
         if (rest) {
             char *end = NULL;
             long n = strtol(rest, &end, 10);
-            if (end == rest || *end || n < 1 || n > 1000000) {
-                reply_error(b, "liquid pour: the amount is a number of particles, 1 or more");
-                return;
+            if (end != rest && (*end == '\0' || *end == ' ')) {
+                if (n < 1 || n > 1000000) {
+                    reply_error(b, "liquid pour: the amount is a number of particles, 1 or more");
+                    return;
+                }
+                count = (int)n;
+                while (*end == ' ') end++;
+                name = *end ? end : NULL;
             }
-            count = (int)n;
         }
         int d = -1;
-        if (!server_liquid_pour(server, count, &d, err, sizeof err)) {
+        if (!server_liquid_pour(server, count, name, &d, err, sizeof err)) {
             reply_error(b, err);
             return;
         }
@@ -1313,7 +1320,7 @@ static void cmd_liquid(FwmServer *server, const char *arg, struct Buf *b) {
         reply_ok(b);
         return;
     }
-    reply_error(b, "liquid: expected `liquid`, `liquid pour [n]` or `liquid clear`");
+    reply_error(b, "liquid: expected `liquid`, `liquid pour [n] [liquid]` or `liquid clear`");
 }
 
 /* `subscribe [events]` — everything, or a comma/space separated subset. The

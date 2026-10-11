@@ -21,6 +21,7 @@
 #include "liquid_kinds.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 static const float BLUE[4] = { 0.2f, 0.5f, 0.9f, 0.8f };
 
@@ -136,7 +137,54 @@ static void test_describe(void) {
     CHECK_STR(d, "thickness 2.5 · density 1");
 }
 
+static void test_ready_made(void) {
+    CASE("a ready-made liquid is in the list, not in the file, and cannot be removed");
+    LiquidKinds k;
+    liquid_kinds_init(&k, BLUE, 60.0);
+    LiquidKind oil = make("Oil", 300.0, 0.9);
+    CHECK(liquid_kinds_add_preset(&k, &oil, LIQUID_PRESET_ID));
+    CHECK_INT(k.count, 2);
+    CHECK(liquid_kinds_find(&k, LIQUID_PRESET_ID)->preset);
+    CHECK(!liquid_kinds_remove(&k, LIQUID_PRESET_ID));
+    char *text = liquid_kinds_serialize(&k);
+    CHECK(text && !strstr(text, "Oil"));
+    free(text);
+
+    CASE("one the user made under the same name is theirs, and stays");
+    liquid_kinds_init(&k, BLUE, 60.0);
+    LiquidKind mine = make("oil", 50.0, 0.8);
+    int id = liquid_kinds_add(&k, &mine);
+    CHECK(!liquid_kinds_add_preset(&k, &oil, LIQUID_PRESET_ID));
+    CHECK_INT(k.count, 2);
+    CHECK_DBL(liquid_kinds_find(&k, id)->viscosity, 50.0, 1e-9);
+
+    CASE("edited, a ready-made liquid is the user's, keeps its id, and is written down");
+    liquid_kinds_init(&k, BLUE, 60.0);
+    LiquidKind honey = make("Honey", 3000.0, 1.4);
+    liquid_kinds_add_preset(&k, &oil, LIQUID_PRESET_ID);
+    liquid_kinds_add_preset(&k, &honey, LIQUID_PRESET_ID + 1);
+    LiquidKind thin = make("Oil", 120.0, 0.9);
+    CHECK(liquid_kinds_update(&k, LIQUID_PRESET_ID, &thin));
+    CHECK(!liquid_kinds_find(&k, LIQUID_PRESET_ID)->preset);
+    text = liquid_kinds_serialize(&k);
+    CHECK(text && strstr(text, "Oil") && !strstr(text, "Honey"));
+    /* As the next start reads it: the edit under its own id, the rest of the
+     * ready-made ones after it, and a new liquid numbered below them all. */
+    LiquidKinds back;
+    liquid_kinds_init(&back, BLUE, 60.0);
+    CHECK_INT(liquid_kinds_parse(&back, text), 1);
+    free(text);
+    CHECK(liquid_kinds_find(&back, LIQUID_PRESET_ID) != NULL);
+    CHECK_DBL(liquid_kinds_find(&back, LIQUID_PRESET_ID)->viscosity, 120.0, 1e-9);
+    CHECK(!liquid_kinds_add_preset(&back, &oil, LIQUID_PRESET_ID));
+    CHECK(liquid_kinds_add_preset(&back, &honey, LIQUID_PRESET_ID + 1));
+    LiquidKind fresh = make("Brine", 40.0, 1.2);
+    int fid = liquid_kinds_add(&back, &fresh);
+    CHECK(fid > 0 && fid < LIQUID_PRESET_ID);
+}
+
 int main(void) {
+    test_ready_made();
     test_round_trip();
     test_water();
     test_bad_file();

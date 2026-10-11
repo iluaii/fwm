@@ -123,9 +123,11 @@ remembered for a different reason — see above.
 ## The liquids menu and the bucket
 
 Experimental ([liquids](configuration.md#liquids)). The **Liquids** row of the
-modes menu opens a list of the liquids there are: water, and any you have made —
-each with its thickness and density under its name, and the desktop it has been
-poured on beside it.
+modes menu opens a list of the liquids there are: water, the ready-made ones —
+oil, honey, milk, coffee, wine, syrup, brine, spirit, slime, tar, lava and
+mercury, or whatever `[[liquid]]` in the config says instead — and any you have
+made, each with its thickness and density under its name, and the desktop it has
+been poured on beside it.
 
 - **+** on the LIQUIDS line makes a new one: a name, a colour — typed as hex or
   picked off the wheel, with the brightness on the bar beside it; the drop at the
@@ -134,13 +136,14 @@ poured on beside it.
 - **the gear**, on the row under the pointer, opens the same form on that liquid.
   Water's colour and thickness are `[liquids] color` and `viscosity`, so changing
   them here changes those for the session and keeps them over the config.
-- **the bin** removes a liquid you made, and takes it off the desktop with it.
-  Water has no bin.
+  A ready-made one changed here is yours from then on, kept over the config the
+  same way.
+- **the bin** removes a liquid you made, and takes it off the desktop with it,
+  leaving the others there. Water and the ready-made ones have no bin.
 
 Liquids made here are kept in `~/.local/state/fwm/liquids`; your `config.toml` is
-never rewritten. Density is kept but changes nothing yet: with one liquid on a
-desktop it cancels out of the physics, and it starts to matter when windows float
-in it and liquids layer — later stages.
+never rewritten. Density is what puts liquids in layers and decides what floats
+in them.
 
 Click the liquid itself and a bucket of it is in your hand: the pointer becomes
 the bucket, and
@@ -154,9 +157,11 @@ the bucket, and
 While the bucket is in your hand no window hears the pointer, but the keyboard is
 untouched — switch gravity off with super+g in the middle of a pour and the
 stream carries on flying. Picking up a bucket switches `[liquids]` on for the
-session if the config had it off. The liquid stands on one desktop at a time, and
-one liquid at a time — they do not mix yet — so pouring honey where there is
-water, or onto another desktop, is refused until the first is drained.
+session if the config had it off. Pour one liquid onto another and they find
+their own order — honey sinks through water, oil comes up through it, and a
+swirl of the two sorts itself into layers as its drops come out of each other.
+Up to eight liquids share a desktop. The liquid stands on one desktop at a time,
+so pouring onto another is refused until the first is drained.
 
 `liquids_menu` and `liquid_bucket` bind the same two things to keys.
 

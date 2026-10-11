@@ -2002,6 +2002,85 @@ const ConfigOutput *config_find_output(const FwmConfig *cfg, const char *name) {
     return NULL;
 }
 
+/* ── ready-made liquids ──────────────────────────────────────────────── */
+
+/* By thickness against water's 60 px²/s and density against water's 1. Not
+ * the real numbers, which span ten thousand times between water and tar: a
+ * liquid's thickness is worked out a step at a time, and the thickest here
+ * already takes several steps a frame — tar as thick as tar would be the
+ * whole desktop in slow motion. What they keep is their order. */
+static const ConfigLiquid builtin_liquids[] = {
+    { "Oil",     { 0.90f, 0.81f, 0.36f, 0.75f }, 300.0,  0.9  },
+    { "Honey",   { 0.66f, 0.34f, 0.11f, 0.92f }, 3000.0, 1.4  },
+    { "Milk",    { 0.96f, 0.95f, 0.91f, 0.95f }, 100.0,  1.03 },
+    { "Coffee",  { 0.29f, 0.18f, 0.10f, 0.93f }, 70.0,   1.01 },
+    { "Wine",    { 0.48f, 0.08f, 0.19f, 0.85f }, 70.0,   0.99 },
+    { "Syrup",   { 0.61f, 0.26f, 0.08f, 0.90f }, 1500.0, 1.33 },
+    { "Brine",   { 0.18f, 0.61f, 0.56f, 0.75f }, 70.0,   1.2  },
+    { "Spirit",  { 0.87f, 0.92f, 1.00f, 0.40f }, 40.0,   0.79 },
+    { "Slime",   { 0.45f, 0.84f, 0.23f, 0.90f }, 4000.0, 1.05 },
+    { "Tar",     { 0.09f, 0.07f, 0.06f, 0.98f }, 6000.0, 1.15 },
+    { "Lava",    { 1.00f, 0.35f, 0.08f, 1.00f }, 2500.0, 2.6  },
+    { "Mercury", { 0.79f, 0.80f, 0.83f, 1.00f }, 30.0,   13.5 },
+};
+
+static void load_liquids_ready(toml_table_t *root, FwmConfig *cfg) {
+    cfg->liquid_ready_count = 0;
+    toml_array_t *arr = root ? toml_array_in(root, "liquid") : NULL;
+    if (!arr) {
+        for (size_t i = 0; i < sizeof(builtin_liquids) / sizeof(builtin_liquids[0]); i++)
+            cfg->liquids_ready[cfg->liquid_ready_count++] = builtin_liquids[i];
+        return;
+    }
+    int n = toml_array_nelem(arr);
+    for (int i = 0; i < n; i++) {
+        toml_table_t *tbl = toml_table_at(arr, i);
+        if (!tbl) continue;
+        if (cfg->liquid_ready_count == CONFIG_MAX_LIQUIDS) {
+            config_report_error(cfg, "[[liquid]]: more than %d — the rest ignored",
+                                CONFIG_MAX_LIQUIDS);
+            break;
+        }
+        ConfigLiquid q = { .color = { 0.23f, 0.55f, 0.88f, 0.8f }, .viscosity = 60.0,
+                           .density = 1.0 };
+        toml_datum_t name = toml_string_in(tbl, "name");
+        if (!name.ok || !*name.u.s) {
+            config_report_error(cfg, "[[liquid]] #%d: no name — ignored", i + 1);
+            if (name.ok) free(name.u.s);
+            continue;
+        }
+        snprintf(q.name, sizeof(q.name), "%s", name.u.s);
+        free(name.u.s);
+        toml_datum_t c = toml_string_in(tbl, "color");
+        if (c.ok) {
+            float pre[4];
+            if (parse_hex_color(c.u.s, pre)) {
+                float a = pre[3], k = a > 0.0f ? 1.0f / a : 0.0f;
+                for (int j = 0; j < 3; j++) q.color[j] = pre[j] * k;
+                q.color[3] = a;
+            } else {
+                config_report_error(cfg, "[[liquid]] \"%s\": color \"%s\" is not #RRGGBB[AA]",
+                                    q.name, c.u.s);
+            }
+            free(c.u.s);
+        }
+        for (int f = 0; f < 2; f++) {
+            const char *key = f ? "density" : "viscosity";
+            toml_datum_t d = toml_double_in(tbl, key);
+            toml_datum_t di = toml_int_in(tbl, key);
+            if (d.ok || di.ok) {
+                double v = d.ok ? d.u.d : (double)di.u.i;
+                if (f) q.density = v; else q.viscosity = v;
+            }
+        }
+        if (q.viscosity < 0.0) q.viscosity = 0.0;
+        if (q.viscosity > 100000.0) q.viscosity = 100000.0;
+        if (q.density < 0.1) q.density = 0.1;
+        if (q.density > 20.0) q.density = 20.0;
+        cfg->liquids_ready[cfg->liquid_ready_count++] = q;
+    }
+}
+
 /* ── materials ───────────────────────────────────────────────────────── */
 
 /* What a window can be made of out of the box, by density against water. */
@@ -2264,6 +2343,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_glass(NULL, cfg);
     load_grass(NULL, cfg);
     load_liquids(NULL, cfg);
+    load_liquids_ready(NULL, cfg);
     load_materials(NULL, cfg);
     load_sound(NULL, cfg);
     load_volume(NULL, cfg);
@@ -2331,6 +2411,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_stats(root, cfg);
     load_wallpaper(root, cfg);
     load_wallpaper_picker(root, cfg);
+    load_liquids_ready(root, cfg);
     load_materials(root, cfg);
     load_rules(root, cfg);
     load_outputs(root, cfg);

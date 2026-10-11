@@ -48,6 +48,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #include <linux/input-event-codes.h>
@@ -85,7 +86,13 @@ enum { FULL_BUDGET = 1, FULL_BRIM = 2 };
 struct FwmLiquidRun {
     FwmLiquid *sim;
     int desktop;
-    int kind;               /* which liquid it is: an id in server->liquid_kinds */
+    /* The liquids in it, by their place in it (liquid.h's kinds): an id in
+     * server->liquid_kinds, or -1 for a place no liquid has; and how many
+     * particles of each there were in the last picture. A place whose liquid
+     * has run out is free for the next one poured. */
+    int slot[LIQUID_MAX_KINDS];
+    int slot_n[LIQUID_MAX_KINDS];
+    unsigned remove;        /* places whose liquid goes at the next handover */
 
     /* The worker. `job`, `quit` and the job's inputs are under `lock`; `busy`
      * is set by the compositor when it hands a step over and cleared by the
@@ -108,6 +115,7 @@ struct FwmLiquidRun {
     double box_w, box_h;
 
     int pour;               /* particles asked for and not yet poured */
+    int pour_slot;
     double pour_x, pour_y;
     bool clear;
     /* What the bucket in the hand has poured and drained since the last step,
@@ -115,14 +123,18 @@ struct FwmLiquidRun {
      * stream leaves the bucket at the hand's own speed: swing it and the
      * water flies. */
     int stream;
+    int stream_slot;
     double stream_x, stream_y, stream_vx, stream_vy;
     int drain;
     double drain_x, drain_y;
     /* The last stream found no room: FULL_BUDGET, the budget spent, or
-     * FULL_BRIM, the desktop full to the top; 0 while there is room. */
+     * FULL_BRIM, the desktop full to the top; 0 while there is room. FULL_KINDS
+     * is set when it is turned away: as many liquids as one desktop holds are
+     * on it already. */
     int full;
 
     float *snap;            /* the particles as (x, y) pairs, for the picture */
+    float *snap_kind;       /* ...and the place of each one's liquid */
     int snap_n, snap_cap;
     bool asleep;            /* as of the last copy */
     int substeps, iters;
@@ -161,16 +173,14 @@ static bool run_idle(const struct FwmLiquidRun *run);
  * fullscreen one, which covers the desktop and stops the liquid anyway, and
  * not one that has not painted anything yet.
  *
- * Free, the ones the physics moves: as dense against the liquid as the
- * window is against water — [liquids] window_density, scaled as the window's
- * weight is — over how dense the liquid is, going as fast as the physics
- * says, under its own gravity. Held, the ones the physics does not: pinned,
+ * Free, the ones the physics moves: as dense against water as [liquids]
+ * window_density says a window is, scaled as the window's weight is — the
+ * liquid is in the same units, whichever liquids are in it — going as fast
+ * as the physics says, under its own gravity. Held, the ones the physics does not: pinned,
  * tiled, on a floating desktop, or in the hand. */
 static void solids_sync(FwmServer *server, struct FwmLiquidRun *run, int d) {
     LiquidSolid s[LIQUID_SOLIDS_MAX];
     int n = 0;
-    double heavy = kind_of(server, run->kind)->density;
-    if (!(heavy > 0.0)) heavy = 1.0;
     const PhysicsWorld *world = &server->physics;
     FwmView *view;
     wl_list_for_each(view, &server->views, link) {
@@ -187,7 +197,7 @@ static void solids_sync(FwmServer *server, struct FwmLiquidRun *run, int d) {
             .w = b->width, .h = b->height,
             .angle = b->spin ? b->angle : 0.0,
             .density = free ? server->config.liquids.window_density
-                              * physics_body_density(world, b) / heavy : 0.0,
+                              * physics_body_density(world, b) : 0.0,
             .vx = b->vx, .vy = b->vy,
             .spin = b->spin ? b->angvel : 0.0,
             .ay = physics_body_gravity(world, b),
@@ -288,6 +298,7 @@ static struct FwmLiquidRun *run_create(FwmServer *server, int desktop) {
     if (!run->sim) { free(run); return NULL; }
     liquid_set_threads(run->sim, threads_wanted(cfg));
     run->desktop = desktop;
+    for (int s = 0; s < LIQUID_MAX_KINDS; s++) run->slot[s] = -1;
     atomic_init(&run->busy, false);
     pthread_mutex_init(&run->lock, NULL);
     pthread_cond_init(&run->cond, NULL);
@@ -322,6 +333,7 @@ static void run_destroy(FwmServer *server) {
     liquid_paint_destroy(run->paint);
     liquid_destroy(run->sim);
     free(run->snap);
+    free(run->snap_kind);
     free(run);
     server->liquid = NULL;
     /* Nothing holds the windows up any more. */
@@ -368,43 +380,68 @@ static bool pointer_target(FwmServer *server, int *d, double *x, double *y) {
     return true;
 }
 
-/* The liquid, standing on desktop `d` and being liquid `kind` — started there
- * if there is none yet, moved and changed if what there is holds nothing.
- * NULL when it holds something else or somewhere else: that desktop goes in
- * `*elsewhere` and that liquid in `*other` (-1 both when it could not be
- * started at all), so each caller can say so in its own words.
+/* The place in the liquid that liquid `kind` (an id in server->liquid_kinds)
+ * is poured into: the one it has, or a free one. -1 when every place has a
+ * liquid in it. A place counts as taken while anything is waiting to be
+ * poured into it. */
+static int slot_for(struct FwmLiquidRun *run, int kind) {
+    for (int s = 0; s < LIQUID_MAX_KINDS; s++)
+        if (run->slot[s] == kind) return s;
+    for (int s = 0; s < LIQUID_MAX_KINDS; s++) {
+        bool waiting = (run->pour > 0 && run->pour_slot == s)
+                    || (run->stream > 0 && run->stream_slot == s);
+        if (run->slot[s] < 0 || (run->slot_n[s] == 0 && !waiting
+                                 && !(run->remove & (1u << s)))) {
+            run->slot[s] = kind;
+            run->slot_n[s] = 0;
+            return s;
+        }
+    }
+    return -1;
+}
+
+/* The liquid on desktop `d`, with a place in it for liquid `kind` — started
+ * there if there is none yet, moved there if what there is holds nothing.
+ * NULL when it stands on another desktop, which goes in `*elsewhere`, or
+ * holds as many liquids as it can (`*elsewhere` -1), or could not be started
+ * at all.
  *
  * Liquid that cannot be seen is not stepped, and a desktop's worth of it
  * waiting unseen elsewhere is one more desktop the CPU is spent on the moment
  * it comes back; until there are liquids on more than one desktop at once,
- * the one there is says where. And one liquid at a time: two in one pool is
- * a pressure solve with two densities in it, which is the layers this is not
- * yet. A clear still waiting for its tick counts as empty, since the clear
- * goes in before anything poured after it. */
+ * the one there is says where. A clear still waiting for its tick counts as
+ * empty, since the clear goes in before anything poured after it. */
 static struct FwmLiquidRun *claim_desktop(FwmServer *server, int d, int kind,
-                                          int *elsewhere, int *other) {
+                                          int *elsewhere, int *slot) {
     struct FwmLiquidRun *run = server->liquid;
     *elsewhere = -1;
-    *other = -1;
-    if (run && (run->desktop != d || run->kind != kind)) {
+    *slot = -1;
+    if (run && run->desktop != d) {
         bool empty = run->clear
                   || (run->pour == 0 && run->stream == 0 && run->snap_n == 0
                       && run_idle(run) && liquid_count(run->sim) == 0);
         if (!empty) {
             *elsewhere = run->desktop;
-            *other = run->kind;
             return NULL;
         }
         run->desktop = d;
-        run->kind = kind;
+        for (int s = 0; s < LIQUID_MAX_KINDS; s++) run->slot[s] = -1;
     }
     if (!run) {
         run = server->liquid = run_create(server, d);
         if (!run) return NULL;
-        run->kind = kind;
         wlr_log(WLR_INFO, "liquid: on desktop %d", d);
     }
-    return run;
+    *slot = slot_for(run, kind);
+    return *slot >= 0 ? run : NULL;
+}
+
+/* The place liquid `kind` has in the liquid there is, or -1. */
+static int slot_of(const struct FwmLiquidRun *run, int kind) {
+    if (!run) return -1;
+    for (int s = 0; s < LIQUID_MAX_KINDS; s++)
+        if (run->slot[s] == kind) return s;
+    return -1;
 }
 
 /* The liquid by id, water standing in for one that has gone. */
@@ -424,7 +461,7 @@ static void kinds_sync_water(FwmServer *server) {
     w->viscosity = server->config.liquids.viscosity;
 }
 
-bool server_liquid_pour(FwmServer *server, int count, int *desktop_out,
+bool server_liquid_pour(FwmServer *server, int count, const char *liquid, int *desktop_out,
                         char *err, size_t errcap) {
     const LiquidsConfig *cfg = &server->config.liquids;
     if (!cfg->enabled) {
@@ -452,13 +489,34 @@ bool server_liquid_pour(FwmServer *server, int count, int *desktop_out,
         x = out->box.width / 2.0;
         y = out->box.height / 4.0;
     }
-    int elsewhere, other;
-    int kind = server->liquid ? server->liquid->kind : 0;
-    struct FwmLiquidRun *run = claim_desktop(server, d, kind, &elsewhere, &other);
+    /* Which liquid, by its name in the list; water when none is named. */
+    int kind = 0;
+    if (liquid) {
+        kinds_sync_water(server);
+        const LiquidKinds *ks = &server->liquid_kinds;
+        kind = -1;
+        for (int i = 0; i < ks->count && kind < 0; i++)
+            if (strcasecmp(ks->kind[i].name, liquid) == 0) kind = ks->kind[i].id;
+        if (kind < 0) {
+            snprintf(err, errcap, "there is no liquid called \"%s\" — the liquids menu "
+                                  "has the list", liquid);
+            return false;
+        }
+    }
+    if (server->liquid && server->liquid->pour > 0 && slot_of(server->liquid, kind)
+                                                       != server->liquid->pour_slot) {
+        snprintf(err, errcap, "another liquid is still being poured — a moment");
+        return false;
+    }
+    int elsewhere, slot;
+    struct FwmLiquidRun *run = claim_desktop(server, d, kind, &elsewhere, &slot);
     if (!run) {
         if (elsewhere >= 0)
             snprintf(err, errcap, "the liquid is on desktop %d — fwmctl liquid clear "
                                   "first (one desktop at a time, for now)", elsewhere);
+        else if (server->liquid)
+            snprintf(err, errcap, "%d liquids are on that desktop already — drain one",
+                     LIQUID_MAX_KINDS);
         else
             snprintf(err, errcap, "the liquid could not be started");
         return false;
@@ -466,6 +524,8 @@ bool server_liquid_pour(FwmServer *server, int count, int *desktop_out,
 
     if (count <= 0) count = cfg->particles / 4;
     if (count < 1) count = 1;
+    /* One pour waits at a time; a second, of water as well, joins it. */
+    run->pour_slot = slot;
     run->pour += count;
     if (run->pour > cfg->particles) run->pour = cfg->particles;
     run->pour_x = x;
@@ -497,7 +557,16 @@ void server_liquid_state(FwmServer *server, FwmLiquidState *st) {
     st->step_ms = run->step_ms;
     st->threads = liquid_threads(run->sim);
     st->drawn = run->paint && liquid_paint_current(run->paint);
-    snprintf(st->kind, sizeof(st->kind), "%s", kind_of(server, run->kind)->name);
+    /* The liquids in it, by name, as many as fit. */
+    size_t used = 0;
+    for (int s = 0; s < LIQUID_MAX_KINDS && used + 1 < sizeof(st->kind); s++) {
+        if (run->slot[s] < 0 || run->slot_n[s] == 0) continue;
+        int w = snprintf(st->kind + used, sizeof(st->kind) - used, "%s%s",
+                         used ? ", " : "", kind_of(server, run->slot[s])->name);
+        if (w < 0) break;
+        used += (size_t)w;
+        if (used >= sizeof(st->kind)) { used = sizeof(st->kind) - 1; break; }
+    }
 }
 
 /* ── the bucket ──────────────────────────────────────────────────────────
@@ -772,21 +841,24 @@ static void hand_tick(FwmServer *server, double elapsed) {
     }
     if (!hand->pouring) return;
 
-    int elsewhere, other;
-    run = claim_desktop(server, d, hand->kind, &elsewhere, &other);
+    int elsewhere, slot;
+    run = claim_desktop(server, d, hand->kind, &elsewhere, &slot);
     if (!run) {
-        if (!hand->told && other >= 0) {
-            const char *there = kind_of(server, other)->name;
-            if (elsewhere != d)
-                toast_show(server, true, "%s is on desktop %d — drain it there first",
-                           there, elsewhere + 1);
-            else
-                toast_show(server, true, "There is %s here — drain it first; "
-                           "liquids do not mix yet", there);
+        if (!hand->told) {
+            if (elsewhere >= 0)
+                toast_show(server, true, "The liquid is on desktop %d — drain it there first",
+                           elsewhere + 1);
+            else if (server->liquid)
+                toast_show(server, true, "%d liquids are here already — drain one first",
+                           LIQUID_MAX_KINDS);
         }
         hand->told = true;
         return;
     }
+    /* What is waiting to go in is one liquid; a bucket swapped for another
+     * between two handovers starts its own stream. */
+    if (run->stream > 0 && run->stream_slot != slot) run->stream = 0;
+    run->stream_slot = slot;
 
     double rate = cfg->particles * BUCKET_POUR_SHARE;
     if (rate < 200.0) rate = 200.0;
@@ -817,7 +889,6 @@ static void liquids_menu_fill(FwmServer *server, LiquidsMenuState *st) {
     kinds_sync_water(server);
     const LiquidKinds *ks = &server->liquid_kinds;
     struct FwmLiquidRun *run = server->liquid;
-    bool there = run && (run->snap_n > 0 || run->pour > 0 || run->stream > 0) && !run->clear;
     st->count = ks->count < LIQUIDS_MENU_MAX ? ks->count : LIQUIDS_MENU_MAX;
     st->in_hand = -1;
     for (int i = 0; i < st->count; i++) {
@@ -826,8 +897,12 @@ static void liquids_menu_fill(FwmServer *server, LiquidsMenuState *st) {
         snprintf(it->name, sizeof(it->name), "%s", k->name);
         memcpy(it->color, k->color, sizeof(it->color));
         liquid_kind_describe(k, it->desc, sizeof(it->desc));
-        it->desktop = there && run->kind == k->id ? run->desktop : -1;
-        it->removable = k->id != 0;
+        int s = slot_of(run, k->id);
+        bool there = s >= 0 && !run->clear
+                  && (run->slot_n[s] > 0 || (run->pour > 0 && run->pour_slot == s)
+                      || (run->stream > 0 && run->stream_slot == s));
+        it->desktop = there ? run->desktop : -1;
+        it->removable = k->id != 0 && !k->preset;
         if (server->liquid_hand && server->liquid_hand->kind == k->id) st->in_hand = i;
     }
     st->hover = server->liquids_buffer ? server->liquids_hover : -1;
@@ -886,9 +961,11 @@ static void liquid_form_open(FwmServer *server, int edit_id);
 static void remove_kind(FwmServer *server, int id) {
     if (!liquid_kinds_remove(&server->liquid_kinds, id)) return;
     struct FwmLiquidRun *run = server->liquid;
-    if (run && run->kind == id) {
-        server_liquid_clear(server);
-        run->kind = 0;
+    int s = slot_of(run, id);
+    if (s >= 0) {
+        run->remove |= 1u << s;
+        if (run->pour_slot == s) run->pour = 0;
+        if (run->stream_slot == s) run->stream = 0;
     }
     if (server->liquid_hand && server->liquid_hand->kind == id) server_liquid_put_down(server);
     server_state_save_liquids(server);
@@ -1044,7 +1121,7 @@ static void form_submit(FwmServer *server) {
      * picture, since both are read from the registry. */
     if (server->liquid_hand && server->liquid_hand->kind == id)
         hand_paint(server, server->liquid_hand);
-    if (server->liquid && server->liquid->kind == id) server->liquid->dirty = true;
+    if (slot_of(server->liquid, id) >= 0) server->liquid->dirty = true;
     server_kill_liquid_form(server);
     liquids_menu_refresh(server);
 }
@@ -1116,17 +1193,26 @@ static bool desktop_covered(FwmServer *server, int d) {
 }
 
 static void snapshot_take(struct FwmLiquidRun *run) {
-    int n = liquid_count(run->sim), stride;
+    int n = liquid_count(run->sim), stride, kstride;
     const float *p = liquid_positions(run->sim, &stride);
+    const unsigned *kd = liquid_kinds_of(run->sim, &kstride);
     if (n > run->snap_cap) {
         float *s = realloc(run->snap, sizeof(float) * 2 * (size_t)n);
-        if (!s) n = run->snap_cap;
-        else { run->snap = s; run->snap_cap = n; }
+        float *k = s ? realloc(run->snap_kind, sizeof(float) * (size_t)n) : NULL;
+        if (s) run->snap = s;
+        if (k) run->snap_kind = k;
+        if (!s || !k) n = run->snap_cap;
+        else run->snap_cap = n;
     }
+    int count[LIQUID_MAX_KINDS] = { 0 };
     for (int i = 0; i < n; i++) {
         run->snap[2 * i]     = p[i * stride];
         run->snap[2 * i + 1] = p[i * stride + 1];
+        unsigned k = kd[i * kstride] < LIQUID_MAX_KINDS ? kd[i * kstride] : 0;
+        run->snap_kind[i] = (float)k;
+        count[k]++;
     }
+    memcpy(run->slot_n, count, sizeof(count));
     run->snap_n = n;
     run->asleep = liquid_asleep(run->sim);
     run->substeps = liquid_last_substeps(run->sim);
@@ -1232,11 +1318,16 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
         }
         liquid_set_budget(run->sim, cfg->particles);
         liquid_set_threads(run->sim, threads_wanted(cfg));
-        /* The liquid's own thickness; the surface is still [liquids]' for
-         * every liquid, until there is a form row for it. */
+        /* Each liquid's own thickness and weight; the surface is [liquids]'
+         * for all of them, until there is a form row for it. */
         kinds_sync_water(server);
-        liquid_set_material(run->sim, &(LiquidMaterial){
-            .viscosity = kind_of(server, run->kind)->viscosity, .tension = cfg->tension });
+        for (int s = 0; s < LIQUID_MAX_KINDS; s++) {
+            const LiquidKind *k = kind_of(server, run->slot[s] >= 0 ? run->slot[s] : 0);
+            LiquidMaterial m = { .viscosity = k->viscosity, .tension = cfg->tension,
+                                 .density = k->density };
+            if (s == 0) liquid_set_material(run->sim, &m);
+            else liquid_set_kind(run->sim, s, &m);
+        }
 
         /* The walls are the monitor showing the desktop, and the floor is the
          * one the windows stand on — above a bar that reserved the bottom of
@@ -1260,14 +1351,25 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
             run->clear = false;
             changed = true;
         }
+        /* A liquid taken off the list goes from the desktop with it, and
+         * leaves the others. */
+        for (int s = 0; run->remove && s < LIQUID_MAX_KINDS; s++) {
+            if (!(run->remove & (1u << s))) continue;
+            liquid_remove_kind(run->sim, s);
+            run->slot[s] = -1;
+            run->remove &= ~(1u << s);
+            changed = true;
+        }
         if (run->pour > 0 && run->box_w > 0.0) {
-            int got = liquid_pour(run->sim, run->pour_x, run->pour_y, run->pour, 0.0, 0.0);
+            int got = liquid_pour_kind(run->sim, run->pour_slot, run->pour_x, run->pour_y,
+                                       run->pour, 0.0, 0.0);
             wlr_log(WLR_DEBUG, "liquid: poured %d of %d", got, run->pour);
             run->pour = 0;
             changed = true;
         }
         if (run->stream > 0 && run->box_w > 0.0) {
-            int got = liquid_pour(run->sim, run->stream_x, run->stream_y, run->stream,
+            int got = liquid_pour_kind(run->sim, run->stream_slot, run->stream_x, run->stream_y,
+                                       run->stream,
                                   run->stream_vx, run->stream_vy);
             run->full = got > 0 || liquid_room(run->sim) > 0 ? 0
                       : liquid_count(run->sim) >= liquid_budget(run->sim) ? FULL_BUDGET
@@ -1341,11 +1443,15 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
         }
         if (run->paint) {
             kinds_sync_water(server);
-            const LiquidKind *k = kind_of(server, run->kind);
-            const float color[4] = { k->color[0] * k->color[3], k->color[1] * k->color[3],
-                                     k->color[2] * k->color[3], k->color[3] };
-            fresh = liquid_paint_draw(run->paint, run->snap, run->snap_n,
-                                      liquid_spacing(run->sim), color, &run->damage);
+            float palette[LIQUID_PAINT_KINDS][4];
+            for (int s = 0; s < LIQUID_PAINT_KINDS; s++) {
+                const LiquidKind *k = kind_of(server, s < LIQUID_MAX_KINDS && run->slot[s] >= 0
+                                                      ? run->slot[s] : 0);
+                for (int c = 0; c < 3; c++) palette[s][c] = k->color[c] * k->color[3];
+                palette[s][3] = k->color[3];
+            }
+            fresh = liquid_paint_draw(run->paint, run->snap, run->snap_kind, run->snap_n,
+                                      liquid_spacing(run->sim), palette, &run->damage);
         }
         run->dirty = false;
     }

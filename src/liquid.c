@@ -104,6 +104,22 @@
  * tensionless liquid poured in overlapping blobs halfway round. */
 #define DRIFT_RATE 4.5f   /* per second */
 
+/* Liquids that share a cell move with it: the grid sees the cell, and has
+ * no way to tell one liquid in it from another. So a drop of oil smaller
+ * than a cell, inside water, would never come up — which real ones do, at
+ * the speed at which its buoyancy is balanced by the drag on it (Stokes):
+ * (rho - rho_around) g d^2 / (18 mu), d the drop's size, and rho_around
+ * and mu what it moves through: the cell it is in, less its own liquid — a
+ * drop of honey in water falls through water, and is held back by water's
+ * thickness, not its own. The drop is a cell: what is smaller than one the
+ * grid does not see, and so moves as one. Each particle moves that much
+ * against the cell it is in, which is nothing in a cell of its own liquid;
+ * between two, it sorts them, and the edge between layers stays sharp. A
+ * liquid with no thickness at all would give no drag and an endless speed,
+ * so the drag is at least this thick's, px²/s, and no drift crosses half a
+ * cell a step. */
+#define DRIFT_NU_LEAST 1.0f
+
 /* The pressure solve stops when nothing is left over bigger than this
  * fraction of what it started with. Tighter is invisible; looser lets a deep
  * pool sag. */
@@ -133,6 +149,7 @@ typedef struct {
      * smear it out, and it doubles as the strain rate the viscosity is made
      * of. */
     float c00, c01, c10, c11;
+    unsigned kind;         /* which liquid it is */
 } Particle;
 
 struct FwmLiquid {
@@ -155,7 +172,19 @@ struct FwmLiquid {
     unsigned char *uok, *vok, *okb;  /* edges holding a real value */
     float *ftmp;           /* extrapolation scratch, edge-sized */
 
-    float *mass;           /* per cell */
+    float *mass;           /* per cell: how much liquid, as area */
+    float *heavy;          /* ...and as weight, area times density */
+    /* With more than one liquid in the box, for the drift between them: area
+     * times density times viscosity, and the area of each liquid on its own,
+     * LIQUID_MAX_KINDS arrays of cn back to back. */
+    float *thick, *kvol;
+    bool mixed;            /* more than one liquid in it, as of the step */
+    float *rho;            /* how dense the liquid in it is */
+    /* The pressure solve's weights: across the edge to the right of a cell
+     * and the one below it, one over the density there — 0 where the cell on
+     * the other side is not liquid — and the cell's own diagonal. All 1s and
+     * a count of neighbours with one liquid in the box. */
+    float *wr, *wd, *pdiag;
     float *colour;         /* 0 outside .. 1 inside, for the tension */
     float *cover;          /* how much of each cell the solids stand on, 0 .. 1 */
     float *txx, *tyy, *txy;
@@ -168,14 +197,16 @@ struct FwmLiquid {
      * cell, which of its neighbours count and how many are not wall. */
     int   *fluid;
     int    nfluid;
-    unsigned char *nbits, *ndiag;
+    unsigned char *nbits;
     int    strip_at[LIQUID_MAX_THREADS + 1];
     int    strip_col[LIQUID_MAX_THREADS + 1];
     unsigned char *ring;   /* per wall cell, for release_walls */
     float *pres, *rhs, *res, *aux, *dir, *prec, *q;
     double last_h;         /* the step `pres` was solved for */
 
-    LiquidMaterial mat;
+    LiquidMaterial mat;    /* the tension; and liquid 0, as kind[0] is */
+    LiquidMaterial kind[LIQUID_MAX_KINDS];
+    unsigned present;      /* which kinds have particles, as of the step */
     double gx, gy;
     bool have_g;
 
@@ -289,7 +320,8 @@ FwmLiquid *liquid_create(double spacing, int budget) {
     l->inv_dx = 1.0f / l->dx;
     l->pmass  = (float)(spacing * spacing);
     l->budget = budget;
-    l->mat = (LiquidMaterial){ .viscosity = 0.0, .tension = 0.0 };
+    l->mat = (LiquidMaterial){ .viscosity = 0.0, .tension = 0.0, .density = 1.0 };
+    for (int k = 0; k < LIQUID_MAX_KINDS; k++) l->kind[k] = l->mat;
     l->rng = 0x2545f491u;
     l->parts = 1;
     return l;
@@ -299,8 +331,10 @@ static void grid_free(FwmLiquid *l) {
     free(l->u);    free(l->um);   free(l->v);    free(l->vm);
     free(l->uok);  free(l->vok);  free(l->okb);  free(l->ftmp);
     free(l->mass); free(l->colour); free(l->cover);
+    free(l->heavy); free(l->thick); free(l->kvol);
+    free(l->rho); free(l->wr); free(l->wd); free(l->pdiag);
     free(l->txx);  free(l->tyy);  free(l->txy);  free(l->type);
-    free(l->fluid); free(l->nbits); free(l->ndiag);
+    free(l->fluid); free(l->nbits);
     free(l->sid);   free(l->flood); free(l->pocket);
     free(l->ring);
     free(l->pgrid); free(l->pocc);
@@ -309,9 +343,10 @@ static void grid_free(FwmLiquid *l) {
     l->u = l->um = l->v = l->vm = l->ftmp = NULL;
     l->uok = l->vok = l->okb = NULL;
     l->mass = l->colour = l->cover = l->txx = l->tyy = l->txy = NULL;
+    l->heavy = l->thick = l->kvol = l->rho = l->wr = l->wd = l->pdiag = NULL;
     l->type = NULL;
     l->fluid = NULL;
-    l->nbits = l->ndiag = NULL;
+    l->nbits = NULL;
     l->sid = NULL;
     l->flood = NULL;
     l->pocket = NULL;
@@ -341,7 +376,7 @@ static bool parts_alloc(FwmLiquid *l) {
     free(l->pocc);
     l->pgrid = NULL;
     l->pocc = NULL;
-    l->pstride = 2 * l->un + 2 * l->vn + l->cn;
+    l->pstride = 2 * l->un + 2 * l->vn + (3 + LIQUID_MAX_KINDS) * l->cn;
     if (l->parts > 1) {
         l->pgrid = malloc((size_t)(l->parts - 1) * l->pstride * sizeof(float));
         if (!l->pgrid) return false;
@@ -428,10 +463,15 @@ void liquid_set_box(FwmLiquid *l, double w, double h) {
     GRAB(l->okb, fmax, 1);              GRAB(l->ftmp, fmax, sizeof(float));
     GRAB(l->mass, l->cn, sizeof(float)); GRAB(l->colour, l->cn, sizeof(float));
     GRAB(l->cover, l->cn, sizeof(float));
+    GRAB(l->heavy, l->cn, sizeof(float)); GRAB(l->rho, l->cn, sizeof(float));
+    GRAB(l->thick, l->cn, sizeof(float));
+    GRAB(l->kvol, (size_t)LIQUID_MAX_KINDS * l->cn, sizeof(float));
+    GRAB(l->wr, l->cn, sizeof(float));  GRAB(l->wd, l->cn, sizeof(float));
+    GRAB(l->pdiag, l->cn, sizeof(float));
     GRAB(l->txx, l->cn, sizeof(float)); GRAB(l->tyy, l->cn, sizeof(float));
     GRAB(l->txy, l->cn, sizeof(float)); GRAB(l->type, l->cn, 1);
     GRAB(l->fluid, l->cn, sizeof(int));
-    GRAB(l->nbits, l->cn, 1);           GRAB(l->ndiag, l->cn, 1);
+    GRAB(l->nbits, l->cn, 1);
     GRAB(l->sid, l->cn, 1);             GRAB(l->flood, l->cn, sizeof(int));
     GRAB(l->pocket, l->cn, sizeof(int));
     GRAB(l->ring, (size_t)(2 * (l->nx + l->ny)), 1);
@@ -470,21 +510,48 @@ void liquid_set_box(FwmLiquid *l, double w, double h) {
     wake(l);
 }
 
-void liquid_set_material(FwmLiquid *l, const LiquidMaterial *m) {
-    if (!l || !m) return;
+/* The ranges a liquid is held to. The step is chosen from these, so nothing
+ * may be negative or so large that the step it implies is a rounding error.
+ * The config and the menu clamp the same; this is for a caller that is not
+ * them. */
+static LiquidMaterial clamped(const LiquidMaterial *m) {
     LiquidMaterial v = *m;
-    /* The step is chosen from these, so nothing may be negative or so large
-     * that the step it implies is a rounding error. The config clamps the
-     * same ranges; this is for a caller that is not the config. */
     if (!(v.viscosity >= 0.0)) v.viscosity = 0.0;
     if (v.viscosity > 100000.0) v.viscosity = 100000.0;
     if (!(v.tension >= 0.0)) v.tension = 0.0;
     if (v.tension > 500.0) v.tension = 500.0;
-    if (v.viscosity == l->mat.viscosity && v.tension == l->mat.tension) return;
+    if (!(v.density > 0.0)) v.density = 1.0;
+    if (v.density < 0.05) v.density = 0.05;
+    if (v.density > 50.0) v.density = 50.0;
+    return v;
+}
+
+void liquid_set_material(FwmLiquid *l, const LiquidMaterial *m) {
+    if (!l || !m) return;
+    LiquidMaterial v = clamped(m);
+    if (v.viscosity == l->mat.viscosity && v.tension == l->mat.tension
+        && v.density == l->mat.density) return;
     l->mat = v;
+    l->kind[0].viscosity = v.viscosity;
+    l->kind[0].density = v.density;
     /* A thinner liquid flows where a thicker one had stopped, and a stronger
      * surface pulls on a puddle that had settled under a weaker one. */
     wake(l);
+}
+
+void liquid_set_kind(FwmLiquid *l, int kind, const LiquidMaterial *m) {
+    if (!l || !m || kind < 0 || kind >= LIQUID_MAX_KINDS) return;
+    LiquidMaterial v = clamped(m);
+    LiquidMaterial *k = &l->kind[kind];
+    if (v.viscosity == k->viscosity && v.density == k->density) return;
+    k->viscosity = v.viscosity;
+    k->density = v.density;
+    if (kind == 0) {
+        l->mat.viscosity = v.viscosity;
+        l->mat.density = v.density;
+    }
+    /* A liquid made heavier sinks through what it lay on. */
+    if (l->present & (1u << kind)) wake(l);
 }
 
 void liquid_set_budget(FwmLiquid *l, int budget) {
@@ -506,7 +573,12 @@ static bool reserve(FwmLiquid *l, int want) {
 
 int liquid_pour(FwmLiquid *l, double cx, double cy, int count,
                 double vx, double vy) {
-    if (!l || count <= 0 || !l->u) return 0;
+    return liquid_pour_kind(l, 0, cx, cy, count, vx, vy);
+}
+
+int liquid_pour_kind(FwmLiquid *l, int kind, double cx, double cy, int count,
+                     double vx, double vy) {
+    if (!l || count <= 0 || !l->u || kind < 0 || kind >= LIQUID_MAX_KINDS) return 0;
     int room = liquid_room(l);
     if (room <= 0) return 0;
     if (count > room) count = room;
@@ -546,11 +618,13 @@ int liquid_pour(FwmLiquid *l, double cx, double cy, int count,
             l->p[l->n++] = (Particle){
                 .x = (float)px, .y = (float)py,
                 .vx = (float)vx, .vy = (float)vy,
+                .kind = (unsigned)kind,
             };
             added++;
         }
     }
     if (added) {
+        l->present |= 1u << kind;
         /* Near the liquid now, for liquid_set_solids, before a step says so. */
         if (l->n == added) {
             l->lo_x = l->lo_y = INFINITY;
@@ -563,6 +637,24 @@ int liquid_pour(FwmLiquid *l, double cx, double cy, int count,
         wake(l);
     }
     return added;
+}
+
+int liquid_count_kind(const FwmLiquid *l, int kind) {
+    if (!l) return 0;
+    int n = 0;
+    for (int k = 0; k < l->n; k++) n += l->p[k].kind == (unsigned)kind;
+    return n;
+}
+
+int liquid_remove_kind(FwmLiquid *l, int kind) {
+    if (!l) return 0;
+    int out = 0;
+    for (int k = 0; k < l->n; k++)
+        if (l->p[k].kind != (unsigned)kind) l->p[out++] = l->p[k];
+    int gone = l->n - out;
+    l->n = out;
+    if (gone) wake(l);
+    return gone;
 }
 
 void liquid_clear(FwmLiquid *l) {
@@ -1261,8 +1353,21 @@ static void strip_list(FwmLiquid *l, int k) {
             if (t[c + 1 - cw] == FLUID && i + 1 < i1) b |= NB_UR;
             l->fluid[n] = (int)c;
             l->nbits[n] = (unsigned char)b;
-            l->ndiag[n] = (unsigned char)((t[c - 1] != SOLID) + (t[c + 1] != SOLID)
-                                        + (t[c - cw] != SOLID) + (t[c + cw] != SOLID));
+            /* Across an edge, one over its density: the two cells' between
+             * liquid and liquid, the liquid's own against air, and nothing
+             * against a wall. */
+            const float *rho = l->rho;
+            float rc = rho[c];
+            l->wr[c] = t[c + 1] == FLUID ? 2.0f / (rc + rho[c + 1]) : 0.0f;
+            l->wd[c] = t[c + cw] == FLUID ? 2.0f / (rc + rho[c + cw]) : 0.0f;
+            float d = 0.0f;
+            const size_t around[4] = { c - 1, c + 1, c - cw, c + cw };
+            for (int a = 0; a < 4; a++) {
+                size_t q = around[a];
+                if (t[q] == FLUID)    d += 2.0f / (rc + rho[q]);
+                else if (t[q] == AIR) d += 1.0f / rc;
+            }
+            l->pdiag[c] = d;
             n++;
         }
 }
@@ -1271,20 +1376,21 @@ static void strip_preconditioner(FwmLiquid *l, int k0, int k1) {
     const float tau = 0.97f, sigma = 0.25f;
     const int cw = l->cw;
     float *pc = l->prec;
+    const float *wr = l->wr, *wd = l->wd;
     for (int k = k0; k < k1; k++) {
         int c = l->fluid[k];
         unsigned b = l->nbits[k];
-        float diag = (float)l->ndiag[k];
+        float diag = l->pdiag[c];
         float e = diag;
         if (b & NB_LS) {
-            float a = pc[c - 1] * pc[c - 1];
-            e -= a;
-            if (b & NB_LD) e -= tau * a;
+            float a = wr[c - 1] * pc[c - 1];
+            e -= a * a;
+            if (b & NB_LD) e -= tau * wr[c - 1] * wd[c - 1] * pc[c - 1] * pc[c - 1];
         }
         if (b & NB_U) {
-            float a = pc[c - cw] * pc[c - cw];
-            e -= a;
-            if (b & NB_UR) e -= tau * a;
+            float a = wd[c - cw] * pc[c - cw];
+            e -= a * a;
+            if (b & NB_UR) e -= tau * wd[c - cw] * wr[c - cw] * pc[c - cw] * pc[c - cw];
         }
         if (e < sigma * diag) e = diag;
         pc[c] = 1.0f / sqrtf(e);
@@ -1321,16 +1427,17 @@ static float strip_rhs(FwmLiquid *l, int k0, int k1, float h) {
 /* y = A x over the strip, and the dot of y with `x` for it. */
 static double strip_multiply(const FwmLiquid *l, int k0, int k1, const float *x, float *y) {
     const int cw = l->cw;
+    const float *wr = l->wr, *wd = l->wd;
     double dot = 0.0;
     for (int k = k0; k < k1; k++) {
         int c = l->fluid[k];
         unsigned b = l->nbits[k];
         float s = 0.0f;
-        if (b & NB_L) s += x[c - 1];
-        if (b & NB_R) s += x[c + 1];
-        if (b & NB_U) s += x[c - cw];
-        if (b & NB_D) s += x[c + cw];
-        float v = (float)l->ndiag[k] * x[c] - s;
+        if (b & NB_L) s += wr[c - 1] * x[c - 1];
+        if (b & NB_R) s += wr[c] * x[c + 1];
+        if (b & NB_U) s += wd[c - cw] * x[c - cw];
+        if (b & NB_D) s += wd[c] * x[c + cw];
+        float v = l->pdiag[c] * x[c] - s;
         y[c] = v;
         dot += (double)v * (double)x[c];
     }
@@ -1362,14 +1469,14 @@ static double strip_apply(FwmLiquid *l, int part, int k0, int k1, const float *x
 /* z = M^-1 r over the strip, and the dot of z with r for it. */
 static double strip_precondition(FwmLiquid *l, int k0, int k1, const float *r, float *z) {
     const int cw = l->cw;
-    const float *pc = l->prec;
+    const float *pc = l->prec, *wr = l->wr, *wd = l->wd;
     float *q = l->q;
     for (int k = k0; k < k1; k++) {
         int c = l->fluid[k];
         unsigned b = l->nbits[k];
         float s = r[c];
-        if (b & NB_LS) s += pc[c - 1] * q[c - 1];
-        if (b & NB_U)  s += pc[c - cw] * q[c - cw];
+        if (b & NB_LS) s += wr[c - 1] * pc[c - 1] * q[c - 1];
+        if (b & NB_U)  s += wd[c - cw] * pc[c - cw] * q[c - cw];
         q[c] = s * pc[c];
     }
     double dot = 0.0;
@@ -1377,8 +1484,8 @@ static double strip_precondition(FwmLiquid *l, int k0, int k1, const float *r, f
         int c = l->fluid[k];
         unsigned b = l->nbits[k];
         float s = q[c];
-        if (b & NB_RS) s += pc[c] * z[c + 1];
-        if (b & NB_D)  s += pc[c] * z[c + cw];
+        if (b & NB_RS) s += wr[c] * pc[c] * z[c + 1];
+        if (b & NB_D)  s += wd[c] * pc[c] * z[c + cw];
         z[c] = s * pc[c];
         dot += (double)z[c] * (double)r[c];
     }
@@ -1588,9 +1695,18 @@ static double stable_dt(const FwmLiquid *l) {
     double h = CFL * dx / (fmax(l->vmax, l->smax) + 1e-3);
     /* Viscosity is explicit diffusion, and explicit diffusion has its own
      * limit: the momentum it moves in one step must not overshoot the
-     * neighbour it is evening out with. */
-    if (l->mat.viscosity > 0.0) {
-        double hv = 0.2 * dx * dx / l->mat.viscosity;
+     * neighbour it is evening out with. With several liquids, where a thick
+     * heavy one drags on a thin light one across the edge between them it
+     * moves the light one as if it were as thick as the heavy one's weight
+     * makes it: the worst of those. */
+    double mu = 0.0, lightest = INFINITY;
+    for (int k = 0; k < LIQUID_MAX_KINDS; k++) {
+        if (!(l->present & (1u << k))) continue;
+        mu = fmax(mu, l->kind[k].viscosity * l->kind[k].density);
+        lightest = fmin(lightest, l->kind[k].density);
+    }
+    if (mu > 0.0) {
+        double hv = 0.2 * dx * dx * lightest / mu;
         if (hv < h) h = hv;
     }
     /* Capillary waves are fastest at the shortest wavelength the grid holds,
@@ -1625,20 +1741,30 @@ static double stable_dt(const FwmLiquid *l) {
  * multiplied by, so the two go in as one term and one pass over the
  * particles. */
 struct grid_view {
-    float *u, *um, *v, *vm, *mass;
+    float *u, *um, *v, *vm, *mass, *heavy, *thick, *kvol;
     unsigned char *occ;
 };
 
 static void gather(const FwmLiquid *l, int lo, int hi, float h, const struct grid_view *g) {
     const float x0 = l->ox + 0.1f * l->dx, x1 = l->ox + l->nx * l->dx - 0.1f * l->dx;
     const float y0 = l->oy + 0.1f * l->dx, y1 = l->oy + l->ny * l->dx - 0.1f * l->dx;
-    const float dx = l->dx, idx = l->inv_dx, m = l->pmass;
-    const float nu = (float)l->mat.viscosity;
-    /* -dt * volume * D^-1, with D^-1 = 4/dx^2 for the quadratic kernel. */
-    const float ks = -h * m * 4.0f * idx * idx * nu;
+    const float dx = l->dx, idx = l->inv_dx, area = l->pmass;
+    /* Per liquid: its density, and -dt * volume * D^-1 * its viscosity, with
+     * D^-1 = 4/dx^2 for the quadratic kernel. */
+    float rho_of[LIQUID_MAX_KINDS], ks_of[LIQUID_MAX_KINDS], nu_of[LIQUID_MAX_KINDS];
+    for (int q = 0; q < LIQUID_MAX_KINDS; q++) {
+        rho_of[q] = (float)l->kind[q].density;
+        nu_of[q] = (float)l->kind[q].viscosity;
+        ks_of[q] = -h * area * rho_of[q] * 4.0f * idx * idx * (float)l->kind[q].viscosity;
+    }
     const int nx = l->nx, ny = l->ny;
     for (int k = lo; k < hi; k++) {
         Particle *p = &l->p[k];
+        /* Momentum goes to the grid by weight, so that a velocity there is
+         * what the liquids crossing it carry between them, the heavier one
+         * the more; the stress is the viscosity's times the density. */
+        unsigned kd = p->kind < LIQUID_MAX_KINDS ? p->kind : 0;
+        const float m = area * rho_of[kd], ks = ks_of[kd];
         /* Whatever a solid moved over this substep, it is off it now. */
         if (l->nbodies) {
             /* One with nowhere left to be is let go of after the move. */
@@ -1683,8 +1809,22 @@ static void gather(const FwmLiquid *l, int lo, int hi, float h, const struct gri
         iy = stencil(gy - 0.5f, wy, &fy);
         for (int j = 0; j < 3; j++) {
             size_t row = CIX(l, ix, iy + j);
-            for (int i = 0; i < 3; i++)
-                g->mass[row + i] += wx[i] * wy[j] * m;
+            for (int i = 0; i < 3; i++) {
+                g->mass[row + i] += wx[i] * wy[j] * area;
+                g->heavy[row + i] += wx[i] * wy[j] * m;
+            }
+        }
+        if (l->mixed) {
+            float *mine = g->kvol + (size_t)kd * l->cn;
+            const float mnu = m * nu_of[kd];
+            for (int j = 0; j < 3; j++) {
+                size_t row = CIX(l, ix, iy + j);
+                for (int i = 0; i < 3; i++) {
+                    float w = wx[i] * wy[j];
+                    g->thick[row + i] += w * mnu;
+                    mine[row + i] += w * area;
+                }
+            }
         }
 
         int ci = (int)gx, cj = (int)gy;
@@ -1709,11 +1849,14 @@ static void job_to_grid(void *ctx, int part, int parts) {
 
     struct grid_view g;
     if (part == 0) {
-        g = (struct grid_view){ l->u, l->um, l->v, l->vm, l->mass, NULL };
+        g = (struct grid_view){ l->u, l->um, l->v, l->vm, l->mass, l->heavy, l->thick,
+                                l->kvol, NULL };
     } else {
         float *base = l->pgrid + (size_t)(part - 1) * l->pstride;
         g = (struct grid_view){ base, base + un, base + 2 * un, base + 2 * un + vn,
-                                base + 2 * un + 2 * vn, NULL };
+                                base + 2 * un + 2 * vn, base + 2 * un + 2 * vn + cn,
+                                base + 2 * un + 2 * vn + 2 * cn,
+                                base + 2 * un + 2 * vn + 3 * cn, NULL };
     }
     g.occ = l->pocc + (size_t)part * cn;
     memset(g.u, 0, un * sizeof(float));
@@ -1721,6 +1864,12 @@ static void job_to_grid(void *ctx, int part, int parts) {
     memset(g.v, 0, vn * sizeof(float));
     memset(g.vm, 0, vn * sizeof(float));
     memset(g.mass, 0, cn * sizeof(float));
+    memset(g.heavy, 0, cn * sizeof(float));
+    if (l->mixed) {
+        memset(g.thick, 0, cn * sizeof(float));
+        for (int k = 0; k < LIQUID_MAX_KINDS; k++)
+            if (l->present & (1u << k)) memset(g.kvol + (size_t)k * cn, 0, cn * sizeof(float));
+    }
     memset(g.occ, 0, cn);
 
     int lo, hi;
@@ -1757,13 +1906,30 @@ static void job_to_grid(void *ctx, int part, int parts) {
     const float full = FILL * 4.0f * l->pmass;
     crew_share((int)cn, part, parts, &lo, &hi);
     for (size_t c = (size_t)lo; c < (size_t)hi; c++) {
-        float mass = l->mass[c];
+        float mass = l->mass[c], heavy = l->heavy[c];
         unsigned char occ = l->pocc[c];
         for (int q = 1; q < parts; q++) {
-            mass += other[(size_t)(q - 1) * ps + 2 * un + 2 * vn + c];
+            const float *o = other + (size_t)(q - 1) * ps + 2 * un + 2 * vn;
+            mass += o[c];
+            heavy += o[cn + c];
             occ |= l->pocc[(size_t)q * cn + c];
         }
+        if (l->mixed) {
+            float thick = l->thick[c];
+            for (int q = 1; q < parts; q++)
+                thick += other[(size_t)(q - 1) * ps + 2 * un + 2 * vn + 2 * cn + c];
+            l->thick[c] = thick;
+            for (int k = 0; k < LIQUID_MAX_KINDS; k++) {
+                if (!(l->present & (1u << k))) continue;
+                float vol = l->kvol[(size_t)k * cn + c];
+                for (int q = 1; q < parts; q++)
+                    vol += other[(size_t)(q - 1) * ps + 2 * un + 2 * vn + (3 + (size_t)k) * cn + c];
+                l->kvol[(size_t)k * cn + c] = vol;
+            }
+        }
         l->mass[c] = mass;
+        l->heavy[c] = heavy;
+        l->rho[c] = mass > 0.0f ? heavy / mass : 1.0f;
         int i = (int)(c % (size_t)l->cw) - PAD, j = (int)(c / (size_t)l->cw) - PAD;
         if (i < 0 || i >= l->nx || j < 0 || j >= l->ny) l->type[c] = SOLID;
         else l->type[c] = (occ || mass >= full) ? FLUID : AIR;
@@ -2109,6 +2275,14 @@ static void extrapolate(FwmLiquid *l, float *f, unsigned char *ok, size_t len,
     }
 }
 
+/* One over the density across the edge between cells a and b, at least one
+ * of them liquid — the solve's own weight there. */
+static inline float edge_weight(const FwmLiquid *l, size_t a, size_t b) {
+    bool fa = l->type[a] == FLUID, fb = l->type[b] == FLUID;
+    if (fa && fb) return 2.0f / (l->rho[a] + l->rho[b]);
+    return 1.0f / l->rho[fa ? a : b];
+}
+
 /* The pressure onto the edges between liquid cells and the ones beside
  * them, and every edge left without a value given one. */
 static void job_finish(void *ctx, int part, int parts) {
@@ -2124,7 +2298,7 @@ static void job_finish(void *ctx, int part, int parts) {
             if (l->type[a] != FLUID && l->type[b] != FLUID) continue;
             if (l->sid[a] || l->sid[b]) continue;   /* the solid's, or let go */
             size_t f = UIX(l, i, j);
-            l->u[f] -= (l->pres[b] - l->pres[a]) * idx;
+            l->u[f] -= (l->pres[b] - l->pres[a]) * idx * edge_weight(l, a, b);
             l->uok[f] = 1;
         }
     for (int j = lo > 1 ? lo : 1; j < hi; j++)
@@ -2133,7 +2307,7 @@ static void job_finish(void *ctx, int part, int parts) {
             if (l->type[a] != FLUID && l->type[b] != FLUID) continue;
             if (l->sid[a] || l->sid[b]) continue;
             size_t f = VIX(l, i, j);
-            l->v[f] -= (l->pres[b] - l->pres[a]) * idx;
+            l->v[f] -= (l->pres[b] - l->pres[a]) * idx * edge_weight(l, a, b);
             l->vok[f] = 1;
         }
     crew_sync(l->crew);
@@ -2152,6 +2326,17 @@ static void job_to_particles(void *ctx, int part, int parts) {
     const float y0 = l->oy + 0.1f * dx, y1 = l->oy + ny * dx - 0.1f * dx;
     const float dinv = 4.0f * idx;   /* D^-1 times the dx in each offset */
     const float squeeze = l->held ? fmaxf(SQUEEZE_LEAST, SQUEEZE_TIMES * (float)l->hmax) : 0.0f;
+    /* Drift (see DRIFT_STOKES): only with more than one liquid in the box
+     * and something pulling. */
+    const bool mixed = l->mixed && (l->gx != 0.0 || l->gy != 0.0);
+    const float d2 = dx * dx, area = l->pmass;
+    const float slip_most = 0.5f * dx / h;
+    const size_t cn = l->cn;
+    float rho_of[LIQUID_MAX_KINDS], nu_of[LIQUID_MAX_KINDS];
+    for (int q = 0; q < LIQUID_MAX_KINDS; q++) {
+        rho_of[q] = (float)l->kind[q].density;
+        nu_of[q] = (float)l->kind[q].viscosity;
+    }
     float vmax2 = 0.0f;
     double vsum2 = 0.0;
     float lox = INFINITY, loy = INFINITY, hix = -INFINITY, hiy = -INFINITY;
@@ -2196,6 +2381,29 @@ static void job_to_particles(void *ctx, int part, int parts) {
 
         p->x += h * vx;
         p->y += h * vy;
+        if (mixed) {
+            int ci = (int)gx, cj = (int)gy;
+            if (ci >= 0 && ci < nx && cj >= 0 && cj < ny) {
+                size_t c = CIX(l, ci, cj);
+                unsigned kd = p->kind < LIQUID_MAX_KINDS ? p->kind : 0;
+                /* What is around it: the cell, less its own liquid. */
+                float own = l->kvol[(size_t)kd * cn + c];
+                float around = l->mass[c] - own;
+                float rk = rho_of[kd];
+                float ro = around > 0.02f * area ? (l->heavy[c] - rk * own) / around : rk;
+                float dr = rk - ro;
+                if (l->type[c] == FLUID && fabsf(dr) > 1e-4f) {
+                    float mu = (l->thick[c] - rk * nu_of[kd] * own) / around;
+                    mu = fmaxf(mu, DRIFT_NU_LEAST * ro);
+                    float k = dr * d2 / (18.0f * mu);
+                    float sx = k * (float)l->gx, sy = k * (float)l->gy;
+                    float s = sqrtf(sx * sx + sy * sy);
+                    if (s > slip_most) { sx *= slip_most / s; sy *= slip_most / s; }
+                    p->x += h * sx;
+                    p->y += h * sy;
+                }
+            }
+        }
         /* The grid stops liquid at a solid's face the way it does at a wall,
          * and a substep's move can still carry a particle a hair into it.
          * Caught between a solid and a wall with no room left, it is
@@ -2353,6 +2561,9 @@ void liquid_step(FwmLiquid *l, double dt, double gx, double gy) {
         return;
     }
 
+    l->present = 0;
+    for (int k = 0; k < l->n; k++) l->present |= 1u << (l->p[k].kind & 31u);
+    l->mixed = (l->present & (l->present - 1)) != 0;
     bodies_start(l, dt);
     spill(l);
     double t = 0.0;
@@ -2469,4 +2680,9 @@ int liquid_last_iterations(const FwmLiquid *l) { return l ? l->iters : 0; }
 const float *liquid_positions(const FwmLiquid *l, int *stride) {
     if (stride) *stride = (int)(sizeof(Particle) / sizeof(float));
     return (l && l->p) ? &l->p[0].x : NULL;
+}
+
+const unsigned *liquid_kinds_of(const FwmLiquid *l, int *stride) {
+    if (stride) *stride = (int)(sizeof(Particle) / sizeof(unsigned));
+    return (l && l->p) ? &l->p[0].kind : NULL;
 }

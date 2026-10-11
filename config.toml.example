@@ -897,6 +897,16 @@ threads   = 0
 # material, and its desktop's mass_density, make it denser or lighter.
 window_density = 0.5
 
+# The liquids ready to pick in the liquids menu besides water and the ones made
+# there. With none here: oil, honey, milk, coffee, wine, syrup, brine, spirit,
+# slime, tar, lava and mercury. Any here replace those. Thickness as viscosity
+# above; density against water — what puts liquids in layers. Up to 16.
+#[[liquid]]
+#name      = "Brine"
+#color     = "#2F9C8FBF"
+#viscosity = 70
+#density   = 1.2
+
 # What a window can be made of, for a [[rule]]'s material: a name and a density
 # against water. Built in: foam 0.05, cork 0.25, wood 0.6, ice 0.92, glass 2.5,
 # stone 2.7, iron 7.9, gold 19.3. A [[material]] with one of those names
