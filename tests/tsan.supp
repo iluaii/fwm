@@ -36,3 +36,16 @@ called_from_lib:libavcodec.so
 called_from_lib:libavutil.so
 called_from_lib:libavformat.so
 called_from_lib:libswscale.so
+
+# Arch's gdk-pixbuf now hands decoding to glycin, which runs
+# each loader on threads of its own ('T4', 'T5' in the reports) and passes
+# buffers between them through Rust synchronisation TSan cannot see. Both
+# stacks of every race are inside libglycin. Reached from icon_load() and the
+# wallpaper load; fwm only waits for the finished pixbuf.
+called_from_lib:libglycin-2.so
+
+# The same path goes through GIO to find and read the file, and GIO takes and
+# drops a GRecMutex that glib allocated, so the unlock looks like one by a
+# thread that never locked it. Same shape as the gdk-pixbuf entry above.
+called_from_lib:libgio-2.0.so
+mutex:libgio-2.0.so
