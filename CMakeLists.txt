@@ -171,6 +171,7 @@ set(SOURCES
     src/server_tick.c
     src/server_tiling.c
     src/server_liquid.c
+    src/server_plane.c
     src/server_shell.c
     src/server_output.c
     src/server_input.c

@@ -327,7 +327,7 @@ void server_wrap_slide_start(FwmServer *server, FwmOutput *out, int dir) {
     out->wrap_ghost_buf = wlr_buffer_lock(buf);
     wlr_buffer_drop(buf);
     wlr_scene_node_place_above(&out->wrap_ghost->node,
-                               &server->layer_windows->node);
+                               &server->layer_front->node);
 
     out->wrap_dir = dir;
     out->wrap_slide = server->screen_width;
@@ -1850,6 +1850,7 @@ static int physics_tick_cb(void *data) {
                              BAR_MAX_RISE_SPEED * server->config.cava.push, dt);
         }
 
+        server_planes_sync(server);
         physics_step(&server->physics, server->screen_width, server->screen_height,
                      drag_win, resize_win, dragged_win, dt);
         /* The step that just ran is the first to carry mass = "ram" weights, so

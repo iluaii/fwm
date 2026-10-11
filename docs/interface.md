@@ -161,8 +161,8 @@ water, or onto another desktop, is refused until the first is drained.
 `liquids_menu` and `liquid_bucket` bind the same two things to keys.
 
 Super+ctrl+minus and super+ctrl+equal take the focused window back and forward
-through the liquid's planes — behind it, in it, in front of it — and say which
-it is in; see [liquids](configuration.md#liquids).
+through the [planes](physics.md#planes): at the back the liquid runs over it, in
+the middle it stands in it, in front the liquid runs behind it.
 
 ## The stats menu
 

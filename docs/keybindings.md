@@ -28,7 +28,7 @@ unusable, so they work on a machine with no config at all.
 | `Super+P` | `pin_window` | freeze it: physics stops moving it |
 | `Super+N` | `toggle_nocollide` | other windows pass through it |
 | `Super+R` | `spin_window` | hand its rotation to the simulation (experimental) |
-| `Super+Ctrl+-` / `Super+Ctrl+=` | `liquid_plane:-` / `liquid_plane:+` | the window back or forward against the liquid: behind it, in it, in front of it (experimental; the keypad's − and + too) |
+| `Super+Ctrl+-` / `Super+Ctrl+=` | `plane:-` / `plane:+` | the window one [plane](physics.md#planes) back or forward: drawn over the planes behind it, meeting only windows in its own (the keypad's − and + too) |
 | `Super+W` | `group_toggle` | tab this window together with the focused group |
 | `Super+Tab` / `Super+Shift+Tab` | `group_next` / `group_prev` | walk the tabs |
 | `Super+Shift+W` | `group_add` | add the focused window to the group |
@@ -84,6 +84,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `toggle_nocollide` | toggle pass-through for this window |
 | `toggle_nocollide_all` | ...for every window at once |
 | `spin_window` | give the focused window a spin (experimental) |
+| `plane:-|+` | the focused window one [plane](physics.md#planes) back or forward. `plane:back`, `:middle`, `:front` put it in one by name; `:auto` lets its desktop say again |
 | `spin_all` | ...every window |
 | `calm_all` | zero every velocity |
 | `fake_fullscreen` | fill the work area, keep the tray. Sits exactly where a single tile would: same monitor work area, same `[tiling] gaps_out`. |
@@ -115,7 +116,6 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `star_collapse` | collapse the `[star]` on its desktop now — dwarf, pulsar or hole, by the mass thrown into it |
 | `liquids_menu` | the [liquids menu](interface.md#the-liquids-menu-and-the-bucket), the same one the modes menu's Liquids row opens |
 | `liquid_bucket` | a bucket of water in the hand, or put down the one there — left pours, right drains, Escape puts it down |
-| `liquid_plane:-|+` | the focused window one plane back or forward against the liquid: behind it, in it, in front of it ([which is which](configuration.md#liquids)). `liquid_plane:behind`, `:in`, `:front` put it in one by name, `:auto` gives it back to its mode |
 
 ### World
 

@@ -68,6 +68,7 @@ struct BodySlot {
     b2BodyType type;         /* last applied body type */
     int no_collide;          /* last applied collision-filter state */
     int fenced;              /* ... and whether the desktop edges apply to it */
+    int layer;               /* ... and the plane it was filtered into */
     int spin;                /* last applied free-rotation state */
     /* Last applied material, so the per-step resolve below only talks to Box2D
      * when something actually changed (a reload, a drag onto another desktop). */
@@ -539,7 +540,7 @@ void physics_push_overlapping(PhysicsWorld *world, uint32_t pusher, double speed
     for (int i = 0; i < world->body_count; i++) {
         PhysicsBody *b = &world->bodies[i];
         if (!b->active || b->id == pusher || b->no_collide || b->fullscreen || b->shaped) continue;
-        if (b->desktop_id != a->desktop_id) continue;
+        if (b->desktop_id != a->desktop_id || b->layer != a->layer) continue;
 
         if (!rects_overlap((int)a->x, (int)a->y, a->width, a->height,
                            (int)b->x, (int)b->y, b->width, b->height)) continue;
@@ -622,18 +623,25 @@ static b2Rot body_rot(const PhysicsBody *m) {
  * two-way filter test against everything, walls included, so such windows used
  * to sail straight out past the top and the desktop-1 / desktop-10 edges.
  * Walls therefore get their own bit that even a no-collide window keeps. */
-#define CAT_WINDOW 0x0001u
 #define CAT_WALL   0x0002u
 /* The right edge of the glass on a monitor narrower than the strip's stride
  * (world->desktop_w). A bit of its own because, unlike every other wall, it is
  * one a window is sometimes allowed through: see fence_applies. */
 #define CAT_FENCE  0x0004u
+/* A window, in the plane it stands in (PhysicsBody.layer, -1..1): one bit a
+ * plane, so a window only meets the windows in its own. */
+#define CAT_WINDOW(layer) (0x0010u << ((layer) + 1))
+#define CAT_WINDOWS       (CAT_WINDOW(-1) | CAT_WINDOW(0) | CAT_WINDOW(1))
 
-static b2Filter filter_for(int no_collide, int fenced) {
+static int layer_of(const PhysicsBody *m) {
+    return m->layer < -1 ? -1 : m->layer > 1 ? 1 : m->layer;
+}
+
+static b2Filter filter_for(int no_collide, int fenced, int layer) {
     b2Filter f = b2DefaultFilter();
-    f.categoryBits = CAT_WINDOW;
-    // Walls always; other windows only when collision is enabled.
-    f.maskBits = no_collide ? CAT_WALL : (CAT_WALL | CAT_WINDOW);
+    f.categoryBits = CAT_WINDOW(layer);
+    // Walls always; other windows in its plane only when collision is enabled.
+    f.maskBits = no_collide ? CAT_WALL : (CAT_WALL | CAT_WINDOW(layer));
     if (fenced) f.maskBits |= CAT_FENCE;
     return f;
 }
@@ -641,14 +649,14 @@ static b2Filter filter_for(int no_collide, int fenced) {
 static b2Filter filter_for_wall(void) {
     b2Filter f = b2DefaultFilter();
     f.categoryBits = CAT_WALL;
-    f.maskBits = CAT_WINDOW;
+    f.maskBits = CAT_WINDOWS;
     return f;
 }
 
 static b2Filter filter_for_fence(void) {
     b2Filter f = b2DefaultFilter();
     f.categoryBits = CAT_FENCE;
-    f.maskBits = CAT_WINDOW;
+    f.maskBits = CAT_WINDOWS;
     return f;
 }
 
@@ -945,7 +953,7 @@ static void slot_create(struct Engine *eng, PhysicsWorld *world, int i, PhysicsB
     sd.material.restitution = mat.restitution;
     sd.material.friction = mat.friction;
     sd.enableHitEvents = true;           // impact effects (squash, shake, dust)
-    sd.filter = filter_for(no_collide, fenced);
+    sd.filter = filter_for(no_collide, fenced, layer_of(m));
     b2Polygon box = b2MakeBox(px2m(m->width / 2.0), px2m(m->height / 2.0));
     s->shape = b2CreatePolygonShape(s->body, &sd, &box);
 
@@ -960,6 +968,7 @@ static void slot_create(struct Engine *eng, PhysicsWorld *world, int i, PhysicsB
     s->type = type;
     s->no_collide = no_collide;
     s->fenced = fenced;
+    s->layer = layer_of(m);
     s->spin = m->spin;
     s->sx = m->x; s->sy = m->y;
     s->svx = m->vx; s->svy = m->vy;
@@ -1039,12 +1048,13 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
             sd.material.restitution = mat.restitution;
             sd.material.friction = mat.friction;
             sd.enableHitEvents = true;
-            sd.filter = filter_for(no_collide, fenced);
+            sd.filter = filter_for(no_collide, fenced, layer_of(m));
             b2Polygon box = b2MakeBox(px2m(m->width / 2.0), px2m(m->height / 2.0));
             s->shape = b2CreatePolygonShape(s->body, &sd, &box);
             s->sw = m->width; s->sh = m->height;
             s->no_collide = no_collide;
             s->fenced = fenced;
+            s->layer = layer_of(m);
             // The box was rebuilt around the body's OLD center, but the mirror
             // anchors the top-left corner — the center moves by half the size
             // delta. Re-drive the transform from the mirror or the window
@@ -1094,15 +1104,18 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
                 b2Body_SetAngularVelocity(s->body, (float)m->angvel);
             }
         }
-        if (s->no_collide != no_collide || s->fenced != fenced) {
-            b2Shape_SetFilter(s->shape, filter_for(no_collide, fenced));
+        if (s->no_collide != no_collide || s->fenced != fenced || s->layer != layer_of(m)) {
+            b2Shape_SetFilter(s->shape, filter_for(no_collide, fenced, layer_of(m)));
             /* Waking is the whole point of the fence half: a window that came
              * down in the dead band has just stopped moving, and one asleep
              * inside a body that only now became solid to it would be left
-             * sitting in it. */
-            if (s->fenced != fenced) b2Body_SetAwake(s->body, true);
+             * sitting in it. The plane half likewise: a window put into a
+             * plane where it overlaps another has to be woken to be put out
+             * of it. */
+            if (s->fenced != fenced || s->layer != layer_of(m)) b2Body_SetAwake(s->body, true);
             s->no_collide = no_collide;
             s->fenced = fenced;
+            s->layer = layer_of(m);
         }
 
         /* Spin turned on or off since the last step. Clearing fixedRotation

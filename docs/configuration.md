@@ -1312,19 +1312,12 @@ and lies on them, a window dropped in splashes it and raises it by what it
 displaces, one dragged through it pushes it along, and one lifted out comes out
 dripping — it is let go wherever air can get in behind, the way the walls let
 go of it. A desktop holds that much less liquid while a window takes up room in
-it; what no longer fits runs over the top. Tiled windows are not in it: they
-stand in front of it, like the glass of an aquarium. It does not push windows
-back yet.
+it; what no longer fits runs over the top. It does not push windows back yet.
 
-Each window stands in one of three planes against it — behind it, in it, or in
-front of it — and super+ctrl+minus and super+ctrl+equal (`liquid_plane:-` and
-`liquid_plane:+`) move the focused window one back or forward. Only a window in
-the liquid is in the water; the liquid runs behind one in front of it, and over
-one behind it, drawn on top. Being under the liquid, a window behind it is also
-under every window that is not. Otherwise the planes change nothing between
-windows — they still collide, and the one raised last is still on top. A floating window starts in it and a tile
-in front of it; one moved stays where it was put through tiling and floating.
-Fullscreen lifts a window out from behind until it is back.
+It lies between the back [plane](physics.md#planes) and the middle one: a window
+in the middle stands in it, one in front it runs behind, and one at the back it
+runs over, drawn on top. Super+ctrl+minus and super+ctrl+equal move a window
+between them. Tiles start in front, so a tiling desktop is an aquarium.
 
 One desktop at a time: the liquid stands on the desktop it was first poured on
 until it is cleared. It is only stepped while a monitor shows that desktop and

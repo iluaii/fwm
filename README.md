@@ -682,7 +682,7 @@ fwmctl unsave sun.blur       # and take it back, without a reload
 `fwmctl window <id> k=v` is the same idea for windows. `dispatch` acts on
 whatever has the focus, because that is what a keybind means; a script has an id
 out of `windows` instead, and `desktop=`, `x=`/`y=`, `pin=`, `nocollide=`,
-`liquid_plane=`, `focus=` and `close=` act on that one window without
+`plane=`, `focus=` and `close=` act on that one window without
 disturbing the session around it.
 
 Replies are JSON, so `jq` does the rest:

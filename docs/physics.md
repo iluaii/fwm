@@ -220,6 +220,21 @@ A window is only as free to turn as the room around it: one whose diagonal is
 taller than the screen wedges against the floor and ceiling instead of coming
 round.
 
+## Planes
+
+Every window stands in one of three planes, one behind the other: back, middle
+and front. `plane:-` and `plane:+` (super+ctrl+minus and super+ctrl+equal) move
+the focused window one back or forward. A window only meets the windows in its own
+plane — windows in different planes pass through one another, though never through
+a wall — and a window in front is drawn over every window behind it, however
+recently that one was focused: a raise lifts a window within its own plane.
+
+Until you move it, a window is in the middle on a physics or floating desktop and
+in front on a tiling one; a dialog stands with the window it belongs to. A window
+you moved keeps its plane wherever it goes. Fullscreen draws a window in front for
+as long as it lasts. The [liquid](configuration.md#liquids) lies between the back
+plane and the middle one.
+
 ## What physics does not own
 
 - **Tiled and floating windows.** Immovable anchors; the layout owns them.

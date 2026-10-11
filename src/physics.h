@@ -69,6 +69,9 @@ typedef struct {
     int sav_w, sav_h;
     int pinned;
     int no_collide;
+    /* Which plane it stands in: -1 back, 0 the middle, 1 front. A window only
+     * ever meets windows in its own; the walls it meets in all of them. */
+    int layer;
     int tiled;     /* window is managed by the tiling layout: physics never moves it */
     int floating;  /* desktop is in floating mode: immovable AND non-colliding,
                     * i.e. pinned + no_collide without touching those per-window

@@ -379,15 +379,17 @@ typedef struct FwmServer {
     bool renderer_recovering;   /* guards re-entry while the swap is under way */
     struct wlr_scene *scene;
     struct wlr_scene_tree *layer_background;
-    /* The windows put behind the liquid, and over them the liquid's picture
-     * on each monitor (server_liquid.c). Every other window is above both. */
-    struct wlr_scene_tree *layer_behind;
+    /* The windows, one tree a plane from the back (server_plane.c), with the
+     * liquid's picture on each monitor between the back plane and the
+     * middle one (server_liquid.c). A window is raised within its plane. */
+    struct wlr_scene_tree *layer_back;
     struct wlr_scene_tree *layer_liquid;
-    struct wlr_scene_tree *layer_windows;
+    struct wlr_scene_tree *layer_windows;   /* the middle plane */
+    struct wlr_scene_tree *layer_front;
     struct wlr_scene_tree *layer_overlay;
     /* wlr-layer-shell trees, interleaved with ours (bottom to top):
-     * wallpaper < ls_background < ls_bottom < behind < liquid < windows
-     * < ls_top < our overlays < ls_overlay. See src/layer.h. */
+     * wallpaper < ls_background < ls_bottom < back < liquid < windows
+     * < front < ls_top < our overlays < ls_overlay. See src/layer.h. */
     struct wlr_scene_tree *ls_background;
     struct wlr_scene_tree *ls_bottom;
     struct wlr_scene_tree *ls_top;
@@ -928,6 +930,23 @@ void server_restack_fullscreen(FwmServer *server);
  * the keys back in the game; nothing else would, since it is not a view and so
  * never a candidate in the scan server_refocus does. */
 bool server_xwl_unmanaged_refocus(FwmServer *server, int desktop);
+/* ── planes (server_plane.c) ──────────────────────────────────────────────
+ * Back, middle and front: what a window is drawn over and under, and which
+ * windows it meets. */
+
+/* The plane it stands in, FwmPlane (view.h) — never PLANE_AUTO; what a window
+ * nobody placed gets is worked out here. */
+int server_view_plane(FwmServer *server, struct FwmView *view);
+/* Put it in `plane`, PLANE_AUTO handing it back to its desktop. */
+void server_view_set_plane(FwmServer *server, struct FwmView *view, int plane);
+/* Bring its scene tree and its physics body up to its plane: on map, in and
+ * out of fullscreen, and for every window once a tick. */
+void server_view_plane_sync(FwmServer *server, struct FwmView *view);
+void server_planes_sync(FwmServer *server);
+/* "back", "middle", "front", "auto", and back; -1 for none of those. */
+const char *plane_name(int plane);
+int plane_parse(const char *s);
+
 /* ── liquid (server_liquid.c) ─────────────────────────────────────────────
  * What `fwmctl liquid` reaches. Pouring and clearing are asked for here and
  * done on the next tick, when the liquid's worker is between steps. */
@@ -953,20 +972,6 @@ typedef struct {
     char kind[LIQUID_NAME_MAX];   /* which liquid it is */
 } FwmLiquidState;
 void server_liquid_state(FwmServer *server, FwmLiquidState *st);
-
-/* The plane a window stands in against the liquid (FwmLiquidPlane, view.h):
- * behind, in or front — never auto; what a window nobody placed gets is
- * worked out here. */
-int server_liquid_plane(FwmServer *server, struct FwmView *view);
-/* Put it in `plane`, LIQUID_PLANE_AUTO handing it back to its mode. On the
- * screen at once; the liquid finds out on its next step. */
-void server_liquid_set_plane(FwmServer *server, struct FwmView *view, int plane);
-/* Its scene node into the tree its plane is drawn in: on map, and in and out
- * of fullscreen, which lifts a window out from behind the liquid. */
-void server_liquid_plane_place(FwmServer *server, struct FwmView *view);
-/* "behind", "in", "front", "auto", and back; -1 for none of those. */
-const char *liquid_plane_name(int plane);
-int liquid_plane_parse(const char *s);
 
 /* The liquids menu, which the modes menu's Liquids row opens: a list of the
  * liquids there are, each with a bin. */

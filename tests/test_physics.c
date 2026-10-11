@@ -157,6 +157,46 @@ static void test_mass_scale_is_felt(void) {
     CHECK_DBL(shove_speed(1.0), even, 1e-9);
 }
 
+/* ── planes ──────────────────────────────────────────────────────────── */
+
+/* A window thrown at another: where it ends up, and how fast the other one
+ * is going, when they stand in planes `a` and `b`. */
+static void throw_across(int a, int b, double *thrown_x, double *hit_vx) {
+    PhysicsWorld w;
+    physics_init(&w);
+    w.gravity_scale = 0.0;
+    w.wrap = 0;
+
+    PhysicsBody *p = physics_sync_body(&w, 1, 200, 400, 300, 200, SW);
+    PhysicsBody *q = physics_sync_body(&w, 2, 900, 400, 300, 200, SW);
+    p->layer = a;
+    q->layer = b;
+    physics_throw_body(&w, 1, 2000.0, 0.0);
+    run(&w, 40);
+
+    p = physics_find_body(&w, 1);
+    q = physics_find_body(&w, 2);
+    *thrown_x = p ? p->x : 0.0;
+    *hit_vx = q ? q->vx : 0.0;
+    physics_destroy(&w);
+}
+
+/* Windows only meet windows in their own plane: in one, the thrown window
+ * sets the other moving; in two, it goes into it and the other never
+ * notices. */
+static void test_planes_pass_through(void) {
+    CASE("planes");
+    double x_same, v_same, x_apart, v_apart;
+    throw_across(0, 0, &x_same, &v_same);
+    throw_across(1, 0, &x_apart, &v_apart);
+
+    CHECK(v_same > 100.0);           /* shoved */
+    CHECK_DBL(v_apart, 0.0, 1e-9);   /* never touched */
+    /* Went into it: a hundred px deep in a window standing still, which no
+     * two solid boxes allow. */
+    CHECK(x_apart + 300.0 > 1000.0);
+}
+
 /* ── hit points ──────────────────────────────────────────────────────── */
 
 /* Toughness scales the mass, and a rule that says nothing must leave it alone —
@@ -399,6 +439,7 @@ int main(void) {
     test_ring_carries_a_throw_the_other_way();
     test_ring_crosses_only_when_clear();
     test_mass_scale_is_felt();
+    test_planes_pass_through();
     test_hp_follows_mass_and_toughness();
     test_hp_freeze_pins_and_releases();
     return t_report("physics");

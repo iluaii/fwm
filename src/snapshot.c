@@ -248,15 +248,16 @@ bool snapshot_lens_view(FwmServer *server, FwmOutput *out, struct wlr_buffer *ds
     }
 
     /* Disable view and all nodes stacked above view: in its own tree, and in
-     * every window tree above it — a window behind the liquid has the liquid
-     * and all the other windows in front of it. */
+     * every tree above it — a window in the back plane has the liquid and
+     * the two other planes in front of it. */
     #define MAX_DISABLED_VIEW_NODES 128
     struct wlr_scene_node *disabled[MAX_DISABLED_VIEW_NODES];
     int disabled_count = 0;
     bool found = false;
     struct wlr_scene_node *node;
     struct wlr_scene_tree *stack[] = {
-        server->layer_behind, server->layer_liquid, server->layer_windows,
+        server->layer_back, server->layer_liquid, server->layer_windows,
+        server->layer_front,
     };
     for (size_t t = 0; t < sizeof(stack) / sizeof(stack[0]); t++) {
         if (!stack[t]) continue;

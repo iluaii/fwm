@@ -233,7 +233,9 @@ bool server_xwl_unmanaged_refocus(FwmServer *server, int desktop) {
 
 static void xwl_or_handle_map(struct wl_listener *listener, void *data) {
     struct FwmXwlUnmanaged *u = wl_container_of(listener, u, map);
-    u->tree = wlr_scene_tree_create(u->server->layer_windows);
+    /* In the front plane: a menu is over whatever it was opened from, and
+     * that may be a window in any of them. */
+    u->tree = wlr_scene_tree_create(u->server->layer_front);
     if (!u->tree) return;
     if (!wlr_scene_surface_create(u->tree, u->xs->surface)) {
         wlr_scene_node_destroy(&u->tree->node);

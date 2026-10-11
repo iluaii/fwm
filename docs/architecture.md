@@ -86,7 +86,7 @@ price to pay for turning a feature *off*.
 | Compositor core | `server.c`, `server_lifecycle.c`, `server_tick.c`, `server_output.c`, `server_shell.c`, `server_seat.c` |
 | Input | `server_input.c` (keyboard, binds, modes), `server_pointer.c`, `server_drag.c`, `gestures.c` + `server_gestures.c` |
 | Windows | `view.c`, `view_effects.c` (squash/wobble/fade), `snapshot.c`, `rotate.c` (raw GLES2, for the rotation and the bend the render-pass API cannot express), `group.c` (tabs) |
-| Layout | `bsp.c` (the tree), `server_tiling.c` (applying it), `server_desktop.c` |
+| Layout | `bsp.c` (the tree), `server_tiling.c` (applying it), `server_desktop.c`, `server_plane.c` (back, middle, front: one scene tree a plane, and the physics told which windows meet) |
 | Desktops | `expo*.c` (the strip and its 3D view) |
 | Config | `config.c`, `config_binds.c`, `config_set.c`, `toml.c` |
 | State & IPC | `session.c`, `launched.c` (which desktop an application was started from), `ipc.c`, `ipc_events.c`, `server_config.c` (paths, reload, remembered choices) |

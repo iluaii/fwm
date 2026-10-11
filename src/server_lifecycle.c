@@ -582,9 +582,10 @@ bool server_init(FwmServer *server, bool debug) {
     // windows, and the tray/hints/welcome overlays sit above them so a raised
     // window can never cover them.
     server->layer_background = wlr_scene_tree_create(&server->scene->tree);
-    server->layer_behind = wlr_scene_tree_create(&server->scene->tree);
+    server->layer_back = wlr_scene_tree_create(&server->scene->tree);
     server->layer_liquid = wlr_scene_tree_create(&server->scene->tree);
     server->layer_windows = wlr_scene_tree_create(&server->scene->tree);
+    server->layer_front = wlr_scene_tree_create(&server->scene->tree);
     server->layer_overlay = wlr_scene_tree_create(&server->scene->tree);
     /* The frost under fwm's own panels hangs in this layer; it needs the
      * server once, and then panels attach to it in one line each. */
@@ -594,20 +595,21 @@ bool server_init(FwmServer *server, bool debug) {
     // express this (new trees always land on top), so place them explicitly:
     // wallpaper < ls_background < ls_bottom < windows < ls_top < our overlays
     // < ls_overlay. A layer-shell overlay therefore outranks even the tray,
-    // which is what clients like a screen locker or a menu expect. The liquid
-    // is drawn among the windows — over the ones put behind it, under the
-    // rest — so it stands above the layer-shell's bottom with them: a window
-    // behind the water must not sink under a wallpaper client's picture.
+    // which is what clients like a screen locker or a menu expect. The windows
+    // are three trees, one a plane, and the liquid is drawn between the back
+    // one and the rest — so it stands above the layer-shell's bottom with
+    // them: a window behind it must not sink under a wallpaper client.
     server->ls_background = wlr_scene_tree_create(&server->scene->tree);
     server->ls_bottom = wlr_scene_tree_create(&server->scene->tree);
     server->ls_top = wlr_scene_tree_create(&server->scene->tree);
     server->ls_overlay = wlr_scene_tree_create(&server->scene->tree);
     wlr_scene_node_place_above(&server->ls_background->node, &server->layer_background->node);
     wlr_scene_node_place_above(&server->ls_bottom->node, &server->ls_background->node);
-    wlr_scene_node_place_above(&server->layer_behind->node, &server->ls_bottom->node);
-    wlr_scene_node_place_above(&server->layer_liquid->node, &server->layer_behind->node);
+    wlr_scene_node_place_above(&server->layer_back->node, &server->ls_bottom->node);
+    wlr_scene_node_place_above(&server->layer_liquid->node, &server->layer_back->node);
     wlr_scene_node_place_above(&server->layer_windows->node, &server->layer_liquid->node);
-    wlr_scene_node_place_above(&server->ls_top->node, &server->layer_windows->node);
+    wlr_scene_node_place_above(&server->layer_front->node, &server->layer_windows->node);
+    wlr_scene_node_place_above(&server->ls_top->node, &server->layer_front->node);
     wlr_scene_node_place_above(&server->layer_overlay->node, &server->ls_top->node);
     wlr_scene_node_place_above(&server->ls_overlay->node, &server->layer_overlay->node);
     /* The lock screen outranks everything, including an external bar's overlay

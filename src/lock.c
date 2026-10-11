@@ -40,8 +40,8 @@ typedef struct FwmLockSurface {
 static void set_normal_content_enabled(FwmServer *server, bool enabled) {
     struct wlr_scene_tree *trees[] = {
         server->layer_background, server->ls_background, server->ls_bottom,
-        server->layer_behind, server->layer_liquid,
-        server->layer_windows, server->ls_top, server->layer_overlay,
+        server->layer_back, server->layer_liquid, server->layer_windows,
+        server->layer_front, server->ls_top, server->layer_overlay,
         server->ls_overlay,
     };
     for (size_t i = 0; i < sizeof(trees) / sizeof(trees[0]); i++) {

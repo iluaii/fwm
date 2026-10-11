@@ -1004,7 +1004,7 @@ tap = true
 #                 toggle_tiling_all, toggle_floating, toggle_floating_all,
 #                 calm_all, cycle_gravity, toggle_tray,
 #                 spin_window, spin_all,
-#                 liquids_menu, liquid_bucket, liquid_plane:-|+,
+#                 plane:-|+, liquids_menu, liquid_bucket,
 #                 show_hints, show_errors, modes_menu, reload_config,
 #                 wallpaper_picker, wallpaper_reroll, launcher, expo,
 #                 toggle_wrap, EXIT
@@ -1080,16 +1080,16 @@ tap = true
 # The same for every window at once. Unbound by default because the obvious key
 # for it (super+shift+r) is reload_config; pick one that suits you.
 #"super+shift+r"      = "spin_all"
-# EXPERIMENTAL, with [liquids]: the focused window back and forward through the
-# liquid's three planes — behind it (the liquid runs over the window, drawn on
-# top), in it (the liquid stands round the window and is moved by it), in front
-# of it (the liquid runs behind, like water behind glass). Floating windows
-# start in it, tiles in front. Equal rather than plus: on the main row plus is
-# shift+equal. liquid_plane:behind / :in / :front / :auto put it in one by name.
-"super+ctrl+minus"       = "liquid_plane:-"
-"super+ctrl+equal"       = "liquid_plane:+"
-"super+ctrl+KP_Subtract" = "liquid_plane:-"
-"super+ctrl+KP_Add"      = "liquid_plane:+"
+# The focused window one plane back or forward: back, middle, front. A window
+# in front is drawn over every window behind it, and windows in different
+# planes pass through one another. The liquid ([liquids]) lies between the back
+# plane and the middle one. Tiles start in front, everything else in the
+# middle. Equal rather than plus: on the main row plus is shift+equal.
+# plane:back / :middle / :front / :auto put it in one by name.
+"super+ctrl+minus"       = "plane:-"
+"super+ctrl+equal"       = "plane:+"
+"super+ctrl+KP_Subtract" = "plane:-"
+"super+ctrl+KP_Add"      = "plane:+"
 "super+shift+Escape" = "EXIT"
 # Bound to the physical "/" key, not to the "?" symbol: a symbol bind lands on
 # a different key per layout (US shift+/, RU shift+7), while "slash" resolves

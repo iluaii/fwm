@@ -411,9 +411,9 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
         }
         b->fullscreen = 1;
         b->flying = 0; b->vx = 0; b->vy = 0;
-        /* Out from behind the liquid, if it was there, before the raise below:
-         * a raise only lifts a window within the tree it is in. */
-        server_liquid_plane_place(server, view);
+        /* Into the front plane before the raise below: a raise only lifts a
+         * window within the plane it is in. */
+        server_view_plane_sync(server, view);
         /* A tile glide still in the air would carry the window off the screen
          * it is being handed: the animation moves it every tick toward a slot
          * that stopped applying the moment it went fullscreen. Windows that
@@ -461,7 +461,7 @@ void server_set_fullscreen(FwmServer *server, struct FwmView *view, bool fullscr
     } else {
         if (b->fullscreen) {
             b->fullscreen = 0;
-            server_liquid_plane_place(server, view);
+            server_view_plane_sync(server, view);
             b->x = b->sav_x; b->y = b->sav_y;
             b->width = b->sav_w; b->height = b->sav_h;
             

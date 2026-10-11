@@ -10,6 +10,15 @@ window's own surfaces. A terminal's alpha or a browser made transparent by its
 own stylesheet then reads as glass, and the text on it as text. `blur_radius`
 sets the reach; `[glass] tint` and `brightness` colour it.
 
+### Planes
+
+Super+ctrl+minus and super+ctrl+equal move a window back and forward through
+three planes. A window in front is drawn over every window behind it, and
+windows in different planes pass through one another. The liquid lies between
+the back plane and the middle one: it runs over a window at the back, stands
+round one in the middle and runs behind one in front. Tiles start in front,
+everything else in the middle.
+
 ### A liquid on the desktop (experimental)
 
 Modes menu → Liquids → Water, and a bucket of it is in your hand: hold the
@@ -25,9 +34,7 @@ body. The windows on its desktop stand in it: it runs round them and lies
 on them, a window dropped in splashes it and raises it by what it displaces,
 and one lifted out comes out dripping rather than with the pool hanging under
 it. Tiled windows stand in front of it instead, like the glass of an
-aquarium, and nothing pushes a window back yet. Super+ctrl+minus and
-super+ctrl+equal move a window back and forward through three planes:
-behind the liquid, which then runs over it, in it, and in front of it. It runs beside the
+aquarium, and nothing pushes a window back yet. It runs beside the
 compositor, split across the CPU's cores (`[liquids] threads`), only while
 somebody can see it and only until it settles — six cores keep a whole 1080p
 screen of it moving in real time. A desktop holds 30000 particles by default,

@@ -242,7 +242,7 @@ static const struct { const char *prefix, *label; } group_kinds[] = {
     { "volume:",              "volume" },
     { "sun_azimuth:",         "turn the sun" },
     { "sun_elevation:",       "raise the sun" },
-    { "liquid_plane:",        "window back/forward in liquid" },
+    { "plane:",               "window back/forward" },
 };
 
 /* Returns true when the bind belonged to a group and has been folded in. */

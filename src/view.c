@@ -1017,8 +1017,6 @@ void view_map(FwmView *view) {
     }
     
     view->scene_tree->node.data = view;
-    /* A window unmapped from behind the liquid comes back behind it. */
-    server_liquid_plane_place(view->server, view);
     if (view->type == FWM_VIEW_XDG) {
         // Popups look their parent's scene tree up through xdg_surface->data
         // (see handle_new_xdg_popup in server.c).
@@ -1242,6 +1240,10 @@ void view_map(FwmView *view) {
         }
     }
     
+    /* Into its plane before anything raises it there or is pushed out of its
+     * way — and back into the one it stood in, if it was unmapped from it. */
+    server_view_plane_sync(view->server, view);
+
     /* Publish to external panels BEFORE focusing, so the activation state that
      * server_focus_view pushes lands on an existing handle. */
     foreign_view_map(view);
@@ -1366,8 +1368,8 @@ void view_unmap(FwmView *view) {
     if (view->last_buffer && view->server->config.decor.fade_in_ms > 0.0) {
         FwmGhost *ghost = calloc(1, sizeof(*ghost));
         if (ghost) {
-            /* In the window's own tree, so one behind the liquid fades out
-             * behind it rather than jumping in front to do so. */
+            /* In the window's own plane, so one at the back fades out there
+             * rather than jumping in front to do so. */
             struct wlr_scene_tree *layer = view->scene_tree && view->scene_tree->node.parent
                                          ? view->scene_tree->node.parent
                                          : view->server->layer_windows;
