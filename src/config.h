@@ -1226,6 +1226,22 @@ typedef struct {
 
 #define CONFIG_MAX_RULES 64
 
+/* What a window can be made of: a name a [[rule]] picks it by, and how dense
+ * it is against water — under 1 floats, sitting that share of its height
+ * under; over 1 sinks. Some are built in; [[material]] adds more, or changes
+ * one by its name:
+ *
+ *   [[material]]
+ *   name    = "balsa"
+ *   density = 0.15
+ */
+#define CONFIG_MATERIAL_NAME 32
+#define CONFIG_MAX_MATERIALS 32
+typedef struct {
+    char   name[CONFIG_MATERIAL_NAME];
+    double density;
+} ConfigMaterial;
+
 /* Rarely more than three; the cap only stops a typo'd file from allocating. */
 #define CONFIG_MAX_OUTPUTS 8
 
@@ -1346,6 +1362,11 @@ typedef struct {
      * window still steps back like the rest. NAN says nothing. */
     double opacity;
 
+    /* What it is made of: a ConfigMaterial's name, "" says nothing. That is
+     * its density against water, and so how heavy it is — `mass` in the same
+     * rule then scales it. */
+    char material[CONFIG_MATERIAL_NAME];
+
     /* The background only: what a terminal does for itself, for a client that
      * does not. Pixels of the window's background colour are drawn at
      * bg_alpha and everything else — text, pictures — at full strength.
@@ -1436,6 +1457,11 @@ typedef struct {
      * opaque the body of the liquid is. */
     float  color[4];
     int    threads;    /* a step split across this many; 0 = one per core */
+    /* How dense a normal window is against water: under 1 it floats, sitting
+     * that share of its height under; over 1 it sinks. A window's [[rule]]
+     * mass, and its desktop's mass_density, scale it as they scale its
+     * weight. */
+    double window_density;
 } LiquidsConfig;
 
 typedef struct {
@@ -1476,6 +1502,8 @@ typedef struct {
     RadialConfig    radial;
     WallpaperLayer *wallpapers;
     int             wallpaper_count;
+    ConfigMaterial  materials[CONFIG_MAX_MATERIALS];
+    int             material_count;
     ConfigRule     *rules;
     int             rule_count;
     ConfigOutput    outputs[CONFIG_MAX_OUTPUTS];
@@ -1573,6 +1601,8 @@ int config_option_nudge(FwmConfig *cfg, const ConfigOption *opt, double delta,
 
 /* Fold every matching rule's properties into `out`, in file order. Returns 0
  * if nothing matched. app_id/title may be NULL. */
+/* The material by that name, or NULL. */
+const ConfigMaterial *config_material(const FwmConfig *cfg, const char *name);
 int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *title,
                        ConfigRule *out);
 

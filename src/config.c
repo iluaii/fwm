@@ -1092,6 +1092,10 @@ static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
     q->tension   = 30.0;
     parse_hex_color("#3a8be0cc", q->color);   /* clear blue, a little see-through */
     q->threads   = 0;      /* one per core */
+    /* Half as dense as water: a window floats half under, and one a rule
+     * makes twice as heavy as normal hangs in the water as if it weighed
+     * nothing — anything heavier sinks. */
+    q->window_density = 0.5;
 
     if (!root) return;
     toml_table_t *tbl = toml_table_in(root, "liquids");
@@ -1104,6 +1108,7 @@ static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
     LOAD_DOUBLE(tbl, "spacing",   q->spacing);
     LOAD_DOUBLE(tbl, "viscosity", q->viscosity);
     LOAD_DOUBLE(tbl, "tension",   q->tension);
+    LOAD_DOUBLE(tbl, "window_density", q->window_density);
     toml_datum_t th = toml_int_in(tbl, "threads");
     if (th.ok) q->threads = (int)th.u.i;
 
@@ -1130,6 +1135,8 @@ static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
     if (q->viscosity > 100000.0) q->viscosity = 100000.0;
     if (q->tension < 0.0)      q->tension = 0.0;
     if (q->tension > 500.0)    q->tension = 500.0;
+    if (q->window_density < 0.01) q->window_density = 0.01;
+    if (q->window_density > 50.0) q->window_density = 50.0;
 }
 
 static void load_session(toml_table_t *root, SessionConfig *s, FwmConfig *cfg) {
@@ -1995,6 +2002,69 @@ const ConfigOutput *config_find_output(const FwmConfig *cfg, const char *name) {
     return NULL;
 }
 
+/* ── materials ───────────────────────────────────────────────────────── */
+
+/* What a window can be made of out of the box, by density against water. */
+static const ConfigMaterial builtin_materials[] = {
+    { "foam",  0.05 },
+    { "cork",  0.25 },
+    { "wood",  0.6  },
+    { "ice",   0.92 },
+    { "glass", 2.5  },
+    { "stone", 2.7  },
+    { "iron",  7.9  },
+    { "gold",  19.3 },
+};
+
+const ConfigMaterial *config_material(const FwmConfig *cfg, const char *name) {
+    if (!name || !*name) return NULL;
+    for (int i = 0; i < cfg->material_count; i++)
+        if (strcmp(cfg->materials[i].name, name) == 0) return &cfg->materials[i];
+    return NULL;
+}
+
+static void load_materials(toml_table_t *root, FwmConfig *cfg) {
+    cfg->material_count = 0;
+    for (size_t i = 0; i < sizeof(builtin_materials) / sizeof(builtin_materials[0]); i++)
+        cfg->materials[cfg->material_count++] = builtin_materials[i];
+    toml_array_t *arr = root ? toml_array_in(root, "material") : NULL;
+    if (!arr) return;
+    int n = toml_array_nelem(arr);
+    for (int i = 0; i < n; i++) {
+        toml_table_t *tbl = toml_table_at(arr, i);
+        if (!tbl) continue;
+        toml_datum_t name = toml_string_in(tbl, "name");
+        if (!name.ok || !*name.u.s) {
+            config_report_error(cfg, "[[material]] #%d: no name — ignored", i + 1);
+            if (name.ok) free(name.u.s);
+            continue;
+        }
+        /* A whole number is a density too: `density = 2`. */
+        toml_datum_t d = toml_double_in(tbl, "density");
+        toml_datum_t di = toml_int_in(tbl, "density");
+        double density = d.ok ? d.u.d : di.ok ? (double)di.u.i : NAN;
+        if (!(density >= 0.001 && density <= 100.0)) {
+            config_report_error(cfg, "[[material]] \"%s\": density must be 0.001..100 — ignored",
+                                name.u.s);
+            free(name.u.s);
+            continue;
+        }
+        ConfigMaterial *m = (ConfigMaterial *)config_material(cfg, name.u.s);
+        if (!m) {
+            if (cfg->material_count == CONFIG_MAX_MATERIALS) {
+                config_report_error(cfg, "[[material]] \"%s\": too many materials (max %d) — ignored",
+                                    name.u.s, CONFIG_MAX_MATERIALS);
+                free(name.u.s);
+                continue;
+            }
+            m = &cfg->materials[cfg->material_count++];
+            snprintf(m->name, sizeof(m->name), "%s", name.u.s);
+        }
+        m->density = density;
+        free(name.u.s);
+    }
+}
+
 static void load_rules(toml_table_t *root, FwmConfig *cfg) {
     cfg->rules      = NULL;
     cfg->rule_count = 0;
@@ -2066,6 +2136,16 @@ static void load_rules(toml_table_t *root, FwmConfig *cfg) {
         r->bg_alpha  = rule_number(cfg, tbl, "bg_alpha",  i, 0.0, 1.0);
         r->blur      = rule_tristate(tbl, "blur");
         r->blur_radius = rule_number(cfg, tbl, "blur_radius", i, 0.0, 128.0);
+        r->material[0] = '\0';
+        toml_datum_t mat = toml_string_in(tbl, "material");
+        if (mat.ok) {
+            if (config_material(cfg, mat.u.s))
+                snprintf(r->material, sizeof(r->material), "%s", mat.u.s);
+            else
+                config_report_error(cfg, "[[rule]] #%d: no material \"%s\" — ignored",
+                                    i + 1, mat.u.s);
+            free(mat.u.s);
+        }
         r->bg_auto   = -1;
         toml_datum_t bgc = toml_string_in(tbl, "bg_color");
         if (bgc.ok) {
@@ -2083,7 +2163,7 @@ static void load_rules(toml_table_t *root, FwmConfig *cfg) {
             isnan(r->mass) && isnan(r->gravity) && isnan(r->bounce) &&
             isnan(r->friction) && isnan(r->toughness) && isnan(r->hardness) &&
             isnan(r->opacity) && isnan(r->bg_alpha) && r->bg_auto < 0 &&
-            r->blur < 0 && isnan(r->blur_radius))
+            r->blur < 0 && isnan(r->blur_radius) && !r->material[0])
             config_report_error(cfg, "[[rule]] #%d: matches but sets nothing", i + 1);
 
         idx++;
@@ -2103,6 +2183,7 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
     out->bg_auto = -1;
     out->blur = -1;
     out->blur_radius = NAN;
+    out->material[0] = '\0';
 
     int matched = 0;
     for (int i = 0; i < cfg->rule_count; i++) {
@@ -2131,6 +2212,7 @@ int config_match_rules(const FwmConfig *cfg, const char *app_id, const char *tit
         if (!isnan(r->bg_alpha))  out->bg_alpha  = r->bg_alpha;
         if (r->blur >= 0)         out->blur      = r->blur;
         if (!isnan(r->blur_radius)) out->blur_radius = r->blur_radius;
+        if (r->material[0]) memcpy(out->material, r->material, sizeof(out->material));
         if (r->bg_auto >= 0) {
             out->bg_auto = r->bg_auto;
             memcpy(out->bg_color, r->bg_color, sizeof(out->bg_color));
@@ -2182,6 +2264,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_glass(NULL, cfg);
     load_grass(NULL, cfg);
     load_liquids(NULL, cfg);
+    load_materials(NULL, cfg);
     load_sound(NULL, cfg);
     load_volume(NULL, cfg);
     load_idle(NULL, cfg);
@@ -2248,6 +2331,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_stats(root, cfg);
     load_wallpaper(root, cfg);
     load_wallpaper_picker(root, cfg);
+    load_materials(root, cfg);
     load_rules(root, cfg);
     load_outputs(root, cfg);
 

@@ -190,6 +190,10 @@ friction  = 0.999      # glides for a long time
 app_id    = "^org.gnome.Calculator$"
 toughness = 0.2        # made of glass, if [physics] hp is on
 hardness  = 3.0        # ... but hits like a brick
+
+[[rule]]
+app_id    = "^foot$"
+material  = "cork"     # floats high in the liquid, and is light to shove
 ```
 
 | Key | Meaning |
@@ -199,6 +203,7 @@ hardness  = 3.0        # ... but hits like a brick
 | `gravity` | Multiplies the desktop's gravity. 0 = weightless, negative = floats up. |
 | `bounce` | Restitution, absolute 0..1 — it replaces the desktop's, not multiplies it. |
 | `friction` | Per-tick velocity retention, absolute 0..1. |
+| `material` | What it is made of, by name: one of the [materials](#materials) built in or made with `[[material]]`. That is its density against water — whether it floats in the [liquid](#liquids) and how deep — and so how heavy it is: an `"iron"` window hits like one. `mass` in the same rule scales it. |
 | `toughness` | Multiplies this window's hit points. 0 = glass, broken by any hit at all; 10 = a safe. Only means anything while `[physics] hp` is on. |
 | `hardness` | Multiplies the damage this window **deals**. Separate from `toughness` so a heavy soft thing does not have to be a hammer. |
 | `opacity` | 0..1, how much of itself the whole window shows — text and pictures too, unlike a terminal that draws only its background translucent. Multiplies `[decor] inactive_opacity`, so an unfocused window still steps back. |
@@ -212,6 +217,24 @@ hardness  = 3.0        # ... but hits like a brick
 
 There is deliberately no per-window "float": tiling on fwm is a property of the
 **desktop**, so such a rule could not be honoured.
+
+### materials
+
+What a window can be made of, by density against water: under 1 it floats in the
+[liquid](#liquids), sitting that share of its height under; over 1 it sinks.
+Built in: `foam` 0.05, `cork` 0.25, `wood` 0.6, `ice` 0.92, `glass` 2.5, `stone`
+2.7, `iron` 7.9, `gold` 19.3. `[[material]]` adds one, or changes one of those by
+its name; up to 32.
+
+```toml
+[[material]]
+name    = "balsa"
+density = 0.15
+```
+
+A window with no material is `[liquids] window_density` dense, times whatever
+makes it heavier or lighter than a normal one (its rule's `mass`, its desktop's
+`mass_density`, `[physics] mass = "ram"`).
 
 A window that names a parent — an xdg-shell `set_parent`, an X11
 `WM_TRANSIENT_FOR`, which is to say a dialog, a file chooser, a preferences
@@ -1293,6 +1316,7 @@ viscosity = 60.0      # px²/s: tens is water, hundreds oil, thousands honey
 tension   = 30.0      # px: drops under this stay round; 0 is no surface
 color     = "#3a8be0cc"
 threads   = 0         # a step split across this many; 0 = one per core
+window_density = 0.5  # a normal window against water: under 1 it floats
 ```
 
 It is laws and nothing else: inertia, gravity, an incompressible pressure,
@@ -1312,7 +1336,23 @@ and lies on them, a window dropped in splashes it and raises it by what it
 displaces, one dragged through it pushes it along, and one lifted out comes out
 dripping — it is let go wherever air can get in behind, the way the walls let
 go of it. A desktop holds that much less liquid while a window takes up room in
-it; what no longer fits runs over the top. It does not push windows back yet.
+it; what no longer fits runs over the top.
+
+And it pushes back. A window the physics moves is buoyed up by the weight of
+the liquid it displaces: one less dense than the liquid floats, sitting its
+density's share of its height under — a normal window, `window_density` 0.5,
+half under — and one denser sinks, slowed by what it has to push aside. A wave
+lifts it, a current carries it, a window spun in it is turned by it, and with
+gravity off nothing holds it up but nothing pulls it down either. A liquid made
+denser in the liquids menu holds the same window higher. What a window is made
+of is its [material](#materials). The pressure on a window is solved for
+together with the pressure in the liquid, which is what lets a window far
+lighter than the water it lands in float rather than be thrown out of it. A
+window that is pinned, tiled, on a floating desktop or in your hand is held:
+it moves the liquid and the liquid does not move it. A settled pool keeps
+holding up what floats on it without being stepped. To a cell: the liquid
+takes the pressure on a window's face from the middle of the cell beside it,
+so a window floats up to a dozen px higher than Archimedes would have it.
 
 It lies between the back [plane](physics.md#planes) and the middle one: a window
 in the middle stands in it, one in front it runs behind, and one at the back it
@@ -1333,8 +1373,8 @@ A desktop holds no more than its own area of liquid, whatever `particles` says:
 it cannot be squeezed, so a full desktop refuses more, and a monitor swapped
 for a smaller one spills what no longer fits over the top.
 
-Live: `viscosity`, `tension`, `color`, `particles`, `threads` and `enabled` are
-all `fwmctl set liquids.*`; switching it off empties it. Picking up a bucket switches
+Live: `viscosity`, `tension`, `color`, `particles`, `threads`, `window_density`
+and `enabled` are all `fwmctl set liquids.*`; switching it off empties it. Picking up a bucket switches
 it on for the session. A bucket pours a fifth of `particles` a second. `spacing` is reload-only,
 because particles of one size do not become particles of another, and a new one
 empties the liquid. `FWM_DEBUG_LIQUID=1` logs what a step costs, once a second.

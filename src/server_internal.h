@@ -302,6 +302,9 @@ void server_grass_sync(FwmServer *server);
  * the last one is done, and put the newest picture on every screen that can
  * see it. `elapsed` is the real time the tick covers. */
 void server_liquid_sync(FwmServer *server, double elapsed);
+/* Before the physics steps: what the liquid did to the windows in it over its
+ * last step, for the physics to carry on over the same stretch of time. */
+void server_liquid_forces(FwmServer *server);
 /* Whether the frame loop must keep running at full rate for the liquid. */
 bool server_liquid_busy(FwmServer *server);
 /* GPU reset: let go of the picture; the next tick paints a new one. */

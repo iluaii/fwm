@@ -249,6 +249,10 @@ static void buf_window(struct Buf *b, FwmServer *server, FwmView *view) {
     buf_printf(b, ",\"pinned\":%s", body && body->pinned ? "true" : "false");
     buf_printf(b, ",\"nocollide\":%s", body && body->no_collide ? "true" : "false");
     buf_printf(b, ",\"plane\":\"%s\"", plane_name(server_view_plane(server, view)));
+    /* Against water: what it floats or sinks by, its material and its weight
+     * taken together. */
+    buf_printf(b, ",\"density\":%.3f", body ? server->config.liquids.window_density
+                                               * physics_body_density(&server->physics, body) : 0.0);
     buf_printf(b, ",\"xwayland\":%s}", view->type == FWM_VIEW_XDG ? "false" : "true");
 }
 

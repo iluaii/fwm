@@ -101,6 +101,7 @@ struct FwmLiquidRun {
 
     /* Everything below is the compositor's alone. */
     bool stepped;           /* a step was handed over and has not been looked at */
+    bool pushed;            /* ...and what it did to the windows is in the physics */
     double owed;            /* seconds of simulation not yet handed over */
     bool have_g;
     double last_gx, last_gy;
@@ -152,14 +153,25 @@ static double now_s(void) {
  * desktop, and the rest simply are not in the water. */
 #define LIQUID_SOLIDS_MAX 64
 
+static const LiquidKind *kind_of(FwmServer *server, int id);
+static bool run_idle(const struct FwmLiquidRun *run);
+
 /* The windows standing in the liquid: every one on its desktop in the middle
- * plane (server_plane.c), as a box in the liquid's own coordinates — where it
- * is, never how fast it goes; the liquid works that out from where it was.
- * Not a fullscreen one, which covers the desktop and stops the liquid anyway,
- * and not one that has not painted anything yet. */
+ * plane (server_plane.c), as a box in the liquid's own coordinates. Not a
+ * fullscreen one, which covers the desktop and stops the liquid anyway, and
+ * not one that has not painted anything yet.
+ *
+ * Free, the ones the physics moves: as dense against the liquid as the
+ * window is against water — [liquids] window_density, scaled as the window's
+ * weight is — over how dense the liquid is, going as fast as the physics
+ * says, under its own gravity. Held, the ones the physics does not: pinned,
+ * tiled, on a floating desktop, or in the hand. */
 static void solids_sync(FwmServer *server, struct FwmLiquidRun *run, int d) {
     LiquidSolid s[LIQUID_SOLIDS_MAX];
     int n = 0;
+    double heavy = kind_of(server, run->kind)->density;
+    if (!(heavy > 0.0)) heavy = 1.0;
+    const PhysicsWorld *world = &server->physics;
     FwmView *view;
     wl_list_for_each(view, &server->views, link) {
         if (n == LIQUID_SOLIDS_MAX) break;
@@ -167,14 +179,45 @@ static void solids_sync(FwmServer *server, struct FwmLiquidRun *run, int d) {
         PhysicsBody *b = physics_find_body(&server->physics, view->id);
         if (!b || b->desktop_id != d || b->fullscreen) continue;
         if (server_view_plane(server, view) != PLANE_MIDDLE) continue;
+        bool free = !b->pinned && !b->tiled && !b->floating
+                 && view->id != server->hand_carried && view->id != server->hand_frozen;
         s[n++] = (LiquidSolid){
             .id = view->id,
             .x = b->x - (double)d * server->screen_width, .y = b->y,
             .w = b->width, .h = b->height,
             .angle = b->spin ? b->angle : 0.0,
+            .density = free ? server->config.liquids.window_density
+                              * physics_body_density(world, b) / heavy : 0.0,
+            .vx = b->vx, .vy = b->vy,
+            .spin = b->spin ? b->angvel : 0.0,
+            .ay = physics_body_gravity(world, b),
+            .turns = b->spin,
         };
     }
     liquid_set_solids(run->sim, s, n);
+}
+
+/* What the liquid did to the windows in it, into the physics, which goes on
+ * applying it as it steps them (physics_push_body); every other window,
+ * nothing. With no liquid, nothing for any of them. */
+static void pushes_apply(FwmServer *server, struct FwmLiquidRun *run) {
+    PhysicsWorld *world = &server->physics;
+    for (int i = 0; i < world->body_count; i++) {
+        PhysicsBody *b = &world->bodies[i];
+        if (!b->active) continue;
+        double ax = 0.0, ay = 0.0, alpha = 0.0;
+        if (run) liquid_push(run->sim, b->id, &ax, &ay, &alpha);
+        b->ext_ax = ax;
+        b->ext_ay = ay;
+        b->ext_alpha = alpha;
+    }
+}
+
+void server_liquid_forces(FwmServer *server) {
+    struct FwmLiquidRun *run = server->liquid;
+    if (!run || !run->stepped || run->pushed || !run_idle(run)) return;
+    pushes_apply(server, run);
+    run->pushed = true;
 }
 
 /* ── the worker ──────────────────────────────────────────────────────── */
@@ -224,6 +267,7 @@ static void run_submit(struct FwmLiquidRun *run, double dt, double gx, double gy
     pthread_cond_signal(&run->cond);
     pthread_mutex_unlock(&run->lock);
     run->stepped = true;
+    run->pushed = false;
 }
 
 /* ── lifetime ────────────────────────────────────────────────────────── */
@@ -280,6 +324,8 @@ static void run_destroy(FwmServer *server) {
     free(run->snap);
     free(run);
     server->liquid = NULL;
+    /* Nothing holds the windows up any more. */
+    pushes_apply(server, NULL);
 }
 
 void server_liquid_finish(FwmServer *server) {
@@ -1167,6 +1213,9 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
             run->dbg_steps++;
         }
         bool changed = run->stepped;
+        /* Finished after the physics stepped this tick: what it did is late
+         * by a tick, and still better than lost. */
+        if (run->stepped && !run->pushed) pushes_apply(server, run);
         run->stepped = false;
 
         /* A new spacing is a new liquid: particles of one size do not become
@@ -1259,6 +1308,13 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
             }
         } else {
             run->owed = 0.0;
+        }
+        /* Not stepped, settled or out of sight: what floats in it is held up
+         * by the pressure it was left with, and is told so every tick, since
+         * one that has moved since is no longer held. */
+        if (!run->stepped) {
+            liquid_hold(run->sim);
+            pushes_apply(server, run);
         }
     } else if (show) {
         /* Still stepping from last tick. The time keeps being owed, and is

@@ -603,6 +603,147 @@ static void test_solids(void) {
     liquid_destroy(l);
 }
 
+/* ── free solids ─────────────────────────────────────────────────────── */
+
+/* What the compositor's physics does with a window between two steps of the
+ * liquid, cut down to one body: the liquid steps from where the window is,
+ * then the window goes on under its weight and what the liquid did to it,
+ * and stops at the walls. */
+static void body_frame(FwmLiquid *l, LiquidSolid *b, double W, double H, double g) {
+    b->ax = 0.0;
+    b->ay = g;
+    liquid_set_solids(l, b, 1);
+    liquid_step(l, DT, 0, g);
+    double ax, ay, alpha;
+    liquid_push(l, b->id, &ax, &ay, &alpha);
+    b->vx += ax * DT;
+    b->vy += (g + ay) * DT;
+    b->spin += alpha * DT;
+    b->x += b->vx * DT;
+    b->y += b->vy * DT;
+    b->angle += b->spin * DT;
+    if (b->y + b->h > H) { b->y = H - b->h; if (b->vy > 0) b->vy = 0; }
+    if (b->x < 0)        { b->x = 0;        if (b->vx < 0) b->vx = 0; }
+    if (b->x + b->w > W) { b->x = W - b->w; if (b->vx > 0) b->vx = 0; }
+}
+
+/* A pool, and a window of `density` let go with its bottom on its surface;
+ * how deep the window floats. Averaged over its last seconds: in a pool this
+ * narrow it bobs for a long while — the waves it makes come back off the
+ * walls, as they would in a bathtub. */
+static double draft_of(double density, double w, double h, double *speed) {
+    const double W = 1200, H = 700;
+    FwmLiquid *l = make(W, H, 60, 30);
+    for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 300, 1800, 0, 0);
+    settle(l, 40);
+    double surface = surface_between(l, H, 0, W);
+    LiquidSolid b = { .id = 5, .x = W / 2 - w / 2, .y = surface - h, .w = w, .h = h,
+                      .density = density };
+    double fastest = 0, sum = 0;
+    int n = 0;
+    for (int f = 0; f < 1200; f++) {
+        body_frame(l, &b, W, H, G);
+        if (fabs(b.vy) > fastest) fastest = fabs(b.vy);
+        if (f < 720) continue;
+        double level = 0.5 * (surface_between(l, H, 30, 300) + surface_between(l, H, W - 300, W - 30));
+        sum += b.y + b.h - level;
+        n++;
+    }
+    if (speed) *speed = fastest;
+    CHECK_INT(inside(l, b, 1.0), 0);
+    CHECK_INT(shape_of(l, W, H).bad, 0);
+    liquid_destroy(l);
+    return sum / n;
+}
+
+static void test_bodies(void) {
+    CASE("a window lighter than water floats as deep in it as it is heavy");
+    /* Archimedes: the weight of what it displaces holds up its own, so it
+     * sits its density's share of its height under. To a cell and a half:
+     * the grid takes the pressure on a face from the middle of the cell
+     * beside it, and finds the surface between two cells. */
+    double d50 = draft_of(0.5, 300, 160, NULL);
+    CHECK_DBL(d50, 80, 18);
+    double d25 = draft_of(0.25, 300, 160, NULL);
+    CHECK_DBL(d25, 40, 18);
+    double d75 = draft_of(0.75, 300, 160, NULL);
+    CHECK_DBL(d75, 120, 18);
+    CHECK(d25 < d50 && d50 < d75);
+
+    CASE("a window heavier than water sinks to the floor");
+    const double W = 1200, H = 700;
+    FwmLiquid *l = make(W, H, 60, 30);
+    for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 300, 1800, 0, 0);
+    settle(l, 40);
+    double surface = surface_between(l, H, 0, W);
+    LiquidSolid lead = { .id = 6, .x = 450, .y = surface - 120, .w = 300, .h = 120, .density = 2.0 };
+    double slowest_sink = 0;
+    for (int f = 0; f < 300; f++) {
+        double y0 = lead.y;
+        body_frame(l, &lead, W, H, G);
+        /* Slowed by the water it has to push aside: never as fast as it
+         * would fall in air over the same time. */
+        if (f == 60) slowest_sink = (lead.y - y0) / DT;
+    }
+    CHECK_DBL(lead.y + lead.h, H, 1.0);
+    CHECK(slowest_sink < G * 1.0);
+    CHECK_INT(inside(l, lead, 1.0), 0);
+    liquid_destroy(l);
+
+    CASE("a window far lighter than the water it lands in floats, and does not fly off");
+    /* Lighter than what it pushes aside, and wide and thin, so the water it
+     * shoves outweighs it many times — the case that pushing it with the
+     * last step's pressure cannot survive. */
+    double fastest;
+    double d5 = draft_of(0.05, 600, 60, &fastest);
+    CHECK_DBL(d5, 3, 18);
+    CHECK(fastest < 2000);
+
+    CASE("a plank floats flat, and a tilted one rights itself");
+    l = make(W, H, 60, 30);
+    for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 300, 1800, 0, 0);
+    settle(l, 40);
+    surface = surface_between(l, H, 0, W);
+    LiquidSolid plank = { .id = 8, .x = 400, .y = surface - 70, .w = 400, .h = 80,
+                          .density = 0.5, .turns = true, .angle = 0.5 };
+    for (int f = 0; f < 600; f++) body_frame(l, &plank, W, H, G);
+    double tilt = fabs(remainder(plank.angle, M_PI));
+    CHECK(tilt < 0.15);
+    liquid_destroy(l);
+
+    CASE("asleep, the pool still holds a window up");
+    l = make(W, H, 60, 30);
+    for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 300, 1800, 0, 0);
+    settle(l, 40);
+    surface = surface_between(l, H, 0, W);
+    LiquidSolid raft = { .id = 10, .x = 450, .y = surface - 160 + 80, .w = 300, .h = 160,
+                         .density = 0.5 };
+    /* The pool is asleep already; the window in it wakes it. */
+    int f = 0;
+    do body_frame(l, &raft, W, H, G);
+    while (++f < 3600 && !liquid_asleep(l));
+    CHECK(liquid_asleep(l));
+    /* Held where it went to sleep by its buoyancy there: all but the little
+     * it was still bobbing by. The compositor's physics puts a window that
+     * still sleeps; this one never stops being moved. */
+    double rest = raft.y;
+    for (f = 0; f < 120; f++) body_frame(l, &raft, W, H, G);
+    CHECK_DBL(raft.y, rest, 1.0);
+    liquid_destroy(l);
+
+    CASE("with gravity off, a window thrown into a ball of liquid is slowed by it");
+    l = make(W, H, 60, 30);
+    liquid_pour(l, 700, 350, 6000, 0, 0);
+    run(l, 1.0, 0, 0);
+    LiquidSolid dart = { .id = 11, .x = 100, .y = 320, .w = 120, .h = 60,
+                         .density = 0.5, .vx = 600 };
+    for (f = 0; f < 90; f++) body_frame(l, &dart, W, H, 0);
+    CHECK(dart.vx < 400);
+    CHECK(dart.vx > -100);
+    CHECK_INT(shape_of(l, W, H).bad, 0);
+    liquid_destroy(l);
+}
+
 /* ── threads ─────────────────────────────────────────────────────────── */
 
 static void test_threads(void) {
@@ -665,6 +806,7 @@ int main(void) {
         test_viscosity();
         test_walls();
         test_solids();
+        test_bodies();
     }
     return t_report("test_liquid");
 }

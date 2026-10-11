@@ -424,6 +424,67 @@ static void test_gestures(void) {
  * value the file may simply not mention — and both get it wrong in the same
  * way if the "unset" state is ever confused with a real number, so the tests
  * lean on the cases where 0 and -1 are meaningful values. */
+static void test_materials(void) {
+    CASE("[[material]] and a rule's material");
+    const char *p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[[material]]\n"
+        "name    = \"balsa\"\n"
+        "density = 0.15\n"
+        "[[material]]\n"
+        "name    = \"wood\"\n"        /* a built-in one, changed */
+        "density = 0.7\n"
+        "[[material]]\n"
+        "name    = \"lead\"\n"
+        "density = 11\n"              /* a whole number is a density too */
+        "[[rule]]\n"
+        "app_id   = \"^foot$\"\n"
+        "material = \"balsa\"\n"
+        "[[rule]]\n"
+        "app_id   = \"^mpv$\"\n"
+        "material = \"iron\"\n"
+        "mass     = 2\n");
+    FwmConfig cfg;
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_NOT_NULL(config_material(&cfg, "balsa"));
+    CHECK_DBL(config_material(&cfg, "balsa")->density, 0.15, 1e-9);
+    CHECK_DBL(config_material(&cfg, "wood")->density, 0.7, 1e-9);
+    CHECK_DBL(config_material(&cfg, "lead")->density, 11.0, 1e-9);
+    CHECK_DBL(config_material(&cfg, "gold")->density, 19.3, 1e-9);
+    CHECK(config_material(&cfg, "unobtainium") == NULL);
+
+    ConfigRule out;
+    CHECK_INT(config_match_rules(&cfg, "foot", NULL, &out), 1);
+    CHECK_STR(out.material, "balsa");
+    CHECK_INT(config_match_rules(&cfg, "mpv", NULL, &out), 1);
+    CHECK_STR(out.material, "iron");
+    CHECK_DBL(out.mass, 2.0, 1e-9);
+    CHECK_INT(config_match_rules(&cfg, "kitty", NULL, &out), 0);
+    CHECK_STR(out.material, "");
+    config_free(&cfg);
+    drop_config();
+
+    CASE("a material that is not there, and one with no density, are reported");
+    p = write_config(
+        "[binds]\n\"super+q\" = \"killclient\"\n"
+        "[[material]]\n"
+        "name = \"vapour\"\n"
+        "[[rule]]\n"
+        "app_id   = \"^foot$\"\n"
+        "material = \"vapour\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 3);   /* no density; no such material; sets nothing */
+    CHECK(config_material(&cfg, "vapour") == NULL);
+    config_free(&cfg);
+    drop_config();
+
+    CASE("with no config at all, the built-in materials are there");
+    config_load(&cfg, "/nonexistent/fwm-config.toml");
+    CHECK_DBL(config_material(&cfg, "wood")->density, 0.6, 1e-9);
+    config_free(&cfg);
+}
+
 static void test_rule_material(void) {
     CASE("[[rule]] material properties");
     const char *p = write_config(
@@ -1837,6 +1898,7 @@ int main(void) {
     test_input_touchpad();
     test_gestures();
     test_rule_material();
+    test_materials();
     test_physics_profiles();
     test_mass_mode();
     test_every_dispatchable_action_binds();

@@ -69,6 +69,7 @@ struct BodySlot {
     int no_collide;          /* last applied collision-filter state */
     int fenced;              /* ... and whether the desktop edges apply to it */
     int layer;               /* ... and the plane it was filtered into */
+    double eax, eay, ealpha; /* the outside pull it was last woken for */
     int spin;                /* last applied free-rotation state */
     /* Last applied material, so the per-step resolve below only talks to Box2D
      * when something actually changed (a reload, a drag onto another desktop). */
@@ -467,6 +468,23 @@ void physics_throw_body(PhysicsWorld *world, uint32_t id, double vx, double vy) 
             return;
         }
     }
+}
+
+void physics_push_body(PhysicsWorld *world, uint32_t id, double ax, double ay, double alpha) {
+    PhysicsBody *body = physics_find_body(world, id);
+    if (!body) return;
+    body->ext_ax = isfinite(ax) ? ax : 0.0;
+    body->ext_ay = isfinite(ay) ? ay : 0.0;
+    body->ext_alpha = isfinite(alpha) ? alpha : 0.0;
+}
+
+double physics_body_gravity(const PhysicsWorld *world, const PhysicsBody *b) {
+    struct Material mat = material_for(world, b);
+    return world->gravity * world->gravity_scale * mat.gravity_scale;
+}
+
+double physics_body_density(const PhysicsWorld *world, const PhysicsBody *b) {
+    return material_for(world, b).density;
 }
 
 void physics_spin_body(PhysicsWorld *world, uint32_t id, double angvel) {
@@ -975,6 +993,40 @@ static void slot_create(struct Engine *eng, PhysicsWorld *world, int i, PhysicsB
     s->sang = m->angle; s->sangvel = m->angvel;
 }
 
+/* How much the outside pull on a body has to change before a body at rest
+ * under it is woken: a hundredth of earth's gravity, px/s². Less, and a
+ * window floating still on a settled pool, held up by the same pressure
+ * every step, is kept awake by the rounding in it. */
+#define PUSH_WAKE 10.0
+
+/* The outside pull, into Box2D as a force: forces last one step there, so
+ * this runs before each. */
+static void push_bodies(PhysicsWorld *world, struct Engine *eng) {
+    for (int i = 0; i < world->body_count; i++) {
+        PhysicsBody *m = &world->bodies[i];
+        struct BodySlot *s = &eng->slots[i];
+        if (!m->active || !s->has || s->type != b2_dynamicBody) continue;
+        bool turn = m->spin && m->ext_alpha != 0.0;
+        if (m->ext_ax == 0.0 && m->ext_ay == 0.0 && !turn) {
+            s->eax = s->eay = s->ealpha = 0.0;
+            continue;
+        }
+        bool wake = fabs(m->ext_ax - s->eax) + fabs(m->ext_ay - s->eay) > PUSH_WAKE
+                 || fabs(m->ext_alpha - s->ealpha) > 0.05;
+        if (wake) {
+            s->eax = m->ext_ax;
+            s->eay = m->ext_ay;
+            s->ealpha = m->ext_alpha;
+        }
+        float mass = b2Body_GetMass(s->body);
+        b2Body_ApplyForceToCenter(s->body, (b2Vec2){ mass * px2m(m->ext_ax), mass * px2m(m->ext_ay) },
+                                  wake);
+        if (turn)
+            b2Body_ApplyTorque(s->body, b2Body_GetRotationalInertia(s->body) * (float)m->ext_alpha,
+                               wake);
+    }
+}
+
 void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
                   uint32_t skip_a, uint32_t skip_b, uint32_t dragged_id, double dt) {
     struct Engine *eng = engine_of(world);
@@ -1302,6 +1354,7 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
     world->impact_count = 0;
 
     for (int k = 0; k < subs; k++) {
+        push_bodies(world, eng);
         b2World_Step(eng->world, sdt, 4);
 
         /* Between the substeps as much as after them: a shove that hands a

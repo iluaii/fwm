@@ -1851,6 +1851,9 @@ static int physics_tick_cb(void *data) {
         }
 
         server_planes_sync(server);
+        server->hand_carried = dragged_win;
+        server->hand_frozen = resize_win;
+        server_liquid_forces(server);
         physics_step(&server->physics, server->screen_width, server->screen_height,
                      drag_win, resize_win, dragged_win, dt);
         /* The step that just ran is the first to carry mass = "ram" weights, so

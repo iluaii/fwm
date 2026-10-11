@@ -485,6 +485,10 @@ typedef struct FwmServer {
     /* The liquid, once something has been poured ([liquids], src/liquid.h).
      * NULL until then, and again once it is switched off. */
     struct FwmLiquidRun *liquid;
+    /* The windows the hand has this tick (server_tick.c): the one it carries,
+     * and the one it is resizing or turning. Neither is free for the liquid
+     * to move. */
+    uint32_t hand_carried, hand_frozen;
     /* The liquids menu, while it is open, and the row under the pointer in
      * it; and the bucket, while one is in the hand (server_liquid.c). */
     struct wlr_scene_buffer *liquids_buffer;

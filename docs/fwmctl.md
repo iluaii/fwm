@@ -18,7 +18,7 @@ at it explicitly or you will be talking to the outer session.
 | Command | Does |
 |---|---|
 | `fwmctl state` | compositor state: desktop, camera, per-monitor desktops, gravity, per-desktop modes, focused title |
-| `fwmctl windows` | every window: id, title, app_id, geometry, desktop, focus, pinned, nocollide, xwayland |
+| `fwmctl windows` | every window: id, title, app_id, geometry, desktop, focus, pinned, nocollide, plane, density (against water: under 1 it floats), xwayland |
 | `fwmctl outputs` | monitors, their current mode and every mode they offer |
 | `fwmctl memory` | fwm's own memory, split into heap, mapped libraries and client buffers |
 | `fwmctl output <name> k=v …` | change one monitor |

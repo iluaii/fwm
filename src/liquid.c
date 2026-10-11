@@ -61,6 +61,9 @@
 #define SLEEP_RMS   3.0   /* px/s */
 #define SLEEP_MAX  30.0   /* px/s */
 #define SLEEP_AFTER 0.5   /* s */
+/* ...and nothing floating in it going faster than this, px/s: where the
+ * compositor's physics lets a window it moves fall asleep too. */
+#define SLEEP_BODY  5.0
 
 /* A cell no particle happens to be in, inside the liquid, is still liquid:
  * with two particles to a cell side, the flow opens such gaps all the time.
@@ -188,12 +191,22 @@ struct FwmLiquid {
     int nsolid;            /* cells under a body, as of the last step */
     struct sface *sfaces;
     int nsfaces, sfaces_cap;
+    /* The faces free solids share with liquid cells, for the pressure solve
+     * (see "free solids"), and what the liquid did to each free solid over
+     * the last step, by id. */
+    struct couple *cpl;
+    int ncpl, cpl_cap;
+    struct push *push;
+    int npush, push_cap;
     int *flood;            /* release_solids' and find_pockets' stack */
     /* Liquid shut in with no air — between a solid and a wall, say — as
      * runs of cells in `pocket`, pocket k from pocket_at[k]. */
     int *pocket, *pocket_at;
     int npockets, pocket_cap;
     double smax;           /* the fastest solid surface near the liquid */
+    double hmax;           /* ...of the held ones, and whether there are any */
+    bool held;
+    double fmax;           /* the fastest free solid in it, after the last step */
     /* The particles' bounding box after the last step: "near the liquid". */
     float lo_x, lo_y, hi_x, hi_y;
 
@@ -306,6 +319,9 @@ static void grid_free(FwmLiquid *l) {
     l->pgrid = NULL;
     l->pocc = NULL;
     l->pres = l->rhs = l->res = l->aux = l->dir = l->prec = l->q = NULL;
+    /* Its cells are gone with the grid, and so is the pressure it held. */
+    l->ncpl = 0;
+    l->npush = 0;
 }
 
 void liquid_destroy(FwmLiquid *l) {
@@ -314,6 +330,7 @@ void liquid_destroy(FwmLiquid *l) {
     free(l->p);
     free(l->sol_prev); free(l->sol_next);
     free(l->bodies);   free(l->sfaces); free(l->pocket_at);
+    free(l->cpl);      free(l->push);
     grid_free(l);
     free(l);
 }
@@ -599,37 +616,61 @@ int liquid_drain(FwmLiquid *l, double cx, double cy, double r, int max) {
  * the next test does not find it on it. */
 #define SKIN 0.01f
 
-/* The fastest a solid may drive the liquid: this many times its own fastest
- * point, and never less than SQUEEZE_LEAST px/s.
+/* The fastest a held solid may drive the liquid: this many times its own
+ * fastest point, and never less than SQUEEZE_LEAST px/s.
  *
  * Not a law, and the one place here that is not: a limit on what a law
  * cannot do with a solid nothing pushes back on. Liquid between a solid and
  * a wall it is closing on has to leave through the gap, and as fast as the
  * gap is narrow — a window's corner sweeping the floor of a pool drove it at
  * 50000 px/s, the step ran at its ceiling for frames on end and the pool
- * sprayed like a burst pipe. Real water would hold the window off instead;
- * until the liquid pushes back (the next stage) it gives, here, at a speed
- * nothing else on a desktop reaches, and is a little fuller there for a
- * moment. A free splash never comes near it: water that fell the height of
- * the screen splashes at a few thousand px/s. Only while solids are in it. */
+ * sprayed like a burst pipe. A free solid is held off by the liquid it
+ * squeezes, as a real one would be, and needs nothing of the kind; a held
+ * one — carried by the hand, which no water stops — still does, and while
+ * one stands in the liquid it gives, here, at a speed nothing else on a
+ * desktop reaches, and is a little fuller there for a moment. A free splash
+ * never comes near it: water that fell the height of the screen splashes at
+ * a few thousand px/s. */
 #define SQUEEZE_TIMES 3.0f
 #define SQUEEZE_LEAST 6000.0f
 
 struct body {
+    unsigned id;
+    bool free;
     float hw, hh, reach;       /* half its size, and half its diagonal */
-    float cx0, cy0, a0;        /* its centre and turn at the start of the step */
-    float vx, vy, spin;        /* px/s and rad/s, over the step */
-    float px, py, c, s;        /* now: its centre, and its turn as cos, sin */
+    float cx0, cy0, a0;        /* held: its centre and turn at the start of the step */
+    float vx, vy, spin;        /* px/s and rad/s: held, over the step; free, now */
+    float px, py, a, c, s;     /* now: its centre, and its turn, also as cos, sin */
+    float minv, iinv;          /* free: one over its mass, and its moment (0: does not turn) */
+    float ax, ay;              /* free: what else pulls on it, px/s² */
+    double gvx, gvy, gspin;    /* free: what the liquid has given it this step */
+    double wx, wy, ww;         /* free: during a solve, M^-1 J x */
 };
 
 /* An edge where a solid meets a cell that is not solid. */
 struct sface {
     int f;                     /* the edge, in u (axis 0) or v (axis 1) */
     int cell;                  /* the cell on the liquid's side */
+    int body;                  /* the solid's index in bodies */
     unsigned char axis;
     unsigned char had;         /* the liquid had a velocity there */
+    unsigned char let_go;      /* release_solids opened it */
     float out;                 /* +1 or -1: which way along the axis is away from the solid */
+    float x, y;                /* its middle */
     float solid, own;          /* the solid's velocity across it, and the liquid's */
+};
+
+/* A face a free solid shares with a liquid cell, and what a unit of pressure
+ * in that cell does to the solid through it: pushes it (gx, gy) and turns it
+ * gw about its centre, per unit of the face's length. */
+struct couple {
+    int cell, body;
+    float gx, gy, gw;
+};
+
+struct push {
+    unsigned id;
+    double ax, ay, alpha;
 };
 
 static const LiquidSolid *solid_with(const LiquidSolid *s, int n, unsigned id) {
@@ -670,6 +711,9 @@ void liquid_set_solids(FwmLiquid *l, const LiquidSolid *s, int n) {
         struct body *c = realloc(l->bodies, (size_t)n * sizeof(*c));
         if (!c) return;
         l->bodies = c;
+        struct push *d = realloc(l->push, (size_t)n * sizeof(*d));
+        if (!d) return;
+        l->push = d;
         l->sol_cap = n;
     }
 
@@ -696,24 +740,45 @@ void liquid_set_solids(FwmLiquid *l, const LiquidSolid *s, int n) {
     if (wakes) wake(l);
 }
 
-/* The step's solids: where each starts, and how fast it goes to where it is
- * to be. And the fastest of them near the liquid, which the step has to keep
- * up with as it does with the liquid's own fastest. */
+/* The step's solids: where each starts, and how fast it goes — a held one
+ * to where it is to be, a free one as fast as it is going. And the fastest of
+ * them near the liquid, which the step has to keep up with as it does with
+ * the liquid's own fastest. */
 static void bodies_start(FwmLiquid *l, double dt) {
     l->nbodies = 0;
-    l->smax = 0.0;
+    l->smax = l->hmax = 0.0;
+    l->held = false;
     for (int k = 0; k < l->nsol_next; k++) {
         const LiquidSolid *now = &l->sol_next[k];
         const LiquidSolid *was = solid_with(l->sol_prev, l->nsol_prev, now->id);
         struct body *b = &l->bodies[l->nbodies++];
         double cx = now->x + now->w / 2, cy = now->y + now->h / 2;
+        memset(b, 0, sizeof(*b));
+        b->id = now->id;
         b->hw = (float)(now->w / 2);
         b->hh = (float)(now->h / 2);
         b->reach = (float)reach_of(now);
-        b->cx0 = (float)cx;
-        b->cy0 = (float)cy;
-        b->a0 = (float)now->angle;
-        b->vx = b->vy = b->spin = 0.0f;
+        b->cx0 = b->px = (float)cx;
+        b->cy0 = b->py = (float)cy;
+        b->a0 = b->a = (float)now->angle;
+        b->c = cosf(b->a);
+        b->s = sinf(b->a);
+        double mass = now->density * now->w * now->h;
+        if (mass > 0.0 && isfinite(mass)) {
+            b->free = true;
+            b->minv = (float)(1.0 / mass);
+            b->iinv = now->turns ? (float)(12.0 / (mass * (now->w * now->w + now->h * now->h))) : 0.0f;
+            b->vx = (float)now->vx;
+            b->vy = (float)now->vy;
+            b->spin = now->turns ? (float)now->spin : 0.0f;
+            b->ax = (float)now->ax;
+            b->ay = (float)now->ay;
+            double fastest = hypot(now->vx, now->vy) + fabs(b->spin) * b->reach;
+            if (fastest > l->smax && near_liquid(l, cx, cy, cx, cy, b->reach))
+                l->smax = fastest;
+            continue;
+        }
+        l->held = true;
         if (was && was->w == now->w && was->h == now->h && dt > 0.0) {
             double wx = was->x + was->w / 2, wy = was->y + was->h / 2;
             double da = remainder(now->angle - was->angle, 2.0 * M_PI);
@@ -728,20 +793,50 @@ static void bodies_start(FwmLiquid *l, double dt) {
                 b->spin = (float)spin;
                 if (fastest > l->smax && near_liquid(l, wx, wy, cx, cy, b->reach))
                     l->smax = fastest;
+                if (fastest > l->hmax && near_liquid(l, wx, wy, cx, cy, b->reach))
+                    l->hmax = fastest;
             }
         }
     }
 }
 
-/* Every solid where it is `t` seconds into the step. */
-static void bodies_at(FwmLiquid *l, double t) {
+/* A free solid that has reached a wall stops going into it: the walls are
+ * solid to it as they are to the liquid. */
+static void keep_in_box(const FwmLiquid *l, struct body *b) {
+    float ex = fabsf(b->c) * b->hw + fabsf(b->s) * b->hh;
+    float ey = fabsf(b->s) * b->hw + fabsf(b->c) * b->hh;
+    float w = (float)l->w, h = (float)l->h;
+    if (2.0f * ex < w) {
+        if (b->px - ex < 0.0f) { b->px = ex;     if (b->vx < 0.0f) b->vx = 0.0f; }
+        if (b->px + ex > w)    { b->px = w - ex; if (b->vx > 0.0f) b->vx = 0.0f; }
+    }
+    if (2.0f * ey < h) {
+        if (b->py - ey < 0.0f) { b->py = ey;     if (b->vy < 0.0f) b->vy = 0.0f; }
+        if (b->py + ey > h)    { b->py = h - ey; if (b->vy > 0.0f) b->vy = 0.0f; }
+    }
+}
+
+/* Every solid for the next `h` seconds, `t` seconds into the step: a held
+ * one where its path puts it at the end of them, a free one where it stands,
+ * going as fast as what else pulls on it makes it go by then. The liquid's
+ * part of a free one's speed comes when the pressure is solved for
+ * (couple_finish), and it moves on that after (bodies_move) — moved first,
+ * on a speed the liquid had not had its say in, a window at rest on a pool
+ * sank into it a little every step and was put back the next, and the pool
+ * never stopped trembling. */
+static void bodies_at(FwmLiquid *l, double t, double h) {
     for (int k = 0; k < l->nbodies; k++) {
         struct body *b = &l->bodies[k];
+        if (b->free) {
+            b->vx += b->ax * (float)h;
+            b->vy += b->ay * (float)h;
+            continue;
+        }
         b->px = b->cx0 + (float)(b->vx * t);
         b->py = b->cy0 + (float)(b->vy * t);
-        float a = b->a0 + (float)(b->spin * t);
-        b->c = cosf(a);
-        b->s = sinf(a);
+        b->a = b->a0 + (float)(b->spin * t);
+        b->c = cosf(b->a);
+        b->s = sinf(b->a);
     }
 }
 
@@ -834,12 +929,12 @@ static void solid_edge(FwmLiquid *l, int axis, size_t f, size_t a, size_t b, flo
         vel[f] = 0.0f;
         return;
     }
-    const struct body *bd = &l->bodies[(sa ? sa : sb) - 1];
+    int body = (sa ? sa : sb) - 1;
     float svx, svy;
-    body_velocity(bd, x, y, &svx, &svy);
+    body_velocity(&l->bodies[body], x, y, &svx, &svy);
     struct sface e = {
-        .f = (int)f, .cell = (int)(sa ? b : a), .axis = (unsigned char)axis,
-        .had = ok[f], .out = sa ? 1.0f : -1.0f,
+        .f = (int)f, .cell = (int)(sa ? b : a), .body = body, .axis = (unsigned char)axis,
+        .had = ok[f], .out = sa ? 1.0f : -1.0f, .x = x, .y = y,
         .solid = axis ? svy : svx, .own = vel[f],
     };
     add_sface(l, &e);
@@ -944,6 +1039,7 @@ static bool release_solids(FwmLiquid *l) {
         const struct sface *e = &l->sfaces[k];
         if (mark[e->cell] == 2 && e->had && (e->own - e->solid) * e->out > 0.0f) {
             (e->axis ? l->v : l->u)[e->f] = e->own;
+            l->sfaces[k].let_go = 1;
             any = true;
         }
     }
@@ -957,6 +1053,126 @@ static void spill(FwmLiquid *l) {
     if (l->n > most) {
         qsort(l->p, (size_t)l->n, sizeof(*l->p), lower_first);
         l->n = most;
+    }
+}
+
+/* The free solids on, `h` seconds, at the speed the liquid left them. */
+static void bodies_move(FwmLiquid *l, float h) {
+    for (int k = 0; k < l->nbodies; k++) {
+        struct body *b = &l->bodies[k];
+        if (!b->free) continue;
+        b->px += b->vx * h;
+        b->py += b->vy * h;
+        b->a += b->spin * h;
+        b->c = cosf(b->a);
+        b->s = sinf(b->a);
+        keep_in_box(l, b);
+    }
+}
+
+/* ── free solids ─────────────────────────────────────────────────────────
+ *
+ * A free solid is pushed by the pressure on its faces and pushes back on the
+ * liquid with its own motion, and both at once: the solid's velocity is an
+ * unknown in the pressure solve like the pressure itself (Batty, Bertails &
+ * Bridson 2007). Through a face it shares with a liquid cell, a pressure p in
+ * the cell pushes the solid with p times the face's length along G =
+ * (d, r x d) — d the way from the cell into the solid along the face's axis,
+ * r the face's place about the solid's centre — so over a step the solid's
+ * velocity becomes V* + M^-1 J p h, J the sum of those over its faces and V*
+ * where it was going anyway. And what flows out of the cell through that
+ * face is the solid's velocity there, G . V. Put the one into the other and
+ * each cell's equation gains dx² G^T M^-1 J p: the matrix is A + dx² J^T
+ * M^-1 J, still symmetric and positive definite, and the conjugate gradients
+ * solve it as they did A — with the MIC(0) of A alone as the preconditioner,
+ * which the solid's part only slows down a little.
+ *
+ * Solved together, a body lighter than the liquid it moves through is fine;
+ * solved apart — the pressure read off afterwards and the push handed to the
+ * body for the next step — it is not, because pushing liquid aside makes it
+ * heavier than it is (the liquid it shoves has to be shoved too), and a body
+ * pushed by that from the last step is pushed back past where it started,
+ * further each step. */
+
+static bool add_couple(FwmLiquid *l, const struct couple *c) {
+    if (l->ncpl == l->cpl_cap) {
+        int cap = l->cpl_cap ? 2 * l->cpl_cap : 256;
+        struct couple *a = realloc(l->cpl, (size_t)cap * sizeof(*a));
+        if (!a) return false;
+        l->cpl = a;
+        l->cpl_cap = cap;
+    }
+    l->cpl[l->ncpl++] = *c;
+    return true;
+}
+
+/* The faces free solids share with liquid cells, as they stand: not the ones
+ * let go of, which have air behind them. */
+static void couple_build(FwmLiquid *l) {
+    l->ncpl = 0;
+    for (int k = 0; k < l->nsfaces; k++) {
+        const struct sface *e = &l->sfaces[k];
+        const struct body *b = &l->bodies[e->body];
+        if (!b->free || e->let_go || l->type[e->cell] != FLUID) continue;
+        float d = -e->out;
+        float rx = e->x - b->px, ry = e->y - b->py;
+        struct couple c = { .cell = e->cell, .body = e->body };
+        if (e->axis == 0) { c.gx = d; c.gy = 0.0f; c.gw = -d * ry; }
+        else              { c.gx = 0.0f; c.gy = d; c.gw = d * rx; }
+        if (!add_couple(l, &c)) return;
+    }
+}
+
+/* M^-1 J x for every free solid, into its (wx, wy, ww). */
+static void couple_reduce(FwmLiquid *l, const float *x) {
+    for (int k = 0; k < l->nbodies; k++) {
+        struct body *b = &l->bodies[k];
+        b->wx = b->wy = b->ww = 0.0;
+    }
+    for (int k = 0; k < l->ncpl; k++) {
+        const struct couple *c = &l->cpl[k];
+        struct body *b = &l->bodies[c->body];
+        double v = x[c->cell];
+        b->wx += c->gx * v;
+        b->wy += c->gy * v;
+        b->ww += c->gw * v;
+    }
+    for (int k = 0; k < l->nbodies; k++) {
+        struct body *b = &l->bodies[k];
+        b->wx *= b->minv;
+        b->wy *= b->minv;
+        b->ww *= b->iinv;
+    }
+}
+
+/* The pressure solved: each free solid in the liquid takes what it gave it,
+ * and its faces carry its new velocity, which is the one the liquid beside
+ * them was solved to flow with. */
+static void couple_finish(FwmLiquid *l) {
+    if (l->ncpl == 0) return;
+    couple_reduce(l, l->pres);
+    const double dx = l->dx;
+    for (int k = 0; k < l->nbodies; k++) {
+        struct body *b = &l->bodies[k];
+        if (!b->free) continue;
+        double dvx = dx * b->wx, dvy = dx * b->wy, dw = dx * b->ww;
+        b->vx += (float)dvx;
+        b->vy += (float)dvy;
+        b->spin += (float)dw;
+        b->gvx += dvx;
+        b->gvy += dvy;
+        b->gspin += dw;
+        double fastest = hypot(b->vx, b->vy) + fabs(b->spin) * b->reach;
+        if (fastest > l->smax && near_liquid(l, b->px, b->py, b->px, b->py, b->reach))
+            l->smax = fastest;
+    }
+    for (int k = 0; k < l->nsfaces; k++) {
+        const struct sface *e = &l->sfaces[k];
+        const struct body *b = &l->bodies[e->body];
+        if (!b->free || e->let_go) continue;
+        float svx, svy;
+        body_velocity(b, e->x, e->y, &svx, &svy);
+        (e->axis ? l->v : l->u)[e->f] = e->axis ? svy : svx;
     }
 }
 
@@ -1121,6 +1337,28 @@ static double strip_multiply(const FwmLiquid *l, int k0, int k1, const float *x,
     return dot;
 }
 
+/* y = (A + dx² J^T M^-1 J) x over the strip, and the dot of y with x for it:
+ * the liquid's part, and the free solids' (see "free solids"). Every member
+ * calls it at once, with x final everywhere. */
+static double strip_apply(FwmLiquid *l, int part, int k0, int k1, const float *x, float *y) {
+    double dot = strip_multiply(l, k0, k1, x, y);
+    if (l->ncpl == 0) return dot;
+    if (part == 0) couple_reduce(l, x);
+    crew_sync(l->crew);
+    const int i0 = l->strip_col[part], i1 = l->strip_col[part + 1], cw = l->cw;
+    const float dx2 = l->dx * l->dx;
+    for (int k = 0; k < l->ncpl; k++) {
+        const struct couple *c = &l->cpl[k];
+        int i = c->cell % cw - PAD;
+        if (i < i0 || i >= i1) continue;
+        const struct body *b = &l->bodies[c->body];
+        float t = dx2 * (float)(c->gx * b->wx + c->gy * b->wy + c->gw * b->ww);
+        y[c->cell] += t;
+        dot += (double)t * (double)x[c->cell];
+    }
+    return dot;
+}
+
 /* z = M^-1 r over the strip, and the dot of z with r for it. */
 static double strip_precondition(FwmLiquid *l, int k0, int k1, const float *r, float *z) {
     const int cw = l->cw;
@@ -1226,10 +1464,24 @@ static void find_pockets(FwmLiquid *l) {
  * px/s. So what a pocket cannot get rid of it keeps — the part of its
  * inflow every cell of it shares is taken out of the equations, and the
  * pocket is a little fuller until the solid lets it out again, which the
- * drift correction then evens out. */
+ * drift correction then evens out.
+ *
+ * Unless a free solid shuts it in: then the pocket has a pressure, the one
+ * that pushes that solid back, and is left as it is. */
 static void open_pockets(FwmLiquid *l) {
+    int *tag = l->flood;   /* free between find_pockets and release_solids */
+    for (int k = 0; k < l->ncpl; k++) tag[l->cpl[k].cell] = 0;
+    for (int k = 0; k < l->npockets; k++)
+        for (int q = l->pocket_at[k]; q < l->pocket_at[k + 1]; q++) tag[l->pocket[q]] = k + 1;
     for (int k = 0; k < l->npockets; k++) {
         int a = l->pocket_at[k], b = l->pocket_at[k + 1];
+        double gx = 0.0, gy = 0.0;
+        for (int q = 0; q < l->ncpl; q++)
+            if (tag[l->cpl[q].cell] == k + 1) {
+                gx += l->cpl[q].gx;
+                gy += l->cpl[q].gy;
+            }
+        if (fabs(gx) + fabs(gy) >= 1.0) continue;
         double sum = 0.0;
         for (int q = a; q < b; q++) sum += l->rhs[l->pocket[q]];
         float mean = (float)(sum / (b - a));
@@ -1266,7 +1518,7 @@ static void job_pressure(void *ctx, int part, int parts) {
     }
     const float tol = SOLVE_TOL * scale;
 
-    strip_multiply(l, k0, k1, x, z);
+    strip_apply(l, part, k0, k1, x, z);
     float worst = 0.0f;
     for (int k = k0; k < k1; k++) {
         int c = l->fluid[k];
@@ -1287,7 +1539,7 @@ static void job_pressure(void *ctx, int part, int parts) {
 
     int it;
     for (it = 1; it <= SOLVE_MAX_ITERS; it++) {
-        mine[3] = strip_multiply(l, k0, k1, s, z);
+        mine[3] = strip_apply(l, part, k0, k1, s, z);
         crew_sync(l->crew);
         double ds = summed(l, 3);
         if (!(ds > 0.0)) break;
@@ -1899,7 +2151,7 @@ static void job_to_particles(void *ctx, int part, int parts) {
     const float x0 = l->ox + 0.1f * dx, x1 = l->ox + nx * dx - 0.1f * dx;
     const float y0 = l->oy + 0.1f * dx, y1 = l->oy + ny * dx - 0.1f * dx;
     const float dinv = 4.0f * idx;   /* D^-1 times the dx in each offset */
-    const float squeeze = l->nbodies ? fmaxf(SQUEEZE_LEAST, SQUEEZE_TIMES * (float)l->smax) : 0.0f;
+    const float squeeze = l->held ? fmaxf(SQUEEZE_LEAST, SQUEEZE_TIMES * (float)l->hmax) : 0.0f;
     float vmax2 = 0.0f;
     double vsum2 = 0.0;
     float lox = INFINITY, loy = INFINITY, hix = -INFINITY, hiy = -INFINITY;
@@ -1997,6 +2249,7 @@ static void substep(FwmLiquid *l, float h) {
 
     close_walls(l);
     close_solids(l);
+    couple_build(l);
 
     /* 3. The pressure, starting from last step's: a pool at rest needs the
      * same pressure every step, and from there the solve has almost nothing
@@ -2007,14 +2260,17 @@ static void substep(FwmLiquid *l, float h) {
     for (size_t c = 0; c < l->cn; c++)
         l->pres[c] = l->type[c] == FLUID ? l->pres[c] * rescale : 0.0f;
     solve_pressure(l, h, true);
-    bool let_go = release_walls(l);
-    let_go |= release_solids(l);
-    if (let_go) solve_pressure(l, h, false);
+    bool walls = release_walls(l);
+    bool solids = release_solids(l);
+    if (solids) couple_build(l);
+    if (walls || solids) solve_pressure(l, h, false);
     l->last_h = h;
+    couple_finish(l);
     crew_run(l->crew, job_finish, &job);
 
-    /* 4. Back to the particles. */
+    /* 4. Back to the particles, and the free solids on with them. */
     crew_run(l->crew, job_to_particles, &job);
+    bodies_move(l, h);
     float vmax2 = (float)largest(l, 0);
     double vsum2 = summed(l, 1);
     int bad = (int)summed(l, 2);
@@ -2046,6 +2302,37 @@ static void substep(FwmLiquid *l, float h) {
     l->vrms = l->n ? sqrt(vsum2 / l->n) : 0.0;
 }
 
+/* The pressure it sleeps under: one solve with nothing moving but gravity,
+ * and the free solids held where they stand. What holds up a window floating
+ * on a sleeping pool (liquid_hold) is then its buoyancy where it went to
+ * sleep — not the pressure of the last step, which still had the pool and
+ * the window moving in it. */
+static void rest_pressure(FwmLiquid *l) {
+    if (l->nbodies == 0 || !(l->last_h > 0.0)) return;
+    float h = (float)l->last_h;
+    struct step_job job = { .l = l, .h = h };
+    for (int k = 0; k < l->nbodies; k++) {
+        struct body *b = &l->bodies[k];
+        b->vx = b->vy = b->spin = 0.0f;
+        b->wx = b->free;   /* kept through the solve */
+        b->free = false;
+    }
+    crew_run(l->crew, job_to_grid, &job);
+    if (l->mat.tension > 0.0) {
+        solid_cover(l);
+        crew_run(l->crew, job_tension, &job);
+    }
+    close_walls(l);
+    close_solids(l);
+    l->ncpl = 0;
+    solve_pressure(l, h, true);
+    for (int k = 0; k < l->nbodies; k++) {
+        struct body *b = &l->bodies[k];
+        b->free = b->wx != 0.0;
+    }
+    couple_build(l);
+}
+
 void liquid_step(FwmLiquid *l, double dt, double gx, double gy) {
     if (!l || !(dt > 0.0)) return;
 
@@ -2061,6 +2348,7 @@ void liquid_step(FwmLiquid *l, double dt, double gx, double gy) {
 
     l->substeps = 0;
     if (l->n == 0 || !l->u || l->asleep) {
+        liquid_hold(l);
         bodies_settle(l);
         return;
     }
@@ -2075,16 +2363,32 @@ void liquid_step(FwmLiquid *l, double dt, double gx, double gy) {
         int n = (int)ceil(left / stable_dt(l) - 1e-9);
         if (n < 1) n = 1;
         double h = left / n;
-        bodies_at(l, t + h);
+        bodies_at(l, t + h, h);
         substep(l, (float)h);
         t += h;
         l->substeps++;
     }
+    /* What the liquid did to each free solid, spread over the time it took. */
+    l->npush = 0;
+    l->fmax = 0.0;
+    for (int k = 0; k < l->nbodies; k++) {
+        const struct body *b = &l->bodies[k];
+        if (!b->free) continue;
+        if (b->gvx != 0.0 || b->gvy != 0.0 || b->gspin != 0.0)
+            l->fmax = fmax(l->fmax, hypot(b->vx, b->vy) + fabs(b->spin) * b->reach);
+        l->push[l->npush++] = (struct push){
+            .id = b->id, .ax = b->gvx / t, .ay = b->gvy / t, .alpha = b->gspin / t,
+        };
+    }
     bodies_settle(l);
 
     /* Calm, and nothing near it moving: a window pushed slowly through a
-     * pool keeps it awake however gently the pool moves. */
-    if (l->vrms < SLEEP_RMS && l->vmax < SLEEP_MAX && l->smax < SLEEP_MAX) {
+     * pool keeps it awake however gently the pool moves. And nothing in it
+     * still bobbing: what holds a floating window up while the liquid sleeps
+     * is the pressure it went to sleep with, which is only its weight if it
+     * was at rest. */
+    if (l->vrms < SLEEP_RMS && l->vmax < SLEEP_MAX && l->smax < SLEEP_MAX
+        && l->fmax < SLEEP_BODY) {
         l->calm_s += dt;
         if (l->calm_s >= SLEEP_AFTER) {
             /* Put down exactly at rest, so that waking it — a pour beside it,
@@ -2097,9 +2401,52 @@ void liquid_step(FwmLiquid *l, double dt, double gx, double gy) {
             }
             l->vmax = l->vrms = 0.0;
             l->asleep = true;
+            rest_pressure(l);
         }
     } else {
         l->calm_s = 0.0;
+    }
+}
+
+/* ── what it does to the solids ──────────────────────────────────────── */
+
+bool liquid_push(const FwmLiquid *l, unsigned id, double *ax, double *ay, double *alpha) {
+    *ax = *ay = *alpha = 0.0;
+    if (!l) return false;
+    for (int k = 0; k < l->npush; k++)
+        if (l->push[k].id == id) {
+            *ax = l->push[k].ax;
+            *ay = l->push[k].ay;
+            *alpha = l->push[k].alpha;
+            return true;
+        }
+    return false;
+}
+
+/* The pressure the last step left, on the faces it was left on, is what
+ * holds a free solid up while nothing moves: at rest it is the weight of the
+ * liquid above each face and nothing else. Only for a solid standing where it
+ * stood — one that has moved is no longer on those faces, and gets nothing
+ * until a step finds where it is. */
+void liquid_hold(FwmLiquid *l) {
+    if (!l) return;
+    l->npush = 0;
+    bool any = l->n > 0 && l->u && l->last_h > 0.0 && l->ncpl > 0;
+    if (any) couple_reduce(l, l->pres);
+    const double k = any ? l->dx / l->last_h : 0.0;
+    for (int s = 0; s < l->nsol_next; s++) {
+        const LiquidSolid *now = &l->sol_next[s];
+        if (!(now->density > 0.0)) continue;
+        const LiquidSolid *was = solid_with(l->sol_prev, l->nsol_prev, now->id);
+        struct push p = { .id = now->id };
+        for (int b = 0; any && b < l->nbodies; b++) {
+            const struct body *bd = &l->bodies[b];
+            if (bd->id != now->id || !bd->free) continue;
+            if (was && !solid_moved(was, now))
+                p = (struct push){ .id = now->id, .ax = k * bd->wx, .ay = k * bd->wy, .alpha = k * bd->ww };
+            break;
+        }
+        l->push[l->npush++] = p;
     }
 }
 

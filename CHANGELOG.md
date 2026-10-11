@@ -34,7 +34,12 @@ body. The windows on its desktop stand in it: it runs round them and lies
 on them, a window dropped in splashes it and raises it by what it displaces,
 and one lifted out comes out dripping rather than with the pool hanging under
 it. Tiled windows stand in front of it instead, like the glass of an
-aquarium, and nothing pushes a window back yet. It runs beside the
+aquarium. And it pushes back: a window lighter than the liquid floats in it,
+sitting as deep as it is heavy, a heavier one sinks, slowed by what it
+pushes aside, and a wave lifts it and a current carries it off. What a
+window is made of is a rule's `material` — `wood` floats, `iron` sinks, and
+`[[material]]` makes more — and a normal one is `[liquids] window_density`,
+half as dense as water. It runs beside the
 compositor, split across the CPU's cores (`[liquids] threads`), only while
 somebody can see it and only until it settles — six cores keep a whole 1080p
 screen of it moving in real time. A desktop holds 30000 particles by default,

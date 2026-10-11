@@ -121,6 +121,11 @@ typedef struct {
      * density rule_mass does, and is kept separate from it so a [[rule]]
      * mass = 3 still means "three times whatever this window weighs". */
     double mass_scale;
+
+    /* What pulls on it from outside the world — the liquid it stands in — as
+     * an acceleration, px/s² and rad/s² about its centre (physics_push_body).
+     * It acts at every step until it is changed, like its weight does. */
+    double ext_ax, ext_ay, ext_alpha;
 } PhysicsBody;
 
 /* The physics of one desktop. Every field starts as the [physics] value and is
@@ -245,6 +250,22 @@ void physics_unspin_body(PhysicsWorld *world, uint32_t id);
 
 void physics_push_away(PhysicsWorld *world, uint32_t pushed, uint32_t pusher, double speed);
 void physics_push_overlapping(PhysicsWorld *world, uint32_t pusher, double speed);
+
+/* What something outside the world does to a body — the liquid — as an
+ * acceleration, px/s² and rad/s² about its centre, that goes on acting at
+ * every step until it is changed. Not a push given once: the liquid runs on a
+ * clock of its own and hands over what it did over a stretch of time, and a
+ * window given that all at once and then left to its weight for the rest of
+ * the stretch would hop. Only a body the simulation moves feels it; the turn
+ * only one that turns. A body at rest under it is left asleep while it does
+ * not change. */
+void physics_push_body(PhysicsWorld *world, uint32_t id, double ax, double ay, double alpha);
+
+/* The gravity a body feels, px/s² down: its desktop's, times the gravity
+ * switch, times its rule's. And how dense it is against a normal window: its
+ * desktop's profile, its rule, and what the compositor decided it weighs. */
+double physics_body_gravity(const PhysicsWorld *world, const PhysicsBody *b);
+double physics_body_density(const PhysicsWorld *world, const PhysicsBody *b);
 
 /* ── hit points ──────────────────────────────────────────────────────── */
 

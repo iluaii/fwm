@@ -864,7 +864,8 @@ fps        = 24
 # stands on the desktop you poured it on, and the windows there stand in it:
 # it runs round them and lies on them, a falling one splashes it and a lifted
 # one comes out dripping. Not tiled windows — those stand in front of it, like
-# the glass of an aquarium. It does not push windows back yet.
+# the glass of an aquarium. And it pushes back: a window lighter than it floats,
+# a heavier one sinks, a wave lifts it and a current carries it.
 #
 # The CPU's cores while anything in it moves (on six, about 1.5ms a step for
 # 12000 particles, 4ms for 30000), nothing once it has settled or while nobody
@@ -891,6 +892,18 @@ color     = "#3a8be0cc"
 # How many threads a step is split across. 0 is one per core — SMT's second
 # thread on a core adds little here and takes it from everything else.
 threads   = 0
+# How dense a normal window is against water. Under 1 it floats, sitting that
+# share of its height under; over 1 it sinks. A window's [[rule]] mass and
+# material, and its desktop's mass_density, make it denser or lighter.
+window_density = 0.5
+
+# What a window can be made of, for a [[rule]]'s material: a name and a density
+# against water. Built in: foam 0.05, cork 0.25, wood 0.6, ice 0.92, glass 2.5,
+# stone 2.7, iron 7.9, gold 19.3. A [[material]] with one of those names
+# changes it.
+#[[material]]
+#name    = "balsa"
+#density = 0.15
 
 # When a restarted fwm should put your applications back. fwm records what is
 # running and on which desktop, and relaunches it — the applications restart,
@@ -1525,8 +1538,11 @@ dir = "~/Pictures"
 #   bounce    restitution 0..1. 0 lands dead, 0.9 is a rubber ball.
 #   friction  how much speed it keeps per tick, 0..1, like [physics] friction.
 #             Low values also make it grip other windows more.
+#   material  what it is made of, by name (see [[material]] below): its
+#             density against water — whether it floats in [liquids] and how
+#             deep — and so how heavy it is. mass in the same rule scales it.
 #
-# These four are absolute settings, not toggles: they layer over the desktop's
+# These are absolute settings, not toggles: they layer over the desktop's
 # profile, so a heavy window stays heavy wherever it is dragged.
 #
 #   opacity   0..1, how much of itself the whole window shows — text and

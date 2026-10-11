@@ -1219,6 +1219,13 @@ void view_map(FwmView *view) {
             /* Material: copied across as-is, NANs included, because NAN is
              * exactly what the body wants for "defer to the desktop". */
             body->rule_mass      = rule.mass;
+            /* What it is made of is how dense it is against water, and so
+             * how heavy against a normal window, which is [liquids]
+             * window_density dense; a mass in the same rule scales that. */
+            const ConfigMaterial *made = config_material(&view->server->config, rule.material);
+            if (made)
+                body->rule_mass = (isnan(rule.mass) ? 1.0 : rule.mass) * made->density
+                                / view->server->config.liquids.window_density;
             body->rule_gravity   = rule.gravity;
             body->rule_bounce    = rule.bounce;
             body->rule_friction  = rule.friction;

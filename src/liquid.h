@@ -100,30 +100,66 @@ void liquid_set_material(FwmLiquid *l, const LiquidMaterial *m);
 /* Something solid standing in the liquid: a box `w` x `h` whose unturned
  * top-left is (x, y), turned `angle` radians about its centre (y-down, the
  * way a window's is). `id` says it is the same thing from one call to the
- * next, which is how its motion is known: the liquid is told where things
- * are, never how fast they go — the speed is how far a solid got over a
- * step, and that is the same for a window falling, thrown or carried on the
- * pointer.
+ * next.
  *
- * A solid is a moving wall. Nothing goes through it; what it moves into is
- * pushed ahead of it and what lies on it stays there; it pulls on the liquid
- * against it only where no air could get in behind — a window lifted out of
- * a pool comes out dripping, not with the pool hanging under it. It is not
- * pushed back: the liquid does not move what stands in it. And it takes up
- * room, so a desktop holds that much less liquid while it is there. */
+ * Nothing goes through a solid; what it moves into is pushed ahead of it and
+ * what lies on it stays there; it pulls on the liquid against it only where
+ * no air could get in behind — a window lifted out of a pool comes out
+ * dripping, not with the pool hanging under it. And it takes up room, so a
+ * desktop holds that much less liquid while it is there. A solid is one of
+ * two kinds:
+ *
+ * HELD, with no density: something else moves it, and nothing the liquid
+ * does moves it back — a window in the hand, or pinned. The liquid is told
+ * where it is, never how fast it goes: the speed is how far it got over a
+ * step, and that is the same for a window carried on the pointer or put
+ * somewhere by a key.
+ *
+ * FREE, with a density: a body, as heavy as its density times its area, the
+ * liquid's being 1. The pressure on it is solved for together with the
+ * pressure in the liquid — not read off the liquid afterwards and handed
+ * over, which a body lighter than the liquid it pushes aside cannot survive
+ * (it is shoved back harder than it pushed, and the next step harder still).
+ * So a free solid is buoyed up by exactly the weight of what it displaces,
+ * floats when that is more than its own, sinks when it is less, is slowed by
+ * what it has to push out of its way and carried along by what runs into it.
+ * It starts each step where it stands, going (vx, vy) px/s and turning
+ * `spin` rad/s, under the acceleration (ax, ay) everything but the liquid
+ * puts on it — its weight; it turns only if `turns`. What the liquid did to
+ * it over the step is read back with liquid_push, for whatever moves it to
+ * act on: the liquid moves its own copy of the body over a step, and nothing
+ * else. */
 typedef struct {
     unsigned id;
     double x, y, w, h;
     double angle;
+    double density;      /* against the liquid's; 0 is held */
+    double vx, vy, spin; /* free: how fast it is going now */
+    double ax, ay;       /* free: px/s², what else pulls on it */
+    bool turns;          /* free: it may turn */
 } LiquidSolid;
 
-/* Where the solids are to be at the end of the next step; `n` of them, which
- * may be none. Over the step each moves from where it stood at the end of the
- * last one to here. One it did not know before simply is there, and so is
- * one that went further in a step than anything is thrown — a window sent
- * across the desktop by a key, not by a hand. A change near the liquid wakes
- * it; far from it, it does not. */
+/* The solids for the next step; `n` of them, which may be none. A held one
+ * moves over the step from where it stood at the end of the last one to
+ * here; one it did not know before simply is there, and so is one that went
+ * further in a step than anything is thrown — a window sent across the
+ * desktop by a key, not by a hand. A free one starts the step here. A change
+ * near the liquid wakes it; far from it, it does not. */
 void liquid_set_solids(FwmLiquid *l, const LiquidSolid *s, int n);
+
+/* What the liquid did to free solid `id` over the last step, as the
+ * acceleration that does it over the step's time: px/s², and rad/s² about its
+ * centre. Applied over the next stretch of the caller's own time, it carries
+ * the body where the liquid carried its copy. False, and zeros, for a solid
+ * that was not free in it.
+ *
+ * A liquid that is not stepped — asleep, or not to be seen — still holds up
+ * what floats in it, with the pressure it was left in: liquid_hold works that
+ * out for the free solids standing where they stood when it was solved, and
+ * gives none to one that has moved since. A step that finds the liquid
+ * asleep does the same. */
+bool liquid_push(const FwmLiquid *l, unsigned id, double *ax, double *ay, double *alpha);
+void liquid_hold(FwmLiquid *l);
 /* Change the most the liquid may hold. Lowering it below what is already
  * poured keeps what is there and refuses more. */
 void liquid_set_budget(FwmLiquid *l, int budget);
