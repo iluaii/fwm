@@ -41,6 +41,15 @@ typedef enum {
     TILE_ANIM_FLIGHT,  /* sent across the strip to another desktop */
 } FwmTileAnim;
 
+/* Where a window stands against the liquid (see FwmView.liquid_plane), from
+ * the back of the screen to the front. */
+typedef enum {
+    LIQUID_PLANE_AUTO = 0,  /* nobody said: a floating window in it, a tile in front */
+    LIQUID_PLANE_BEHIND,    /* the liquid runs over it, and is drawn over it */
+    LIQUID_PLANE_IN,        /* the liquid stands round it, and is moved by it */
+    LIQUID_PLANE_FRONT,     /* the liquid runs behind it, like water behind glass */
+} FwmLiquidPlane;
+
 /* Where an X11 window goes while its desktop is on no monitor: far outside the
  * X root, so nothing lands on it, and inside the 16 bits an X coordinate has —
  * which is why this cannot be the scene's PARKED_X. See view_set_size. */
@@ -104,6 +113,11 @@ typedef struct FwmView {
     double tile_tx, tile_ty;
     double tile_fx, tile_fy;
     double tile_t;
+
+    /* Which plane it stands in against the liquid, LIQUID_PLANE_*: set by
+     * liquid_plane: and kept through tiling and floating, so a window put
+     * somewhere stays there; AUTO until then (server_liquid.c). */
+    int liquid_plane;
 
     /* Size this view was last aligned against. The layout re-runs when a
      * client commits a different one; without this it would re-run on every

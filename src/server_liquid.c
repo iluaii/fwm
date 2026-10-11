@@ -152,13 +152,69 @@ static double now_s(void) {
  * desktop, and the rest simply are not in the water. */
 #define LIQUID_SOLIDS_MAX 64
 
-/* The windows standing in the liquid: every one on its desktop that the
- * physics moves or holds still, as a box in the liquid's own coordinates —
- * where it is, never how fast it goes; the liquid works that out from where
- * it was. Not the tiled ones: the layout's, they stand in front of the
- * liquid like the glass of an aquarium. Not a fullscreen one, which covers
- * the desktop and stops the liquid anyway, and not one that has not painted
- * anything yet. */
+/* ── the planes ──────────────────────────────────────────────────────────
+ *
+ * A window stands in one of three planes against the liquid: behind it, in
+ * it, or in front of it. Only the middle one is in the water — the liquid
+ * stands round it and is moved by it; the other two it does not know are
+ * there, and runs over the one behind and behind the one in front. The plane
+ * is the liquid's business alone: windows in different planes still collide
+ * with one another, and which of two windows is over the other is still
+ * whichever was raised last — except that a window behind the liquid is under
+ * the liquid, and so under every window that is not behind it too.
+ *
+ * Until somebody says otherwise a floating window is in it and a tile is in
+ * front of it, as the glass of an aquarium is. */
+
+int server_liquid_plane(FwmServer *server, FwmView *view) {
+    if (view->liquid_plane != LIQUID_PLANE_AUTO) return view->liquid_plane;
+    PhysicsBody *b = physics_find_body(&server->physics, view->id);
+    return b && b->tiled ? LIQUID_PLANE_FRONT : LIQUID_PLANE_IN;
+}
+
+const char *liquid_plane_name(int plane) {
+    switch (plane) {
+    case LIQUID_PLANE_BEHIND: return "behind";
+    case LIQUID_PLANE_IN:     return "in";
+    case LIQUID_PLANE_FRONT:  return "front";
+    default:                  return "auto";
+    }
+}
+
+int liquid_plane_parse(const char *s) {
+    if (!s) return -1;
+    if (strcmp(s, "behind") == 0) return LIQUID_PLANE_BEHIND;
+    if (strcmp(s, "in") == 0)     return LIQUID_PLANE_IN;
+    if (strcmp(s, "front") == 0)  return LIQUID_PLANE_FRONT;
+    if (strcmp(s, "auto") == 0)   return LIQUID_PLANE_AUTO;
+    return -1;
+}
+
+/* Drawn behind the liquid only while it is behind it and not fullscreen: a
+ * fullscreen window owns the glass it is shown on, whatever plane it will go
+ * back to. Coming out from behind puts it on top of the windows, as a raise
+ * does, with its dialogs over it and a real fullscreen window over them. */
+void server_liquid_plane_place(FwmServer *server, FwmView *view) {
+    if (!view->scene_tree) return;
+    PhysicsBody *b = physics_find_body(&server->physics, view->id);
+    bool behind = view->liquid_plane == LIQUID_PLANE_BEHIND && !(b && b->fullscreen);
+    struct wlr_scene_tree *want = behind ? server->layer_behind : server->layer_windows;
+    if (view->scene_tree->node.parent == want) return;
+    wlr_scene_node_reparent(&view->scene_tree->node, want);
+    server_restack_children(server, view);
+    server_restack_fullscreen(server);
+}
+
+void server_liquid_set_plane(FwmServer *server, FwmView *view, int plane) {
+    view->liquid_plane = plane;
+    server_liquid_plane_place(server, view);
+}
+
+/* The windows standing in the liquid: every one on its desktop that is in its
+ * plane, as a box in the liquid's own coordinates — where it is, never how
+ * fast it goes; the liquid works that out from where it was. Not a
+ * fullscreen one, which covers the desktop and stops the liquid anyway, and
+ * not one that has not painted anything yet. */
 static void solids_sync(FwmServer *server, struct FwmLiquidRun *run, int d) {
     LiquidSolid s[LIQUID_SOLIDS_MAX];
     int n = 0;
@@ -167,7 +223,8 @@ static void solids_sync(FwmServer *server, struct FwmLiquidRun *run, int d) {
         if (n == LIQUID_SOLIDS_MAX) break;
         if (!view->scene_tree || !view->scene_tree->node.enabled) continue;
         PhysicsBody *b = physics_find_body(&server->physics, view->id);
-        if (!b || b->desktop_id != d || b->tiled || b->fullscreen) continue;
+        if (!b || b->desktop_id != d || b->fullscreen) continue;
+        if (server_liquid_plane(server, view) != LIQUID_PLANE_IN) continue;
         s[n++] = (LiquidSolid){
             .id = view->id,
             .x = b->x - (double)d * server->screen_width, .y = b->y,
@@ -307,10 +364,6 @@ void server_liquid_output_gone(FwmServer *server, FwmOutput *out) {
     (void)server;
     if (out->liquid_node) wlr_scene_node_destroy(&out->liquid_node->node);
     out->liquid_node = NULL;
-}
-
-void server_liquid_raise(FwmOutput *out) {
-    if (out && out->liquid_node) wlr_scene_node_raise_to_top(&out->liquid_node->node);
 }
 
 /* ── what the socket asks for ────────────────────────────────────────── */
@@ -1123,7 +1176,7 @@ static void place_nodes(FwmServer *server, struct FwmLiquidRun *run, bool show,
             continue;
         }
         if (!out->liquid_node) {
-            out->liquid_node = wlr_scene_buffer_create(server->layer_background, buf);
+            out->liquid_node = wlr_scene_buffer_create(server->layer_liquid, buf);
             if (!out->liquid_node) continue;
             out->liquid_node->point_accepts_input = liquid_declines_input;
         } else if (fresh) {

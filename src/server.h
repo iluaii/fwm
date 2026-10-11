@@ -379,11 +379,15 @@ typedef struct FwmServer {
     bool renderer_recovering;   /* guards re-entry while the swap is under way */
     struct wlr_scene *scene;
     struct wlr_scene_tree *layer_background;
+    /* The windows put behind the liquid, and over them the liquid's picture
+     * on each monitor (server_liquid.c). Every other window is above both. */
+    struct wlr_scene_tree *layer_behind;
+    struct wlr_scene_tree *layer_liquid;
     struct wlr_scene_tree *layer_windows;
     struct wlr_scene_tree *layer_overlay;
     /* wlr-layer-shell trees, interleaved with ours (bottom to top):
-     * wallpaper < ls_background < ls_bottom < windows < ls_top < our overlays
-     * < ls_overlay. See src/layer.h. */
+     * wallpaper < ls_background < ls_bottom < behind < liquid < windows
+     * < ls_top < our overlays < ls_overlay. See src/layer.h. */
     struct wlr_scene_tree *ls_background;
     struct wlr_scene_tree *ls_bottom;
     struct wlr_scene_tree *ls_top;
@@ -949,6 +953,20 @@ typedef struct {
     char kind[LIQUID_NAME_MAX];   /* which liquid it is */
 } FwmLiquidState;
 void server_liquid_state(FwmServer *server, FwmLiquidState *st);
+
+/* The plane a window stands in against the liquid (FwmLiquidPlane, view.h):
+ * behind, in or front — never auto; what a window nobody placed gets is
+ * worked out here. */
+int server_liquid_plane(FwmServer *server, struct FwmView *view);
+/* Put it in `plane`, LIQUID_PLANE_AUTO handing it back to its mode. On the
+ * screen at once; the liquid finds out on its next step. */
+void server_liquid_set_plane(FwmServer *server, struct FwmView *view, int plane);
+/* Its scene node into the tree its plane is drawn in: on map, and in and out
+ * of fullscreen, which lifts a window out from behind the liquid. */
+void server_liquid_plane_place(FwmServer *server, struct FwmView *view);
+/* "behind", "in", "front", "auto", and back; -1 for none of those. */
+const char *liquid_plane_name(int plane);
+int liquid_plane_parse(const char *s);
 
 /* The liquids menu, which the modes menu's Liquids row opens: a list of the
  * liquids there are, each with a bin. */

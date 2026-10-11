@@ -307,8 +307,6 @@ bool server_liquid_busy(FwmServer *server);
 /* GPU reset: let go of the picture; the next tick paints a new one. */
 void server_liquid_gpu_release(FwmServer *server);
 void server_liquid_output_gone(FwmServer *server, FwmOutput *out);
-/* Keep it above the wallpaper and the grass when the background is rebuilt. */
-void server_liquid_raise(FwmOutput *out);
 /* Teardown: stop the worker and drop everything, while the renderer the
  * picture came from is still standing. */
 void server_liquid_finish(FwmServer *server);

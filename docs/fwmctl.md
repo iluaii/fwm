@@ -187,6 +187,7 @@ $ fwmctl window 7 desktop=4 pin=on
 | `x=`, `y=` | put it down, in the same coordinates `windows` reports |
 | `pin=on\|off\|toggle` | hold it still |
 | `nocollide=on\|off\|toggle` | let everything pass through it |
+| `liquid_plane=behind\|in\|front\|auto` | where it stands against the liquid: under it, in it (the liquid flows round it), or in front of it; `auto` lets its mode say — a floating window in it, a tile in front |
 | `focus=on` | give it the keyboard |
 | `close=on` | ask it to close — it may decline and put up a save dialog |
 

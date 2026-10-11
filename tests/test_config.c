@@ -671,7 +671,7 @@ static void test_every_dispatchable_action_binds(void) {
         "modes_menu", "radial_menu", "show_hints", "show_errors", "reload_config",
         "wallpaper_picker", "screenshot", "screenshot_region",
         "output_off", "outputs_on", "toggle_sun", "sun_mode", "star_spawn", "star_off", "star_collapse",
-        "liquids_menu", "liquid_bucket",
+        "liquids_menu", "liquid_bucket", "liquid_plane:-", "liquid_plane:+", "liquid_plane:behind",
         "toggle_internal_output", "focus_output:1", "focus_output:9", "EXIT",
         "view:3", "view:back", "move_to:7", "move_to_view:next", "move_camera:-50",
         "move_to_output:1", "move_to_output_view:2",

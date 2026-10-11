@@ -1316,6 +1316,16 @@ it; what no longer fits runs over the top. Tiled windows are not in it: they
 stand in front of it, like the glass of an aquarium. It does not push windows
 back yet.
 
+Each window stands in one of three planes against it — behind it, in it, or in
+front of it — and super+ctrl+minus and super+ctrl+equal (`liquid_plane:-` and
+`liquid_plane:+`) move the focused window one back or forward. Only a window in
+the liquid is in the water; the liquid runs behind one in front of it, and over
+one behind it, drawn on top. Being under the liquid, a window behind it is also
+under every window that is not. Otherwise the planes change nothing between
+windows — they still collide, and the one raised last is still on top. A floating window starts in it and a tile
+in front of it; one moved stays where it was put through tiling and floating.
+Fullscreen lifts a window out from behind until it is back.
+
 One desktop at a time: the liquid stands on the desktop it was first poured on
 until it is cleared. It is only stepped while a monitor shows that desktop and
 nothing fullscreen covers it, and it stops altogether once it has settled.

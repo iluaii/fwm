@@ -41,6 +41,7 @@
 #include "ui/radial.h"
 #include "ui/mixer.h"
 #include "ui/cairo_overlay.h"
+#include "ui/toast.h"
 #include "wallpaper.h"
 #include "group.h"
 #include "expo.h"
@@ -928,6 +929,32 @@ void server_dispatch_action(FwmServer *server, const char *action) {
          * liquids menu's row, for a key. */
         if (server_liquid_hand_held(server)) server_liquid_put_down(server);
         else server_liquid_take(server, 0);
+    } else if (strncmp(action, "liquid_plane:", 13) == 0) {
+        /* The focused window one plane back or forward against the liquid —
+         * `-` and `+`, the keys they are on — or into one by name. Said on
+         * screen either way: the plane does not show until there is liquid
+         * round the window. */
+        static const char *const where[] = {
+            [LIQUID_PLANE_BEHIND] = "behind the liquid",
+            [LIQUID_PLANE_IN]     = "in the liquid",
+            [LIQUID_PLANE_FRONT]  = "in front of the liquid",
+        };
+        const char *arg = action + 13;
+        FwmView *v = server->focused_view;
+        if (v) {
+            int now = server_liquid_plane(server, v);
+            bool step = strcmp(arg, "-") == 0 || strcmp(arg, "+") == 0;
+            int want = step ? now + (*arg == '+' ? 1 : -1) : liquid_plane_parse(arg);
+            if (want < 0) {
+                wlr_log(WLR_ERROR, "liquid_plane: \"%s\" is not -, +, behind, in, front "
+                                   "or auto", arg);
+            } else if (step && (want < LIQUID_PLANE_BEHIND || want > LIQUID_PLANE_FRONT)) {
+                toast_show(server, false, "Already %s", where[now]);
+            } else {
+                server_liquid_set_plane(server, v, want);
+                toast_show(server, false, "Window %s", where[server_liquid_plane(server, v)]);
+            }
+        }
     } else if (strcmp(action, "star_spawn") == 0) {
         server_star_spawn(server);
     } else if (strcmp(action, "star_off") == 0) {

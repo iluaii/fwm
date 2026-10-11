@@ -248,6 +248,8 @@ static void buf_window(struct Buf *b, FwmServer *server, FwmView *view) {
     PhysicsBody *body = physics_find_body(&server->physics, view->id);
     buf_printf(b, ",\"pinned\":%s", body && body->pinned ? "true" : "false");
     buf_printf(b, ",\"nocollide\":%s", body && body->no_collide ? "true" : "false");
+    buf_printf(b, ",\"liquid_plane\":\"%s\"",
+               liquid_plane_name(server_liquid_plane(server, view)));
     buf_printf(b, ",\"xwayland\":%s}", view->type == FWM_VIEW_XDG ? "false" : "true");
 }
 
@@ -783,7 +785,7 @@ static int parse_switch(const char *val, int now) {
 static void cmd_window(FwmServer *server, const char *arg, struct Buf *b) {
     if (!arg) {
         reply_error(b, "window needs <id> <key>=<value>... "
-                       "(desktop, x, y, pin, nocollide, focus, close)");
+                       "(desktop, x, y, pin, nocollide, liquid_plane, focus, close)");
         return;
     }
 
@@ -812,7 +814,7 @@ static void cmd_window(FwmServer *server, const char *arg, struct Buf *b) {
 
     /* Everything is decided here and applied below, so a typo in the third
      * setting cannot leave the first two standing. */
-    int want_desktop = -1, want_pin = -1, want_nocollide = -1;
+    int want_desktop = -1, want_pin = -1, want_nocollide = -1, want_plane = -1;
     int want_focus = 0, want_close = 0;
     int want_x = 0, want_y = 0;
     bool have_x = false, have_y = false;
@@ -847,6 +849,12 @@ static void cmd_window(FwmServer *server, const char *arg, struct Buf *b) {
         } else if (strcmp(key, "nocollide") == 0) {
             want_nocollide = parse_switch(val, body && body->no_collide);
             if (want_nocollide < 0) { reply_error(b, "nocollide must be on, off or toggle"); return; }
+        } else if (strcmp(key, "liquid_plane") == 0) {
+            want_plane = liquid_plane_parse(val);
+            if (want_plane < 0) {
+                reply_error(b, "liquid_plane must be behind, in, front or auto");
+                return;
+            }
         } else if (strcmp(key, "focus") == 0) {
             int on = parse_switch(val, view == server->focused_view);
             if (on < 0) { reply_error(b, "focus must be on or off"); return; }
@@ -857,7 +865,7 @@ static void cmd_window(FwmServer *server, const char *arg, struct Buf *b) {
             want_close = on;
         } else {
             snprintf(err, sizeof err, "unknown key \"%s\" "
-                     "(desktop, x, y, pin, nocollide, focus, close)", key);
+                     "(desktop, x, y, pin, nocollide, liquid_plane, focus, close)", key);
             reply_error(b, err);
             return;
         }
@@ -891,6 +899,7 @@ static void cmd_window(FwmServer *server, const char *arg, struct Buf *b) {
         body->flying = 0;
     }
     if (body && want_nocollide >= 0) body->no_collide = want_nocollide;
+    if (want_plane >= 0) server_liquid_set_plane(server, view, want_plane);
     if (have_x || have_y) {
         /* Straight into the mirror: physics_step notices a position that no
          * longer matches its shadow and pushes it into Box2D, which is the

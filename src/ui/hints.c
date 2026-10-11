@@ -95,6 +95,10 @@ static const char *key_display(const char *name, char *buf, size_t cap) {
     if (!strcmp(name, "Escape")) return "Esc";
     if (!strcmp(name, "question")) return "?";
     if (!strcmp(name, "slash"))    return "/";
+    if (!strcmp(name, "minus"))    return "\xe2\x88\x92";  /* − */
+    if (!strcmp(name, "equal"))    return "=";
+    if (!strcmp(name, "KP_Subtract")) return "Num\xe2\x88\x92";  /* − */
+    if (!strcmp(name, "KP_Add"))      return "Num+";
     if (!strcmp(name, "XF86AudioRaiseVolume"))  return "Vol+";
     if (!strcmp(name, "XF86AudioLowerVolume"))  return "Vol\xe2\x88\x92"; /* − */
     if (!strcmp(name, "XF86AudioMute"))         return "Mute";
@@ -238,6 +242,7 @@ static const struct { const char *prefix, *label; } group_kinds[] = {
     { "volume:",              "volume" },
     { "sun_azimuth:",         "turn the sun" },
     { "sun_elevation:",       "raise the sun" },
+    { "liquid_plane:",        "window back/forward in liquid" },
 };
 
 /* Returns true when the bind belonged to a group and has been folded in. */

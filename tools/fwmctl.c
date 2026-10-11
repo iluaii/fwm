@@ -102,6 +102,8 @@ int main(int argc, char **argv) {
             "                      refused while the desktop is tiling)\n"
             "  pin=on|off|toggle   hold it still\n"
             "  nocollide=toggle    let everything pass through it\n"
+            "  liquid_plane=in     behind, in or front of the liquid; auto lets\n"
+            "                      its mode say (floating in, tiled in front)\n"
             "  focus=on            give it the keyboard\n"
             "  close=on            ask it to close (it may decline and save first)\n"
             "\n"

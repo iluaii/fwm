@@ -1017,6 +1017,8 @@ void view_map(FwmView *view) {
     }
     
     view->scene_tree->node.data = view;
+    /* A window unmapped from behind the liquid comes back behind it. */
+    server_liquid_plane_place(view->server, view);
     if (view->type == FWM_VIEW_XDG) {
         // Popups look their parent's scene tree up through xdg_surface->data
         // (see handle_new_xdg_popup in server.c).
@@ -1364,7 +1366,12 @@ void view_unmap(FwmView *view) {
     if (view->last_buffer && view->server->config.decor.fade_in_ms > 0.0) {
         FwmGhost *ghost = calloc(1, sizeof(*ghost));
         if (ghost) {
-            ghost->scene_buffer = wlr_scene_buffer_create(view->server->layer_windows, view->last_buffer);
+            /* In the window's own tree, so one behind the liquid fades out
+             * behind it rather than jumping in front to do so. */
+            struct wlr_scene_tree *layer = view->scene_tree && view->scene_tree->node.parent
+                                         ? view->scene_tree->node.parent
+                                         : view->server->layer_windows;
+            ghost->scene_buffer = wlr_scene_buffer_create(layer, view->last_buffer);
         }
         if (ghost && ghost->scene_buffer) {
             // The raw buffer's top-left sits above/left of the xdg geometry

@@ -160,6 +160,10 @@ water, or onto another desktop, is refused until the first is drained.
 
 `liquids_menu` and `liquid_bucket` bind the same two things to keys.
 
+Super+ctrl+minus and super+ctrl+equal take the focused window back and forward
+through the liquid's planes — behind it, in it, in front of it — and say which
+it is in; see [liquids](configuration.md#liquids).
+
 ## The stats menu
 
 Click the stats pill (or bind `stats_menu`). One row per sensor, each with its

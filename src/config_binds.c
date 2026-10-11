@@ -42,6 +42,13 @@ static const struct { const char *bind; const char *action; } default_binds[] = 
     { "super+g",              "cycle_gravity"    },
     { "super+j",              "toggle_tray"      },
     { "super+r",              "spin_window"      },
+    /* The focused window back and forward against the liquid: behind it, in
+     * it, in front of it. Equal rather than plus, which on the main row is
+     * shift+equal; the keypad has both. */
+    { "super+ctrl+minus",       "liquid_plane:-"   },
+    { "super+ctrl+equal",       "liquid_plane:+"   },
+    { "super+ctrl+KP_Subtract", "liquid_plane:-"   },
+    { "super+ctrl+KP_Add",      "liquid_plane:+"   },
     { "super+s",              "toggle_split"     },
     { "super+w",              "group_toggle"     },
     { "super+Tab",            "group_next"       },
