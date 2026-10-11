@@ -41,6 +41,23 @@ static const char vert_src[] =
     "  gl_Position = vec4(pos, 0.0, 1.0);\n"
     "}\n";
 
+/* Full float in every fragment shader here, wherever the GPU has it.
+ *
+ * mediump is allowed to be half float, and on an RX 570 under radeonsi it is:
+ * ten bits of mantissa, so in the right half of a 1980px frame a coordinate
+ * moves in steps of about one pixel. The mask lookup then lands on the
+ * neighbouring texel for one pixel in five there, always the one to the right,
+ * and the frost stops matching the shape it was cut to — short of the right
+ * edge of every island, past the left one in steps — while the islands on the
+ * left of the tray, where the steps are finer, come out clean. highp lands
+ * every pixel on its own texel. */
+#define FRAG_PRECISION                  \
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n" \
+    "precision highp float;\n"          \
+    "#else\n"                           \
+    "precision mediump float;\n"        \
+    "#endif\n"
+
 /* Shrink a picture into a smaller buffer, four taps at the corners of the
  * destination texel so nothing is skipped over on the way down — a single
  * bilinear tap averages two source pixels and would alias the other fourteen.
@@ -60,7 +77,7 @@ static const char vert_src[] =
  * is supposed to do and what the measurement asked for: 9% of the brightness
  * was missing from the tray's frost before this. */
 static const char frag_down_src[] =
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "varying vec2 v_uv;\n"
     "uniform sampler2D tex;\n"
     "uniform vec4 u_src_rect;\n"
@@ -81,7 +98,7 @@ static const char frag_down_src[] =
  * radius they can reach is bought by how far down the picture was shrunk
  * first, never by more taps. */
 static const char frag_blur_src[] =
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "varying vec2 v_uv;\n"
     "uniform sampler2D tex;\n"
     "uniform vec2 u_texel;\n"
@@ -109,7 +126,7 @@ static const char frag_blur_src[] =
  * opaque pane is invisible, and one under a translucent pane would darken the
  * frost from underneath instead of the desktop. */
 static const char frag_glass_src[] =
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "varying vec2 v_uv;\n"
     "uniform sampler2D u_backdrop;\n"
     "uniform sampler2D u_mask;\n"
