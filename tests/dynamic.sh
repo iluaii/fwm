@@ -84,6 +84,16 @@ PASSED=""
 # fwm never starts a sound server, and a runner has none, so without it the
 # capture thread would decline to start and take the point of this scenario
 # with it.
+# And every scenario, the plain ones included, runs in a HOME and a state
+# directory of its own, with no display of the developer's to fall back on.
+# Started in the developer's own, it read their config and the record of
+# their running session — which, with the session still running, reads as
+# a crash — and "restored" it: their [startup] programs started over, and
+# every browser in the record opened a window in the browser they were
+# using. A scenario that wants a config gives itself another HOME on top.
+BASEHOME="$LOGDIR/home-base"
+mkdir -p "$BASEHOME" "$LOGDIR/state-base"
+
 CFGHOME="$LOGDIR/home"
 mkdir -p "$CFGHOME/.config/fwm"
 cat > "$CFGHOME/.config/fwm/config.toml" <<TOML
@@ -213,7 +223,9 @@ start() {
     UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=0 \
     TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1:suppressions=$REPO/tests/tsan.supp" \
     WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 \
-    env "$@" "$FWM" >"$log" 2>&1 &
+    env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_CONFIG_HOME \
+        HOME="$BASEHOME" XDG_STATE_HOME="$LOGDIR/state-base" \
+        "$@" "$FWM" >"$log" 2>&1 &
     FWM_PID=$!
 
     # Wait for the socket rather than sleeping a guessed amount.
