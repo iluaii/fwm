@@ -43,6 +43,11 @@
  * extra step. After that it expires, so a window opened by hand from an
  * application half an hour later follows the camera like anything else.
  *
+ * Expires as a PLACE, that is. The command a launch ran is kept for as long as
+ * the process it started is alive, because that is what the session writes
+ * down for a window to come back by (launched_command), and a window opened
+ * half an hour later still came from that command.
+ *
  * Nothing here is asked of a client, and nothing needs the client's help:
  * xdg-activation is the protocol for a launcher to say where a window belongs,
  * and neither Steam nor most of what one starts from a keybind speaks it.
@@ -51,7 +56,7 @@
 struct FwmServer;
 struct FwmView;
 
-#define LAUNCHED_TTL 120.0   /* seconds an unclaimed launch stays interesting */
+#define LAUNCHED_TTL 120.0   /* seconds a launch places the windows it opens */
 #define LAUNCHED_CMD_MAX 512 /* longest command remembered with a launch */
 
 /* Remember that `pid` was started while `desktop` was the one in front of you,
@@ -76,7 +81,7 @@ int launched_desktop(struct FwmServer *server, struct FwmView *view);
  * started from inside it must not be written down as the terminal.
  *
  * Copies the command into `out` and the launched pid into `*pid`, and returns
- * true; false when there is no such launch, or it has expired. */
+ * true; false when there is no such launch, or its process has ended. */
 bool launched_command(struct FwmServer *server, struct FwmView *view,
                       pid_t *pid, char *out, size_t cap);
 
