@@ -87,10 +87,20 @@ static const char splat_vert_src[] =
     "    v_foam = a_foam;\n"
     "}\n";
 
+/* Full float wherever the GPU has it, for the reason blur.c gives: mediump is
+ * half float on radeonsi, and the field's coordinates in half float move in
+ * steps of about a pixel across the right half of the screen. */
+#define FRAG_PRECISION                  \
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n" \
+    "precision highp float;\n"          \
+    "#else\n"                           \
+    "precision mediump float;\n"        \
+    "#endif\n"
+
 /* A smooth bump that is exactly zero at its rim, so adjacent splats join
  * without a seam: (1 - r²)³. */
 static const char splat_frag_src[] =
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "uniform float u_gain;\n"
     "uniform float u_alpha;\n"   /* 0: colour and amount; 1: how opaque, and foam */
     "varying vec4 v_col;\n"
@@ -142,7 +152,7 @@ static const char shade_vert_src[] =
  * surface — where light crosses a surface at a slant — and straight on in
  * the depth, where it does not. */
 static const char shade_frag_src[] =
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "#define DEPTH_FAR_TIMES 2.6\n"
     "varying vec2 v_uv;\n"
     "uniform sampler2D u_field;\n"

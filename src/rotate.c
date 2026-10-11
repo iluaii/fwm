@@ -40,8 +40,19 @@ static const char vert_src[] =
     "  gl_Position = vec4(pos, 0.0, 1.0);\n"
     "}\n";
 
+/* Full float wherever the GPU has it, for the reason blur.c gives: mediump is
+ * half float on radeonsi, and a texture coordinate in half float moves in
+ * steps of about a pixel across the right half of a 1920px strip, so the
+ * cards there are read from the neighbouring texel one pixel in five. */
+#define FRAG_PRECISION                  \
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n" \
+    "precision highp float;\n"          \
+    "#else\n"                           \
+    "precision mediump float;\n"        \
+    "#endif\n"
+
 static const char frag_2d_src[] =
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "varying vec2 v_texcoord;\n"
     "uniform sampler2D tex;\n"
     "void main() { gl_FragColor = texture2D(tex, v_texcoord); }\n";
@@ -51,7 +62,7 @@ static const char frag_2d_src[] =
  * hence two programs rather than one. */
 static const char frag_ext_src[] =
     "#extension GL_OES_EGL_image_external : require\n"
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "varying vec2 v_texcoord;\n"
     "uniform samplerExternalOES tex;\n"
     "void main() { gl_FragColor = texture2D(tex, v_texcoord); }\n";
@@ -141,13 +152,13 @@ static const char frag_ext_src[] =
     "}\n"
 
 static const char frag_key_2d_src[] =
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "uniform sampler2D tex;\n"
     KEY_BODY;
 
 static const char frag_key_ext_src[] =
     "#extension GL_OES_EGL_image_external : require\n"
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "uniform samplerExternalOES tex;\n"
     KEY_BODY;
 
@@ -215,7 +226,7 @@ static const char vert3d_src[] =
     "}\n";
 
 static const char frag3d_2d_src[] =
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "varying vec2 v_texcoord;\n"
     "uniform sampler2D tex;\n"
     "uniform float alpha;\n"
@@ -223,14 +234,14 @@ static const char frag3d_2d_src[] =
 
 static const char frag3d_ext_src[] =
     "#extension GL_OES_EGL_image_external : require\n"
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "varying vec2 v_texcoord;\n"
     "uniform samplerExternalOES tex;\n"
     "uniform float alpha;\n"
     "void main() { gl_FragColor = texture2D(tex, v_texcoord) * alpha; }\n";
 
 static const char frag3d_solid_src[] =
-    "precision mediump float;\n"
+    FRAG_PRECISION
     "uniform vec4 color;\n"
     "void main() { gl_FragColor = color; }\n";
 
