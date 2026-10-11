@@ -6,8 +6,14 @@
 
 The strip has a **time** button in its bottom-left corner, and `t` does the
 same: a page over the strip about the session rather than the desktops, with a
-log, stats and a timelapse picked from a pill along the bottom. Only the page
-so far — nothing is recorded yet, and each section says what it will hold.
+log, stats and a timelapse picked from a pill along the bottom. The log lists
+every window opened and closed since the computer was switched on, with its
+icon, when, and whether it is still open or how long it lived; the wheel
+scrolls it. Stats and the timelapse are still to come.
+
+Behind it, fwm now keeps a history of its windows — where each one went, the
+way it took there, where it came to rest — in `$XDG_RUNTIME_DIR`, so it
+survives a crash and is gone at reboot.
 
 ### A sponge that dries every liquid
 

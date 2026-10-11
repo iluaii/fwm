@@ -500,8 +500,8 @@ bool expo_handle_button(FwmServer *server, uint32_t button, bool pressed,
 bool expo_handle_axis(FwmServer *server, double delta) {
     FwmExpo *e = server->expo;
     if (!e) return false;
-    /* Not the strip's, behind the page. */
-    if (e->time_open) return true;
+    /* Not the strip's, behind the page: the page's own, to scroll the log. */
+    if (e->time_open) return expo_time_handle_axis(e, delta);
     if (e->orbiting) {
         /* Mid-flight the wheel is the one thing left to ask for: closer or
          * further. Panning as well would fight the hand already turning it. */

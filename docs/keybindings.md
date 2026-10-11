@@ -470,9 +470,16 @@ that desktop.
 
 The time view is a page over the strip about the session rather than the
 desktops, in three sections picked by the pill along the bottom: **log**,
-**stats** and **timelapse**. They are empty for now — nothing is recorded yet.
-Inside it `←` `→` (or `Tab`) step between the sections, `1` `2` `3` jump to one,
-and `t` or `Escape` go back to the strip.
+**stats** and **timelapse**. The log lists every window opened and closed since
+the computer was switched on, newest first — whether each one is still open,
+and how long each closed one lived — and the wheel scrolls it. Stats and
+timelapse are empty for now. Inside it `←` `→` (or `Tab`) step between the
+sections, `1` `2` `3` jump to one, and `t` or `Escape` go back to the strip.
+
+The history behind it is kept in `$XDG_RUNTIME_DIR` (`fwm-journal-<display>`):
+it survives fwm crashing and being started again, and is gone at reboot. It
+holds window titles, which is why it is there and nowhere else — that directory
+is yours alone and lives in memory.
 
 The knob does here what it does in [the radial menu](#the-radial-menu) — turn to
 choose, press to commit — and on the same terms: while the strip is up those

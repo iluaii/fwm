@@ -16,6 +16,7 @@
 #define FWM_UI_EXPO_TIME_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <wlr/types/wlr_scene.h>
 
 /* The desktop strip's "time" view, as pictures: the button in the bottom-left
@@ -43,6 +44,24 @@ enum {
 /* No section under the cursor. */
 #define EXPO_TIME_NONE (-1)
 
+/* One line of the log: a window opening, or closing. */
+typedef struct {
+    bool closed;            /* a closing, rather than an opening */
+    int64_t ms;             /* when, wall clock */
+    const char *app_id, *title;
+    bool still_open;        /* an opening: is the window open now */
+    int64_t lived_ms;       /* a closing: how long it had been open */
+} ExpoTimeRow;
+
+/* The part of the log on screen: `n` rows starting `first` rows down from the
+ * newest, out of `total`. */
+typedef struct {
+    const ExpoTimeRow *rows;
+    int n, first, total;
+    int64_t now_ms;          /* to say a day only when it is not today */
+    const char *icon_theme;  /* [decor] icon_theme, "" for the default */
+} ExpoTimeLog;
+
 /* All three are made on the strip's monitor, whose top-left is (ox, oy) in
  * layout coordinates and whose size is (sw, sh): they live in the shared
  * overlay tree to stay above the strip, so they do not inherit its position. */
@@ -63,9 +82,15 @@ bool expo_time_button_hit(struct wlr_scene_buffer *buf, double lx, double ly);
  * moves words and never redraws the panel. */
 struct wlr_scene_buffer *expo_time_page_show(struct wlr_scene_tree *parent,
                                              int ox, int oy, int sw, int sh);
+/* `log` is read only by the log section, and may be NULL for the others. */
 struct wlr_scene_buffer *expo_time_content_show(struct wlr_scene_tree *parent,
                                                 struct wlr_scene_buffer *page,
-                                                int section);
+                                                int section, const ExpoTimeLog *log);
+/* The same layer drawn again: the log has moved on, or has been scrolled. */
+void expo_time_content_redraw(struct wlr_scene_buffer *buf, int section,
+                              const ExpoTimeLog *log);
+/* How many rows of the log fit on the page. */
+int expo_time_log_fit(struct wlr_scene_buffer *page);
 
 /* The section pill, centred along the bottom where the strip's key hints are
  * while the strip is up. */

@@ -221,6 +221,10 @@ struct FwmExpo {
     double time_tab_from;
     double time_old_x0, time_old_a0;
     int time_page_x, time_page_y, time_tabs_x, time_tabs_y;   /* at rest */
+    /* The log: how many rows down from the newest it is scrolled, and which
+     * version of the history it was last drawn from. */
+    int time_scroll;
+    uint64_t time_log_version;
 };
 
 
@@ -306,5 +310,6 @@ bool expo_time_handle_key(FwmExpo *e, xkb_keysym_t sym);
 bool expo_time_handle_motion(FwmExpo *e, double lx, double ly);
 bool expo_time_handle_button(FwmExpo *e, uint32_t button, bool pressed,
                              double lx, double ly);
+bool expo_time_handle_axis(FwmExpo *e, double delta);
 
 #endif /* FWM_EXPO_INTERNAL_H */

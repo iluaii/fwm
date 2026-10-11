@@ -17,7 +17,11 @@
 #include "../theme.h"
 #include "cairo_overlay.h"
 #include "../glass.h"
+#include "icons.h"
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
 
 #define TIME_H         TRAY_HEIGHT  /* button and pill, the tray's own height */
 #define TIME_PAD_X     16.0         /* inside the button, past the chevron */
@@ -37,8 +41,8 @@ static const char *const section_name[EXPO_TIME_SECTIONS] = {
 
 /* What each section will hold, said on the page until it holds it. */
 static const char *const section_about[EXPO_TIME_SECTIONS] = {
-    "Every window opened and closed this session, newest first. "
-    "A closed one opens again from here, where it was and the size it was.",
+    "Every window opened and closed since the computer was switched on, "
+    "newest first.",
     "How many windows are open and how many have closed, how long fwm has "
     "been up, and where the time went.",
     "The session played back: the windows travelling the paths they took, "
@@ -359,9 +363,225 @@ static void draw_page(cairo_t *cr, int w, int h, void *data) {
     g_object_unref(lab);
 }
 
+/* ── the log ──────────────────────────────────────────────────────────── */
+
+#define LIST_TOP      124.0   /* below the section's title and what it says */
+#define LIST_BOTTOM   60.0    /* above the keys along the bottom of the page */
+#define ROW_H         34.0
+#define TIME_COL      96.0    /* "14:32", or "Mon 14:32" for an earlier day */
+#define ICON_SZ       20
+#define VERB_COL      70.0
+#define STATE_COL     190.0
+
+/* Icons by app_id, looked up once each: finding one walks the icon theme on
+ * disk, and the list is redrawn on every turn of the wheel. Kept for the life
+ * of the compositor — a few dozen small pictures. A miss is remembered too, so
+ * an application with no icon is not searched for on every redraw. */
+#define ICON_CACHE 48
+static struct {
+    char app[64];
+    cairo_surface_t *surf;
+} g_icons[ICON_CACHE];
+static int g_icons_n, g_icons_next;
+
+static cairo_surface_t *icon_try(const char *name, const char *theme) {
+    if (!name || !name[0]) return NULL;
+    cairo_surface_t *s = icon_load(name, theme, ICON_SZ);
+    if (s) return s;
+    /* Most applications name their icon after their app_id, but not always
+     * in the same case, and reverse-DNS ids often name it after their last
+     * part: org.gnome.Nautilus, but also plain nautilus. */
+    char low[64];
+    size_t i = 0;
+    for (; name[i] && i + 1 < sizeof(low); i++)
+        low[i] = (char)(name[i] >= 'A' && name[i] <= 'Z' ? name[i] - 'A' + 'a' : name[i]);
+    low[i] = '\0';
+    if (strcmp(low, name) != 0 && (s = icon_load(low, theme, ICON_SZ))) return s;
+    const char *dot = strrchr(low, '.');
+    if (dot && dot[1]) return icon_load(dot + 1, theme, ICON_SZ);
+    return NULL;
+}
+
+static cairo_surface_t *icon_for(const char *app, const char *theme) {
+    if (!app || !app[0]) return NULL;
+    for (int i = 0; i < g_icons_n; i++)
+        if (strcmp(g_icons[i].app, app) == 0) return g_icons[i].surf;
+    int slot = g_icons_n < ICON_CACHE ? g_icons_n++ : g_icons_next;
+    if (g_icons_n == ICON_CACHE) g_icons_next = (slot + 1) % ICON_CACHE;
+    if (g_icons[slot].surf) cairo_surface_destroy(g_icons[slot].surf);
+    snprintf(g_icons[slot].app, sizeof(g_icons[slot].app), "%s", app);
+    g_icons[slot].surf = icon_try(app, theme);
+    return g_icons[slot].surf;
+}
+
+/* No icon: the first letter of the application, on a disc. */
+static void draw_letter(cairo_t *cr, PangoLayout *l, double x, double y,
+                        const char *name) {
+    const FwmTheme *thm = theme_get();
+    cairo_new_path(cr);
+    cairo_arc(cr, x + ICON_SZ / 2.0, y + ICON_SZ / 2.0, ICON_SZ / 2.0, 0, 2 * M_PI);
+    set_rgb(cr, thm->sel);
+    cairo_fill(cr);
+    char letter[8] = "?";
+    if (name && name[0]) {
+        /* One character, whole: it may well be more than one byte. */
+        size_t n = 1;
+        while (name[n] && ((unsigned char)name[n] & 0xC0) == 0x80 && n < 4) n++;
+        memcpy(letter, name, n);
+        letter[n] = '\0';
+        if (letter[0] >= 'a' && letter[0] <= 'z') letter[0] = (char)(letter[0] - 'a' + 'A');
+    }
+    int tw, th;
+    text_size(l, letter, &tw, &th);
+    set_rgb(cr, thm->muted);
+    cairo_move_to(cr, x + (ICON_SZ - tw) / 2.0, y + (ICON_SZ - th) / 2.0);
+    pango_cairo_show_layout(cr, l);
+}
+
+static void format_clock(int64_t ms, int64_t now_ms, char *out, size_t cap) {
+    time_t t = (time_t)(ms / 1000), now = (time_t)(now_ms / 1000);
+    struct tm a, b;
+    localtime_r(&t, &a);
+    localtime_r(&now, &b);
+    /* The day only when it is not today: a log of one afternoon should not
+     * say "Saturday" twenty times. */
+    if (a.tm_yday == b.tm_yday && a.tm_year == b.tm_year)
+        strftime(out, cap, "%H:%M", &a);
+    else
+        strftime(out, cap, "%a %H:%M", &a);
+}
+
+static void format_span(int64_t ms, char *out, size_t cap) {
+    long s = (long)(ms / 1000);
+    if (s < 60)        snprintf(out, cap, "lived %lds", s);
+    else if (s < 3600) snprintf(out, cap, "lived %ld min", s / 60);
+    else               snprintf(out, cap, "lived %ldh %02ldm", s / 3600, (s / 60) % 60);
+}
+
+static void draw_log(cairo_t *cr, int w, int h, const ExpoTimeLog *log) {
+    const FwmTheme *thm = theme_get();
+    int tw, th;
+
+    if (!log || log->total == 0) {
+        PangoLayout *empty = make_layout(cr, "sans 12");
+        set_rgb(cr, thm->dim);
+        text_size(empty, "nothing recorded yet", &tw, &th);
+        cairo_move_to(cr, (w - tw) / 2.0, (h - th) / 2.0);
+        pango_cairo_show_layout(cr, empty);
+        g_object_unref(empty);
+        return;
+    }
+
+    PangoLayout *small = make_layout(cr, "sans 10");
+    PangoLayout *name = make_layout(cr, "sans 11");
+    PangoLayout *letter = make_layout(cr, "sans bold 9");
+    double title_x = PAGE_PAD + TIME_COL + ICON_SZ + 12.0 + VERB_COL;
+    double title_w = w - PAGE_PAD - STATE_COL - title_x;
+    if (title_w < 40.0) title_w = 40.0;
+    pango_layout_set_width(name, (int)(title_w * PANGO_SCALE));
+    pango_layout_set_ellipsize(name, PANGO_ELLIPSIZE_END);
+
+    for (int i = 0; i < log->n; i++) {
+        const ExpoTimeRow *r = &log->rows[i];
+        double y = LIST_TOP + i * ROW_H;
+        double mid = y + ROW_H / 2.0;
+
+        /* A hairline between rows, so a long list can be followed across. */
+        if (i) {
+            cairo_set_source_rgba(cr, thm->sel[0], thm->sel[1], thm->sel[2], 0.8);
+            cairo_rectangle(cr, PAGE_PAD, y, w - 2 * PAGE_PAD, 1);
+            cairo_fill(cr);
+        }
+
+        char buf[64];
+        format_clock(r->ms, log->now_ms, buf, sizeof(buf));
+        set_rgb(cr, thm->muted);
+        text_size(small, buf, &tw, &th);
+        cairo_move_to(cr, PAGE_PAD, mid - th / 2.0);
+        pango_cairo_show_layout(cr, small);
+
+        double x = PAGE_PAD + TIME_COL;
+        cairo_surface_t *icon = icon_for(r->app_id, log->icon_theme);
+        if (icon) {
+            int iw = cairo_image_surface_get_width(icon);
+            int ih = cairo_image_surface_get_height(icon);
+            cairo_set_source_surface(cr, icon, x + (ICON_SZ - iw) / 2.0,
+                                     mid - ih / 2.0);
+            cairo_paint(cr);
+        } else {
+            draw_letter(cr, letter, x, mid - ICON_SZ / 2.0,
+                        r->app_id && r->app_id[0] ? r->app_id : r->title);
+        }
+        x += ICON_SZ + 12.0;
+
+        /* Opening in the accent and closing in the muted colour: the eye
+         * reads the comings by colour and the goings by their absence. */
+        set_rgb(cr, r->closed ? thm->muted : thm->accent);
+        text_size(small, r->closed ? "closed" : "opened", &tw, &th);
+        cairo_move_to(cr, x, mid - th / 2.0);
+        pango_cairo_show_layout(cr, small);
+
+        set_rgb(cr, thm->text);
+        const char *label = r->title && r->title[0] ? r->title
+                          : (r->app_id && r->app_id[0] ? r->app_id : "a window");
+        text_size(name, label, &tw, &th);
+        cairo_move_to(cr, title_x, mid - th / 2.0);
+        pango_cairo_show_layout(cr, name);
+
+        /* What became of it, right-aligned: open still, or how long it was. */
+        if (r->closed) {
+            format_span(r->lived_ms, buf, sizeof(buf));
+            set_rgb(cr, thm->muted);
+        } else if (r->still_open) {
+            snprintf(buf, sizeof(buf), "open");
+            set_rgb(cr, thm->accent);
+        } else {
+            snprintf(buf, sizeof(buf), "closed");
+            set_rgb(cr, thm->dim);
+        }
+        text_size(small, buf, &tw, &th);
+        double sx = w - PAGE_PAD - tw;
+        cairo_move_to(cr, sx, mid - th / 2.0);
+        pango_cairo_show_layout(cr, small);
+        if (!r->closed && r->still_open) {
+            cairo_new_path(cr);
+            cairo_arc(cr, sx - 9.0, mid, 3.0, 0, 2 * M_PI);
+            cairo_fill(cr);
+        }
+    }
+
+    /* Where in the list this is, when there is more of it than fits. */
+    if (log->total > log->n) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%d\xE2\x80\x93%d of %d", log->first + 1,
+                 log->first + log->n, log->total);
+        set_rgb(cr, thm->muted);
+        text_size(small, buf, &tw, &th);
+        cairo_move_to(cr, w - PAGE_PAD - tw, h - PAGE_PAD + 8.0 - th);
+        pango_cairo_show_layout(cr, small);
+    }
+
+    g_object_unref(small);
+    g_object_unref(name);
+    g_object_unref(letter);
+}
+
+int expo_time_log_fit(struct wlr_scene_buffer *page) {
+    struct wlr_buffer *pix = page ? cairo_overlay_buffer(page) : NULL;
+    if (!pix) return 0;
+    int n = (int)((pix->height - LIST_TOP - LIST_BOTTOM) / ROW_H);
+    return n > 0 ? n : 0;
+}
+
+struct ContentCtx {
+    int section;
+    const ExpoTimeLog *log;
+};
+
 static void draw_content(cairo_t *cr, int w, int h, void *data) {
     const FwmTheme *thm = theme_get();
-    int s = *(const int *)data;
+    const struct ContentCtx *ctx = data;
+    int s = ctx->section;
     if (s < 0 || s >= EXPO_TIME_SECTIONS) s = EXPO_TIME_LOG;
 
     int tw, th;
@@ -382,8 +602,14 @@ static void draw_content(cairo_t *cr, int w, int h, void *data) {
     pango_cairo_show_layout(cr, body);
     g_object_unref(body);
 
-    /* Nothing is recorded yet, and the middle of the page says so rather than
-     * standing empty: an empty page reads as one that failed to load. */
+    if (s == EXPO_TIME_LOG) {
+        draw_log(cr, w, h, ctx->log);
+        return;
+    }
+
+    /* Nothing is recorded for this one yet, and the middle of the page says so
+     * rather than standing empty: an empty page reads as one that failed to
+     * load. */
     PangoLayout *empty = make_layout(cr, "sans 12");
     set_rgb(cr, thm->dim);
     text_size(empty, "nothing recorded yet", &tw, &th);
@@ -411,14 +637,20 @@ struct wlr_scene_buffer *expo_time_page_show(struct wlr_scene_tree *parent,
 
 struct wlr_scene_buffer *expo_time_content_show(struct wlr_scene_tree *parent,
                                                 struct wlr_scene_buffer *page,
-                                                int section) {
+                                                int section, const ExpoTimeLog *log) {
     struct wlr_buffer *pix = page ? cairo_overlay_buffer(page) : NULL;
     if (!pix) return NULL;
     struct wlr_scene_buffer *buf = cairo_overlay_create(parent, pix->width, pix->height);
     if (!buf) return NULL;
-    cairo_overlay_update(buf, draw_content, &section);
-    /* Drawn once and only ever moved: the CPU copy is not needed again. */
-    cairo_overlay_make_static(buf);
+    struct ContentCtx ctx = { .section = section, .log = log };
+    cairo_overlay_update(buf, draw_content, &ctx);
     wlr_scene_node_set_position(&buf->node, page->node.x, page->node.y);
     return buf;
+}
+
+void expo_time_content_redraw(struct wlr_scene_buffer *buf, int section,
+                              const ExpoTimeLog *log) {
+    if (!buf) return;
+    struct ContentCtx ctx = { .section = section, .log = log };
+    cairo_overlay_update(buf, draw_content, &ctx);
 }

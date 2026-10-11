@@ -15,6 +15,8 @@
 #include "expo_internal.h"
 #include "ui/cairo_overlay.h"
 #include "ui/expo_time.h"
+#include "journal.h"
+#include "server_journal.h"
 #include <math.h>
 #include <stdlib.h>
 #include <linux/input-event-codes.h>
@@ -40,6 +42,95 @@ static double ease(double t) {
 
 static double clamp01(double t) {
     return t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+}
+
+/* ── the log ──────────────────────────────────────────────────────────── */
+
+/* Never more on screen than this, whatever the monitor. */
+#define LOG_ROWS_MAX 64
+static ExpoTimeRow g_rows[LOG_ROWS_MAX];
+
+/* Every opening and every closing the history still knows a window for, to be
+ * put in order: two per window at most. */
+#define LOG_ENTRIES_MAX 2048
+typedef struct {
+    int64_t ms;
+    const JournalWindow *w;
+    bool closed;
+} LogEntry;
+static LogEntry g_entries[LOG_ENTRIES_MAX];
+
+/* Newest first; a closing before the opening it shares a millisecond with,
+ * since it cannot have come first. */
+static int entry_cmp(const void *pa, const void *pb) {
+    const LogEntry *a = pa, *b = pb;
+    if (a->ms != b->ms) return a->ms < b->ms ? 1 : -1;
+    return (int)b->closed - (int)a->closed;
+}
+
+/* The part of the log the page has room for, newest first, from however far
+ * down it has been scrolled. Built from the windows rather than from the
+ * events: the events are a ring that a window dragged about all afternoon can
+ * fill, and the list must not lose its openings and closings to that. The
+ * names point into the history itself, so the result is good until the
+ * history next changes — for one draw. */
+static ExpoTimeLog log_view(FwmExpo *e) {
+    FwmServer *server = e->server;
+    FwmJournal *j = server->journal;
+    ExpoTimeLog log = {
+        .rows = g_rows,
+        .now_ms = server_journal_now(),
+        .icon_theme = server->config.decor.icon_theme,
+    };
+    int fit = expo_time_log_fit(e->time_page);
+    if (fit > LOG_ROWS_MAX) fit = LOG_ROWS_MAX;
+
+    int n = 0;
+    int wins = journal_window_count(j);
+    for (int i = 0; i < wins && n + 2 <= LOG_ENTRIES_MAX; i++) {
+        const JournalWindow *w = journal_window_at(j, i);
+        g_entries[n++] = (LogEntry){ .ms = w->opened_ms, .w = w, .closed = false };
+        if (w->closed_ms)
+            g_entries[n++] = (LogEntry){ .ms = w->closed_ms, .w = w, .closed = true };
+    }
+    qsort(g_entries, (size_t)n, sizeof(g_entries[0]), entry_cmp);
+    log.total = n;
+
+    int most = n - fit;
+    if (most < 0) most = 0;
+    if (e->time_scroll > most) e->time_scroll = most;
+    if (e->time_scroll < 0) e->time_scroll = 0;
+    log.first = e->time_scroll;
+
+    for (int i = log.first; i < n && log.n < fit; i++) {
+        const LogEntry *en = &g_entries[i];
+        g_rows[log.n++] = (ExpoTimeRow){
+            .closed = en->closed,
+            .ms = en->ms,
+            .app_id = en->w->app_id,
+            .title = en->w->title,
+            .still_open = en->w->closed_ms == 0,
+            .lived_ms = en->closed && en->ms > en->w->opened_ms
+                            ? en->ms - en->w->opened_ms : 0,
+        };
+    }
+    e->time_log_version = journal_list_version(j);
+    return log;
+}
+
+static struct wlr_scene_buffer *content_show(FwmExpo *e, int section) {
+    if (section != EXPO_TIME_LOG)
+        return expo_time_content_show(e->server->layer_overlay, e->time_page,
+                                      section, NULL);
+    ExpoTimeLog log = log_view(e);
+    return expo_time_content_show(e->server->layer_overlay, e->time_page,
+                                  section, &log);
+}
+
+static void log_redraw(FwmExpo *e) {
+    if (!e->time_content || e->time_section != EXPO_TIME_LOG) return;
+    ExpoTimeLog log = log_view(e);
+    expo_time_content_redraw(e->time_content, EXPO_TIME_LOG, &log);
 }
 
 void expo_time_button_create(FwmExpo *e) {
@@ -121,8 +212,7 @@ static void expo_time_set_section(FwmExpo *e, int s, int dir) {
     g_section = s;
     e->time_slide_dir = dir;
     e->time_slide = 0.0;
-    e->time_content = expo_time_content_show(e->server->layer_overlay,
-                                             e->time_page, s);
+    e->time_content = content_show(e, s);
     expo_time_apply(e);
     wlr_log(WLR_INFO, "expo: time view on %s", section_log_name[s]);
 }
@@ -175,8 +265,10 @@ void expo_time_open(FwmExpo *e) {
         e->time_tabs_x = e->time_tabs->node.x;
         e->time_tabs_y = e->time_tabs->node.y;
     }
-    e->time_content = expo_time_content_show(server->layer_overlay,
-                                             e->time_page, e->time_section);
+    /* Opened again, it starts from the newest: what has just happened is the
+     * likeliest thing to have come looking for. */
+    e->time_scroll = 0;
+    e->time_content = content_show(e, e->time_section);
     /* Placed before the first frame can show them, or they would flash up
      * whole for a frame and then start to appear. */
     expo_time_apply(e);
@@ -303,6 +395,18 @@ bool expo_time_handle_button(FwmExpo *e, uint32_t button, bool pressed,
     return true;
 }
 
+bool expo_time_handle_axis(FwmExpo *e, double delta) {
+    if (!e->time_open || e->time_section != EXPO_TIME_LOG || delta == 0.0) return true;
+    /* A notch of the wheel is about fifteen units: three rows. */
+    int rows = (int)lround(delta / 5.0);
+    if (rows == 0) rows = delta > 0.0 ? 1 : -1;
+    int was = e->time_scroll;
+    e->time_scroll += rows;
+    if (e->time_scroll < 0) e->time_scroll = 0;
+    if (e->time_scroll != was) log_redraw(e);
+    return true;
+}
+
 void expo_time_tick(FwmExpo *e, double dt) {
     if (e->time_button) {
         /* Down with the strip as it leaves, the way the key hints go. */
@@ -337,5 +441,10 @@ void expo_time_tick(FwmExpo *e, double dt) {
         expo_time_drop(e);
         return;
     }
+    /* A window opened or closed while the page is up: the log says so now,
+     * not the next time it is opened. */
+    if (e->time_open && e->time_section == EXPO_TIME_LOG
+        && journal_list_version(e->server->journal) != e->time_log_version)
+        log_redraw(e);
     expo_time_apply(e);
 }
