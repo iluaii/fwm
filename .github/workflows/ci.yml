@@ -52,8 +52,12 @@ jobs:
           cmake --build build -j$(nproc)
 
       - name: Unit tests
+        # Optimised, or test_liquid alone takes twelve minutes: its pools,
+        # windows and layers are tens of simulated seconds each, run twice.
+        # -O2 by hand rather than a Release build, which would define NDEBUG
+        # and take the asserts in physics.c and toml.c out of the tests.
         run: |
-          cmake -S . -B build-test -DFWM_TESTS=ON
+          cmake -S . -B build-test -DFWM_TESTS=ON -DCMAKE_C_FLAGS="-O2"
           cmake --build build-test -j$(nproc)
           ctest --test-dir build-test --output-on-failure
 

@@ -168,7 +168,7 @@ together there and are easy to break separately:
 ## Tests
 
 ```sh
-cmake -S . -B build-test -DFWM_TESTS=ON && ctest --test-dir build-test
+cmake -S . -B build-test -DFWM_TESTS=ON -DCMAKE_C_FLAGS=-O2 && cmake --build build-test && ctest --test-dir build-test
 ```
 
 Only modules that need no compositor, no display and no sound card. Each suite
