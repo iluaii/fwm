@@ -154,6 +154,7 @@ struct FwmLiquid {
 
     float *mass;           /* per cell */
     float *colour;         /* 0 outside .. 1 inside, for the tension */
+    float *cover;          /* how much of each cell the solids stand on, 0 .. 1 */
     float *txx, *tyy, *txy;
     unsigned char *type;
 
@@ -284,7 +285,7 @@ FwmLiquid *liquid_create(double spacing, int budget) {
 static void grid_free(FwmLiquid *l) {
     free(l->u);    free(l->um);   free(l->v);    free(l->vm);
     free(l->uok);  free(l->vok);  free(l->okb);  free(l->ftmp);
-    free(l->mass); free(l->colour);
+    free(l->mass); free(l->colour); free(l->cover);
     free(l->txx);  free(l->tyy);  free(l->txy);  free(l->type);
     free(l->fluid); free(l->nbits); free(l->ndiag);
     free(l->sid);   free(l->flood); free(l->pocket);
@@ -294,7 +295,7 @@ static void grid_free(FwmLiquid *l) {
     free(l->dir);  free(l->prec); free(l->q);
     l->u = l->um = l->v = l->vm = l->ftmp = NULL;
     l->uok = l->vok = l->okb = NULL;
-    l->mass = l->colour = l->txx = l->tyy = l->txy = NULL;
+    l->mass = l->colour = l->cover = l->txx = l->tyy = l->txy = NULL;
     l->type = NULL;
     l->fluid = NULL;
     l->nbits = l->ndiag = NULL;
@@ -409,6 +410,7 @@ void liquid_set_box(FwmLiquid *l, double w, double h) {
     GRAB(l->uok, l->un, 1);             GRAB(l->vok, l->vn, 1);
     GRAB(l->okb, fmax, 1);              GRAB(l->ftmp, fmax, sizeof(float));
     GRAB(l->mass, l->cn, sizeof(float)); GRAB(l->colour, l->cn, sizeof(float));
+    GRAB(l->cover, l->cn, sizeof(float));
     GRAB(l->txx, l->cn, sizeof(float)); GRAB(l->tyy, l->cn, sizeof(float));
     GRAB(l->txy, l->cn, sizeof(float)); GRAB(l->type, l->cn, 1);
     GRAB(l->fluid, l->cn, sizeof(int));
@@ -1516,6 +1518,40 @@ static void job_to_grid(void *ctx, int part, int parts) {
     }
 }
 
+/* How much of each cell the solids stand on, sampled 4 x 4 in the cells
+ * along their edges, for the tension's fullness: a cell a window covers half
+ * of holds half as many particles and is full. */
+static void solid_cover(FwmLiquid *l) {
+    memset(l->cover, 0, l->cn * sizeof(float));
+    if (l->nbodies == 0) return;
+    const int nx = l->nx, ny = l->ny;
+    const float dx = l->dx, idx = l->inv_dx;
+    for (int k = 0; k < l->nbodies; k++) {
+        const struct body *b = &l->bodies[k];
+        float ex = fabsf(b->c) * b->hw + fabsf(b->s) * b->hh;
+        float ey = fabsf(b->s) * b->hw + fabsf(b->c) * b->hh;
+        int i0 = (int)floorf((b->px - ex - l->ox) * idx), i1 = (int)floorf((b->px + ex - l->ox) * idx);
+        int j0 = (int)floorf((b->py - ey - l->oy) * idx), j1 = (int)floorf((b->py + ey - l->oy) * idx);
+        if (i0 < 0) i0 = 0;
+        if (j0 < 0) j0 = 0;
+        if (i1 > nx - 1) i1 = nx - 1;
+        if (j1 > ny - 1) j1 = ny - 1;
+        for (int j = j0; j <= j1; j++)
+            for (int i = i0; i <= i1; i++) {
+                int in = 0;
+                for (int sj = 0; sj < 4; sj++)
+                    for (int si = 0; si < 4; si++) {
+                        float x = l->ox + (i + (si + 0.5f) * 0.25f) * dx - b->px;
+                        float y = l->oy + (j + (sj + 0.5f) * 0.25f) * dx - b->py;
+                        float lx = b->c * x + b->s * y, ly = -b->s * x + b->c * y;
+                        in += fabsf(lx) < b->hw && fabsf(ly) < b->hh;
+                    }
+                float *c = &l->cover[CIX(l, i, j)];
+                *c = fminf(*c + in / 16.0f, 1.0f);
+            }
+    }
+}
+
 /* Surface tension, as a stress: gamma * |g| * (I - n n^T), with g the
  * gradient of how full the cells are and n its direction (Lafaurie et al.
  * 1994). A tension along the surface and none across it — a stretched
@@ -1545,14 +1581,52 @@ static void job_tension(void *ctx, int part, int parts) {
      * neither liquid nor air — the fullness past it is a copy of the
      * fullness against it — so a drop on the floor meets it at a right
      * angle, neither beading up off it as if it were air nor creeping along
-     * it. */
+     * it. A solid the same: full is what the solid leaves of a cell, and a
+     * cell it all but covers reads as the cells around it. Counted against
+     * the whole cell, the sliver a window's edge leaves between itself and
+     * the next cell was a surface in the middle of the pool, pulled on for
+     * ever, and a pool with a window in it never settled. */
+    const float *cover = l->cover;
+    crew_share(ny, part, parts, &lo, &hi);
+    for (int j = lo; j < hi; j++)
+        for (int i = 0; i < nx; i++) {
+            size_t q = CIX(l, i, j);
+            float room = 1.0f - cover[q];
+            /* -1: covered, to be read off the cells around it. */
+            float r = room > 0.25f ? l->mass[q] / (fill * room) : -1.0f;
+            c[q] = r > 1.0f ? 1.0f : r;
+        }
+    crew_sync(l->crew);
+    if (l->nbodies) {
+        for (int j = lo; j < hi; j++)
+            for (int i = 0; i < nx; i++) {
+                size_t q = CIX(l, i, j);
+                if (c[q] >= 0.0f) continue;
+                float sum = 0.0f;
+                int n = 0;
+                if (i > 0      && c[q - 1] >= 0.0f)  { sum += c[q - 1];  n++; }
+                if (i < nx - 1 && c[q + 1] >= 0.0f)  { sum += c[q + 1];  n++; }
+                if (j > 0      && c[q - cw] >= 0.0f) { sum += c[q - cw]; n++; }
+                if (j < ny - 1 && c[q + cw] >= 0.0f) { sum += c[q + cw]; n++; }
+                /* Into scratch, and in only once every member has read
+                 * its neighbours. */
+                l->txy[q] = n ? sum / (float)n : 0.0f;
+            }
+        crew_sync(l->crew);
+        for (int j = lo; j < hi; j++)
+            for (int i = 0; i < nx; i++) {
+                size_t q = CIX(l, i, j);
+                if (c[q] < 0.0f) c[q] = l->txy[q];
+            }
+        crew_sync(l->crew);
+    }
     crew_share(ny + 2, part, parts, &lo, &hi);
     for (int j = lo - 1; j < hi - 1; j++) {
         int sj = j < 0 ? 0 : j >= ny ? ny - 1 : j;
         for (int i = -1; i <= nx; i++) {
+            if (i >= 0 && i < nx && j >= 0 && j < ny) continue;
             int si = i < 0 ? 0 : i >= nx ? nx - 1 : i;
-            float r = l->mass[CIX(l, si, sj)] / fill;
-            c[CIX(l, i, j)] = r > 1.0f ? 1.0f : r;
+            c[CIX(l, i, j)] = c[CIX(l, si, sj)];
         }
     }
     crew_sync(l->crew);
@@ -1916,7 +1990,10 @@ static void substep(FwmLiquid *l, float h) {
     crew_run(l->crew, job_to_grid, &job);
 
     /* 2. Surface tension. */
-    if (l->mat.tension > 0.0) crew_run(l->crew, job_tension, &job);
+    if (l->mat.tension > 0.0) {
+        solid_cover(l);
+        crew_run(l->crew, job_tension, &job);
+    }
 
     close_walls(l);
     close_solids(l);

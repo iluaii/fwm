@@ -399,6 +399,15 @@ static int inside(const FwmLiquid *l, LiquidSolid b, double skin) {
     return in;
 }
 
+/* The surface of a pool between x0 and x1, from how much of it is there: at
+ * rest every particle holds its own square. */
+static double surface_between(const FwmLiquid *l, double H, double x0, double x1) {
+    int st, n = 0;
+    const float *p = liquid_positions(l, &st);
+    for (int i = 0; i < liquid_count(l); i++) n += p[i * st] > x0 && p[i * st] < x1;
+    return H - n * SPACING * SPACING / (x1 - x0);
+}
+
 static void settle(FwmLiquid *l, double most) {
     for (double t = 0; !liquid_asleep(l) && t < most; t += DT) liquid_step(l, DT, 0, G);
 }
@@ -417,17 +426,21 @@ static void test_solids(void) {
     run(l, 25.0, 0, G);
     CHECK_INT(inside(l, post, 1.0), 0);
     CHECK_INT(liquid_count(l), n);
-    /* The window covers the cells whose centres it covers: 16 of 12 px. */
+    /* The window covers the cells whose centres it covers: 16 of 12 px. Read
+     * off the pool on either side of it — some of what was poured onto it
+     * stays on top, a puddle on a flat roof. */
     double depth = n * SPACING * SPACING / (W - 16 * 12.0);
-    CHECK_DBL(H - height_below(l, 0.02), depth, 0.1 * depth + SPACING);
+    double level = 0.5 * (surface_between(l, H, 30, 480) + surface_between(l, H, 720, W - 30));
+    CHECK_DBL(H - level, depth, 0.1 * depth + SPACING);
 
     liquid_destroy(l);
 
     CASE("a window lifted out of a pool comes out dripping, not with the pool");
     /* Slowly, its bottom under the surface: held to it everywhere, the
-     * liquid under it is drawn up after it in a sheet. Let go where air can
-     * get in, what still hangs there when it is well clear is the meniscus
-     * the surface tension holds — about half as much. */
+     * liquid under it would be drawn up after it in a column. Let go where
+     * air can get in, what still hangs there when it is well clear is what
+     * the surface tension holds up — no more than a film as thick as the
+     * tension's own length, 30 px under its 300: 250 particles. */
     l = make(W, H, 60, 30);
     n = 0;
     for (int k = 0; k < 4; k++) n += liquid_pour(l, 150 + k * 300, 250, 1800, 0, 0);
@@ -451,7 +464,7 @@ static void test_solids(void) {
             hanging += x > 450 && x < 750 && y > bottom - 2 && y < surface - 30;
         }
     }
-    CHECK(hanging >= 0 && hanging < 170);
+    CHECK(hanging >= 0 && hanging < 250);
     liquid_destroy(l);
 
     CASE("liquid poured into a cup of three solids stays in it");
