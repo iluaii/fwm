@@ -140,6 +140,9 @@ been poured on beside it.
   same way.
 - **the bin** removes a liquid you made, and takes it off the desktop with it,
   leaving the others there. Water and the ready-made ones have no bin.
+- **the dry sponge**, left of the +, soaks up every liquid there is poured,
+  whatever desktop it stands on — `fwmctl liquid clear` from a menu. It is greyed
+  while nothing is poured.
 
 Liquids made here are kept in `~/.local/state/fwm/liquids`; your `config.toml` is
 never rewritten. Density is what puts liquids in layers and decides what floats

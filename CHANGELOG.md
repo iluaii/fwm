@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### A sponge that dries every liquid
+
+The liquids menu has a dry sponge on its caption line, left of the +: one
+click drains every liquid poured, the way `fwmctl liquid clear` does. It is
+greyed while there is nothing to soak up.
+
 ### Frosted glass behind see-through windows
 
 `[[rule]] blur = true`: what is behind a window — the wallpaper and the

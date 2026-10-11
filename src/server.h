@@ -494,6 +494,7 @@ typedef struct FwmServer {
     struct wlr_scene_buffer *liquids_buffer;
     int liquids_hover;
     int liquids_hover_part;
+    bool liquids_wet;           /* what the open menu's sponge last showed */
     struct FwmLiquidHand *liquid_hand;
     /* The liquids there are to pick: water and the ones made in the menu
      * (src/liquid_kinds.h), and the form one is being made or changed in. */

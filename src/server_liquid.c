@@ -911,6 +911,8 @@ static void liquids_menu_fill(FwmServer *server, LiquidsMenuState *st) {
     st->hover = server->liquids_buffer ? server->liquids_hover : -1;
     st->hover_part = server->liquids_buffer ? server->liquids_hover_part : LIQUIDS_PART_NONE;
     st->full = ks->count >= LIQUID_KINDS_MAX;
+    st->wet = run && !run->clear
+           && (run->snap_n > 0 || run->pour > 0 || run->stream > 0);
     st->opacity = glass_fill(&server->config, server->config.decor.tray_opacity);
 }
 
@@ -996,6 +998,13 @@ bool server_liquid_menu_click(FwmServer *server) {
     int row = liquids_menu_hit(st.count, mx, my, &part);
     if (part == LIQUIDS_PART_PLUS) {
         if (!st.full) liquid_form_open(server, -1);
+        return true;
+    }
+    if (part == LIQUIDS_PART_DRAIN) {
+        if (st.wet) {
+            server_liquid_clear(server);
+            liquids_menu_refresh(server);
+        }
         return true;
     }
     if (row < 0) return true;
@@ -1282,7 +1291,12 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
     if (server->liquids_buffer) {
         LiquidsMenuState st;
         liquids_menu_fill(server, &st);
-        liquids_menu_tick(server->liquids_buffer, &st, elapsed);
+        /* The sponge greys and lights as liquid comes and goes, whoever
+         * poured or drained it. */
+        if (!liquids_menu_tick(server->liquids_buffer, &st, elapsed)
+            && st.wet != server->liquids_wet)
+            liquids_menu_redraw(server->liquids_buffer, &st);
+        server->liquids_wet = st.wet;
     }
 
     if (!cfg->enabled) {

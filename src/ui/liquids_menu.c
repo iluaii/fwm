@@ -38,7 +38,7 @@
 #define MENU_ROW_H_LONG 36.0
 #define LONG_LIST     12
 /* The caption over the rows — with the + that makes a new liquid at its right
- * — and the line under them that says what the buttons do: the bucket takes
+ * and the sponge that drains them all beside it — and the line under them that says what the buttons do: the bucket takes
  * the pointer over, and a mode that does not say how to leave it is a trap. */
 #define CAPTION_H     26.0
 #define FOOTER_H      28.0
@@ -51,7 +51,8 @@ static double row_h(int count) { return count > LONG_LIST ? MENU_ROW_H_LONG : ME
 #define ANIM_EPS 0.002
 
 /* The bin under the pointer goes the red the toast uses when something did not
- * happen: removing a liquid is the one thing here that cannot be taken back. */
+ * happen: removing a liquid is the one thing here that cannot be taken back,
+ * and draining them all with the sponge the other. */
 static const double COL_DRAIN[3] = { 0.93, 0.42, 0.38 };
 
 static struct {
@@ -73,6 +74,10 @@ int liquids_menu_hit(int count, double x, double y, int *part) {
     if (x < 0 || x > MENU_W || y < 0 || y > MENU_H_FOR(count)) return -1;
     if (y >= MENU_PAD && y < MENU_PAD + CAPTION_H && x >= bin_x()) {
         if (part) *part = LIQUIDS_PART_PLUS;
+        return -1;
+    }
+    if (y >= MENU_PAD && y < MENU_PAD + CAPTION_H && x >= gear_x()) {
+        if (part) *part = LIQUIDS_PART_DRAIN;
         return -1;
     }
     for (int r = 0; r < count; r++) {
@@ -161,6 +166,36 @@ static void draw_plus(cairo_t *cr, double x, double y, double s) {
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
 }
 
+/* A dry sponge: a block gone a little hollow at the sides as it dried, with
+ * its pores open. */
+static void draw_sponge(cairo_t *cr, double x, double y, double s) {
+    double lw = fmax(1.4, s * 0.09);
+    double l = x + s * 0.06, r = x + s * 0.94, t = y + s * 0.18, b = y + s * 0.86;
+    cairo_set_line_width(cr, lw);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+    cairo_new_path(cr);
+    cairo_move_to(cr, l + s * 0.06, t);
+    cairo_curve_to(cr, x + s * 0.35, t + s * 0.07, x + s * 0.65, t + s * 0.07, r - s * 0.06, t);
+    cairo_curve_to(cr, r + s * 0.01, t + s * 0.01, r, t + s * 0.05, r - s * 0.01, t + s * 0.10);
+    cairo_curve_to(cr, r - s * 0.06, y + s * 0.42, r - s * 0.06, y + s * 0.62, r - s * 0.01, b - s * 0.10);
+    cairo_curve_to(cr, r, b - s * 0.05, r + s * 0.01, b - s * 0.01, r - s * 0.06, b);
+    cairo_curve_to(cr, x + s * 0.65, b - s * 0.07, x + s * 0.35, b - s * 0.07, l + s * 0.06, b);
+    cairo_curve_to(cr, l - s * 0.01, b - s * 0.01, l, b - s * 0.05, l + s * 0.01, b - s * 0.10);
+    cairo_curve_to(cr, l + s * 0.06, y + s * 0.62, l + s * 0.06, y + s * 0.42, l + s * 0.01, t + s * 0.10);
+    cairo_curve_to(cr, l, t + s * 0.05, l - s * 0.01, t + s * 0.01, l + s * 0.06, t);
+    cairo_close_path(cr);
+    cairo_stroke(cr);
+    static const double pore[][3] = {
+        { 0.32, 0.42, 0.085 }, { 0.66, 0.38, 0.065 },
+        { 0.48, 0.66, 0.070 }, { 0.74, 0.66, 0.050 },
+    };
+    for (size_t i = 0; i < sizeof(pore) / sizeof(pore[0]); i++) {
+        cairo_new_sub_path(cr);
+        cairo_arc(cr, x + s * pore[i][0], y + s * pore[i][1], s * pore[i][2], 0, 2.0 * M_PI);
+    }
+    cairo_fill(cr);
+}
+
 static void text_at(cairo_t *cr, PangoLayout *layout, const char *s,
                     double x, double y, double h, int *w_out) {
     int tw, th;
@@ -200,6 +235,14 @@ static void draw_menu(cairo_t *cr, int w, int h, void *user) {
     cairo_set_source_rgb(cr, pc[0], pc[1], pc[2]);
     double ps = 13.0;
     draw_plus(cr, bin_x() + (ICON_W - ps) / 2.0, MENU_PAD + (CAPTION_H - ps) / 2.0, ps);
+
+    /* The sponge, over the gears' column: greyed with nothing to soak up, and
+     * the bin's red under the pointer — it takes every liquid off at once. */
+    const double *sc = !st->wet ? thm->dim
+                     : st->hover_part == LIQUIDS_PART_DRAIN ? COL_DRAIN : thm->muted;
+    cairo_set_source_rgb(cr, sc[0], sc[1], sc[2]);
+    double ss = 16.0;
+    draw_sponge(cr, gear_x() + (ICON_W - ss) / 2.0, MENU_PAD + (CAPTION_H - ss) / 2.0, ss);
 
     for (int r = 0; r < st->count; r++) {
         const LiquidsMenuItem *it = &st->item[r];

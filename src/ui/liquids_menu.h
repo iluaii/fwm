@@ -25,7 +25,7 @@
  * bucket of it in your hand (server_liquid.c). The row under the pointer
  * shows a gear, which opens it in the liquid form (ui/liquid_form.h), and a
  * bin, which removes it — water has no bin. The + on the caption line makes a
- * new one.
+ * new one, and the dry sponge beside it soaks up every liquid on the desktops.
  *
  * Same chrome as the modes and stats menus — ui/modes.h exports the panel —
  * and the same open and close, because it opens in the place the modes menu
@@ -51,6 +51,7 @@ enum {
     LIQUIDS_PART_GEAR,  /* change it */
     LIQUIDS_PART_BIN,   /* remove it */
     LIQUIDS_PART_PLUS,  /* make a new one */
+    LIQUIDS_PART_DRAIN, /* the sponge: drain every liquid poured */
 };
 
 typedef struct {
@@ -60,6 +61,7 @@ typedef struct {
     int hover_part;     /* LIQUIDS_PART_*, what of it */
     int in_hand;        /* the row whose bucket is in the hand, -1 for none */
     bool full;          /* no room for another: the + is greyed */
+    bool wet;           /* something is poured: else the sponge is greyed */
     double opacity;
 } LiquidsMenuState;
 
@@ -85,7 +87,7 @@ bool liquids_menu_animating(void);
 void liquids_menu_size(int count, int *w, int *h);
 
 /* Hit-test in MENU-BUFFER-LOCAL coordinates: the row under the point (-1 for
- * none, including the + on the caption line), and in `part` what of it. */
+ * none, including the + and the sponge on the caption line), and in `part` what of it. */
 int liquids_menu_hit(int count, double x, double y, int *part);
 
 #endif /* FWM_LIQUIDS_MENU_H */
