@@ -77,6 +77,19 @@
  * jitter gave the inside a "surface" everywhere. */
 #define SURFACE_FULL 0.7f
 
+/* Foam. Water torn apart fast at its surface — a splash landing, a wave
+ * breaking, a sheet thrown off a window — takes air into itself, and comes
+ * up white until the bubbles have risen out of it. Each particle carries how
+ * much: it gains it at FOAM_GAIN per second for every 1/s its strain rate is
+ * over FOAM_STRAIN, and loses it over FOAM_LIFE seconds. Wherever: where a
+ * blob lands in a pool the two surfaces close over the air between them, so
+ * the place water is torn hardest is inside it. A slosh shears its water at a
+ * couple of 1/s and a big wave at ten, a splash at tens. Nothing the liquid does depends on it; it is
+ * what the picture shows. */
+#define FOAM_STRAIN 8.0f    /* 1/s */
+#define FOAM_GAIN   0.4f    /* per second per 1/s over */
+#define FOAM_LIFE   1.2f    /* s */
+
 /* Particles drift: the grid keeps the FLOW from squeezing, but where the
  * particles land within a cell is theirs. Left alone they bunch, and a pool
  * settled a quarter shallower than the liquid poured into it. So a cell
@@ -150,6 +163,7 @@ typedef struct {
      * of. */
     float c00, c01, c10, c11;
     unsigned kind;         /* which liquid it is */
+    float foam;            /* how much air it carries, 0..1: for the picture only */
 } Particle;
 
 struct FwmLiquid {
@@ -2326,6 +2340,7 @@ static void job_to_particles(void *ctx, int part, int parts) {
     const float y0 = l->oy + 0.1f * dx, y1 = l->oy + ny * dx - 0.1f * dx;
     const float dinv = 4.0f * idx;   /* D^-1 times the dx in each offset */
     const float squeeze = l->held ? fmaxf(SQUEEZE_LEAST, SQUEEZE_TIMES * (float)l->hmax) : 0.0f;
+    const float foam_keep = expf(-h / FOAM_LIFE);
     /* Drift (see DRIFT_STOKES): only with more than one liquid in the box
      * and something pulling. */
     const bool mixed = l->mixed && (l->gx != 0.0 || l->gy != 0.0);
@@ -2378,6 +2393,14 @@ static void job_to_particles(void *ctx, int part, int parts) {
         p->vx = vx;  p->vy = vy;
         p->c00 = c00 * dinv;  p->c01 = c01 * dinv;
         p->c10 = c10 * dinv;  p->c11 = c11 * dinv;
+
+        {
+            float strain = sqrtf(p->c00 * p->c00 + p->c11 * p->c11
+                                 + 0.5f * (p->c01 + p->c10) * (p->c01 + p->c10));
+            float air = p->foam * foam_keep;
+            if (strain > FOAM_STRAIN) air += FOAM_GAIN * (strain - FOAM_STRAIN) * h;
+            p->foam = air < 1.0f ? air : 1.0f;
+        }
 
         p->x += h * vx;
         p->y += h * vy;
@@ -2680,6 +2703,11 @@ int liquid_last_iterations(const FwmLiquid *l) { return l ? l->iters : 0; }
 const float *liquid_positions(const FwmLiquid *l, int *stride) {
     if (stride) *stride = (int)(sizeof(Particle) / sizeof(float));
     return (l && l->p) ? &l->p[0].x : NULL;
+}
+
+const float *liquid_foam_of(const FwmLiquid *l, int *stride) {
+    if (stride) *stride = (int)(sizeof(Particle) / sizeof(float));
+    return (l && l->p) ? &l->p[0].foam : NULL;
 }
 
 const unsigned *liquid_kinds_of(const FwmLiquid *l, int *stride) {

@@ -67,6 +67,7 @@
 #include "physics.h"
 #include "server_internal.h"
 #include "theme.h"
+#include "snapshot.h"
 #include "ui/cairo_overlay.h"
 #include "ui/liquid_form.h"
 #include "ui/liquids_menu.h"
@@ -135,6 +136,7 @@ struct FwmLiquidRun {
 
     float *snap;            /* the particles as (x, y) pairs, for the picture */
     float *snap_kind;       /* ...and the place of each one's liquid */
+    float *snap_foam;       /* ...and how much foam it is */
     int snap_n, snap_cap;
     bool asleep;            /* as of the last copy */
     int substeps, iters;
@@ -334,6 +336,7 @@ static void run_destroy(FwmServer *server) {
     liquid_destroy(run->sim);
     free(run->snap);
     free(run->snap_kind);
+    free(run->snap_foam);
     free(run);
     server->liquid = NULL;
     /* Nothing holds the windows up any more. */
@@ -1193,15 +1196,18 @@ static bool desktop_covered(FwmServer *server, int d) {
 }
 
 static void snapshot_take(struct FwmLiquidRun *run) {
-    int n = liquid_count(run->sim), stride, kstride;
+    int n = liquid_count(run->sim), stride, kstride, fstride;
     const float *p = liquid_positions(run->sim, &stride);
     const unsigned *kd = liquid_kinds_of(run->sim, &kstride);
+    const float *fm = liquid_foam_of(run->sim, &fstride);
     if (n > run->snap_cap) {
         float *s = realloc(run->snap, sizeof(float) * 2 * (size_t)n);
-        float *k = s ? realloc(run->snap_kind, sizeof(float) * (size_t)n) : NULL;
         if (s) run->snap = s;
+        float *k = s ? realloc(run->snap_kind, sizeof(float) * (size_t)n) : NULL;
         if (k) run->snap_kind = k;
-        if (!s || !k) n = run->snap_cap;
+        float *f = k ? realloc(run->snap_foam, sizeof(float) * (size_t)n) : NULL;
+        if (f) run->snap_foam = f;
+        if (!s || !k || !f) n = run->snap_cap;
         else run->snap_cap = n;
     }
     int count[LIQUID_MAX_KINDS] = { 0 };
@@ -1210,6 +1216,7 @@ static void snapshot_take(struct FwmLiquidRun *run) {
         run->snap[2 * i + 1] = p[i * stride + 1];
         unsigned k = kd[i * kstride] < LIQUID_MAX_KINDS ? kd[i * kstride] : 0;
         run->snap_kind[i] = (float)k;
+        run->snap_foam[i] = fm[i * fstride];
         count[k]++;
     }
     memcpy(run->slot_n, count, sizeof(count));
@@ -1450,8 +1457,14 @@ void server_liquid_sync(FwmServer *server, double elapsed) {
                 for (int c = 0; c < 3; c++) palette[s][c] = k->color[c] * k->color[3];
                 palette[s][3] = k->color[3];
             }
-            fresh = liquid_paint_draw(run->paint, run->snap, run->snap_kind, run->snap_n,
-                                      liquid_spacing(run->sim), palette, &run->damage);
+            /* What stands behind it, for it to bend: the monitor showing
+             * it, from where its desktop starts there. */
+            struct wlr_buffer *behind = cfg->refraction ? liquid_paint_behind(run->paint) : NULL;
+            bool bent = behind && snapshot_behind_liquid(server, mon, behind,
+                mon->box.x + d * server->screen_width - mon->camera_x, mon->box.y);
+            fresh = liquid_paint_draw(run->paint, run->snap, run->snap_kind, run->snap_foam,
+                                      run->snap_n, liquid_spacing(run->sim), bent,
+                                      palette, &run->damage);
         }
         run->dirty = false;
     }

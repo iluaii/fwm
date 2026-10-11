@@ -10,6 +10,14 @@ window's own surfaces. A terminal's alpha or a browser made transparent by its
 own stylesheet then reads as glass, and the text on it as text. `blur_radius`
 sets the reach; `[glass] tint` and `brightness` colour it.
 
+### A liquid that looks like one
+
+The liquid is thin and clear just under its surface and darker and more
+solid in its depth, lit along its edge from above, and what stands behind it
+shows through the surface, bent by its slant (`[liquids] refraction`).
+Water torn apart fast — a splash, a breaking wave — comes up white with
+foam, which fades in a second or so.
+
 ### Several liquids at once
 
 Up to eight liquids share a desktop, and find their own order: honey sinks

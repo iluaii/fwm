@@ -101,4 +101,10 @@ bool snapshot_lens_view(struct FwmServer *server, struct FwmOutput *out,
                         struct wlr_buffer *dst, int lx, int ly,
                         struct FwmView *view);
 
+/* What stands behind the liquid on a monitor, at layout position (lx, ly),
+ * the size of `dst`: the wallpaper, the layer-shell's background and bottom,
+ * and the windows in the back plane — what the liquid bends (liquid_draw.c). */
+bool snapshot_behind_liquid(struct FwmServer *server, struct FwmOutput *out,
+                            struct wlr_buffer *dst, int lx, int ly);
+
 #endif /* FWM_SNAPSHOT_H */

@@ -896,6 +896,10 @@ threads   = 0
 # share of its height under; over 1 it sinks. A window's [[rule]] mass and
 # material, and its desktop's mass_density, make it denser or lighter.
 window_density = 0.5
+# What stands behind the liquid — the wallpaper, the windows behind it — shows
+# through its thin water near the surface, bent by its slant. Costs drawing the
+# desktop under it once more each time the liquid is drawn.
+refraction = true
 
 # The liquids ready to pick in the liquids menu besides water and the ones made
 # there. With none here: oil, honey, milk, coffee, wine, syrup, brine, spirit,

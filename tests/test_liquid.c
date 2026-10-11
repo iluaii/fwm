@@ -857,6 +857,34 @@ static void test_layers(void) {
     liquid_destroy(l);
 }
 
+/* ── foam ────────────────────────────────────────────────────────────── */
+
+static int foamy(const FwmLiquid *l) {
+    int st, n = 0;
+    const float *f = liquid_foam_of(l, &st);
+    for (int i = 0; i < liquid_count(l); i++) n += f[i * st] > 0.3f;
+    return n;
+}
+
+static void test_foam(void) {
+    CASE("a still pool has no foam, a splash whips it up, and it fades");
+    FwmLiquid *l = make(1200, 700, 60, 30);
+    for (int k = 0; k < 4; k++) liquid_pour(l, 150 + k * 300, 500, 1500, 0, 0);
+    settle(l, 40);
+    CHECK_INT(foamy(l), 0);
+    liquid_pour(l, 600, 120, 2500, 0, 0);
+    int most = 0;
+    for (int f = 0; f < 90; f++) {
+        liquid_step(l, DT, 0, G);
+        int n = foamy(l);
+        if (n > most) most = n;
+    }
+    CHECK(most > 50);
+    run(l, 10.0, 0, G);
+    CHECK(foamy(l) < most / 5);
+    liquid_destroy(l);
+}
+
 /* ── threads ─────────────────────────────────────────────────────────── */
 
 static void test_threads(void) {
@@ -921,6 +949,7 @@ int main(void) {
         test_solids();
         test_bodies();
         test_layers();
+        test_foam();
     }
     return t_report("test_liquid");
 }

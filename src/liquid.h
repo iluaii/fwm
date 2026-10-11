@@ -232,6 +232,10 @@ double liquid_spacing(const FwmLiquid *l);
  * x to the next one's (x then y). Valid until the next call that changes the
  * liquid. */
 const float *liquid_positions(const FwmLiquid *l, int *stride);
+/* How much air each particle carries, 0..1 — the foam a splash or a breaking
+ * wave whips up, gone in a second or so; it changes nothing but the picture.
+ * `stride` floats from one to the next. */
+const float *liquid_foam_of(const FwmLiquid *l, int *stride);
 /* Which liquid each particle is, `stride` unsigneds from one to the next. */
 const unsigned *liquid_kinds_of(const FwmLiquid *l, int *stride);
 

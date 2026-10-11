@@ -167,6 +167,7 @@ static const ConfigOption config_option_table[] = {
     { "liquids.viscosity",              CFG_OPT_DOUBLE, offsetof(FwmConfig, liquids.viscosity),               0.0, 100000.0,   "px^2/s; hundreds is oil, thousands honey" },
     { "liquids.tension",                CFG_OPT_DOUBLE, offsetof(FwmConfig, liquids.tension),                 0.0,   500.0,    "px; how strongly its surface pulls" },
     { "liquids.color",                  CFG_OPT_COLOR,  offsetof(FwmConfig, liquids.color),                   0.0,     0.0,    "the liquid's colour; alpha is how see-through" },
+    { "liquids.refraction",             CFG_OPT_INT,    offsetof(FwmConfig, liquids.refraction),              0.0,     1.0,    "1 = what is behind the liquid shows through it, bent" },
     { "liquids.window_density",         CFG_OPT_DOUBLE, offsetof(FwmConfig, liquids.window_density),          0.01,   50.0,    "a normal window against water: under 1 floats" },
 
     /* `path` is absent for the same reason cava.bars is: a new sample means

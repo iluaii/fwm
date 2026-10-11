@@ -54,8 +54,8 @@ int liquid_paint_height(const FwmLiquidPaint *paint);
 /* Paint `count` particles — (x, y) pairs, px inside the box — `spacing` px
  * apart at rest, each of liquid kinds[i] (0 .. LIQUID_PAINT_KINDS - 1), in
  * that liquid's colour out of `palette` (premultiplied, as parse_hex_color
- * leaves it). Where liquids meet, the colour is as much of each as there is
- * of it.
+ * leaves it), white as foam[i] (0..1) says it is foam. Where liquids meet,
+ * the colour is as much of each as there is of it.
  *
  * Returns the buffer now holding the picture, owned by the paint and valid
  * until the next call, or NULL if nothing could be drawn. `damage` is the part
@@ -63,9 +63,16 @@ int liquid_paint_height(const FwmLiquidPaint *paint);
  * covered then and what it covers now. */
 #define LIQUID_PAINT_KINDS 8
 struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *paint, const float *xy,
-                                     const float *kinds, int count, double spacing,
+                                     const float *kinds, const float *foam,
+                                     int count, double spacing, bool bent,
                                      const float palette[LIQUID_PAINT_KINDS][4],
                                      struct wlr_box *damage);
+
+/* A buffer the size of the box for a picture of what stands behind the
+ * liquid, to be drawn into before liquid_paint_draw is told `bent`: the
+ * liquid then shows it through itself, bent at its surface. NULL if it
+ * cannot be had. */
+struct wlr_buffer *liquid_paint_behind(FwmLiquidPaint *paint);
 
 /* The last picture painted, or NULL. */
 struct wlr_buffer *liquid_paint_current(const FwmLiquidPaint *paint);

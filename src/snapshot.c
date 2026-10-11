@@ -232,46 +232,10 @@ bool snapshot_lens(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
     return ok;
 }
 
-bool snapshot_lens_view(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
-                        int lx, int ly, FwmView *view) {
-    if (!server->wlr_renderer || !dst || !view || !view->scene_tree) return false;
-
-    /* Furniture above layer_windows */
-    struct wlr_scene_tree *furniture[] = {
-        server->ls_top, server->ls_overlay, server->layer_overlay,
-        server->layer_lock,
-    };
-    bool furniture_was[sizeof(furniture) / sizeof(furniture[0])];
-    for (size_t i = 0; i < sizeof(furniture) / sizeof(furniture[0]); i++) {
-        furniture_was[i] = furniture[i] && furniture[i]->node.enabled;
-        if (furniture[i]) wlr_scene_node_set_enabled(&furniture[i]->node, false);
-    }
-
-    /* Disable view and all nodes stacked above view: in its own tree, and in
-     * every tree above it — a window in the back plane has the liquid and
-     * the two other planes in front of it. */
-    #define MAX_DISABLED_VIEW_NODES 128
-    struct wlr_scene_node *disabled[MAX_DISABLED_VIEW_NODES];
-    int disabled_count = 0;
-    bool found = false;
-    struct wlr_scene_node *node;
-    struct wlr_scene_tree *stack[] = {
-        server->layer_back, server->layer_liquid, server->layer_windows,
-        server->layer_front,
-    };
-    for (size_t t = 0; t < sizeof(stack) / sizeof(stack[0]); t++) {
-        if (!stack[t]) continue;
-        wl_list_for_each(node, &stack[t]->children, link) {
-            if (node == &view->scene_tree->node) found = true;
-            if (found && node->enabled) {
-                if (disabled_count < MAX_DISABLED_VIEW_NODES) {
-                    disabled[disabled_count++] = node;
-                    wlr_scene_node_set_enabled(node, false);
-                }
-            }
-        }
-    }
-
+/* The wallpaper and then every buffer the scene still shows, into `dst` at
+ * layout position (lx, ly): what the callers below have left enabled. */
+static bool render_what_shows(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
+                              int lx, int ly) {
     struct wlr_render_pass *pass =
         wlr_renderer_begin_buffer_pass(server->wlr_renderer, dst, NULL);
     bool ok = false;
@@ -314,6 +278,51 @@ bool snapshot_lens_view(FwmServer *server, FwmOutput *out, struct wlr_buffer *ds
 
         ok = wlr_render_pass_submit(pass);
     }
+
+    return ok;
+}
+
+bool snapshot_lens_view(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
+                        int lx, int ly, FwmView *view) {
+    if (!server->wlr_renderer || !dst || !view || !view->scene_tree) return false;
+
+    /* Furniture above layer_windows */
+    struct wlr_scene_tree *furniture[] = {
+        server->ls_top, server->ls_overlay, server->layer_overlay,
+        server->layer_lock,
+    };
+    bool furniture_was[sizeof(furniture) / sizeof(furniture[0])];
+    for (size_t i = 0; i < sizeof(furniture) / sizeof(furniture[0]); i++) {
+        furniture_was[i] = furniture[i] && furniture[i]->node.enabled;
+        if (furniture[i]) wlr_scene_node_set_enabled(&furniture[i]->node, false);
+    }
+
+    /* Disable view and all nodes stacked above view: in its own tree, and in
+     * every tree above it — a window in the back plane has the liquid and
+     * the two other planes in front of it. */
+    #define MAX_DISABLED_VIEW_NODES 128
+    struct wlr_scene_node *disabled[MAX_DISABLED_VIEW_NODES];
+    int disabled_count = 0;
+    bool found = false;
+    struct wlr_scene_node *node;
+    struct wlr_scene_tree *stack[] = {
+        server->layer_back, server->layer_liquid, server->layer_windows,
+        server->layer_front,
+    };
+    for (size_t t = 0; t < sizeof(stack) / sizeof(stack[0]); t++) {
+        if (!stack[t]) continue;
+        wl_list_for_each(node, &stack[t]->children, link) {
+            if (node == &view->scene_tree->node) found = true;
+            if (found && node->enabled) {
+                if (disabled_count < MAX_DISABLED_VIEW_NODES) {
+                    disabled[disabled_count++] = node;
+                    wlr_scene_node_set_enabled(node, false);
+                }
+            }
+        }
+    }
+
+    bool ok = render_what_shows(server, out, dst, lx, ly);
 
     for (int i = 0; i < disabled_count; i++)
         wlr_scene_node_set_enabled(disabled[i], true);
@@ -394,4 +403,22 @@ bool snapshot_world(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst) {
         if (furniture[i]) wlr_scene_node_set_enabled(&furniture[i]->node, was[i]);
 
     return wlr_render_pass_submit(pass);
+}
+
+bool snapshot_behind_liquid(FwmServer *server, FwmOutput *out, struct wlr_buffer *dst,
+                            int lx, int ly) {
+    if (!server->wlr_renderer || !dst) return false;
+    struct wlr_scene_tree *off[] = {
+        server->layer_liquid, server->layer_windows, server->layer_front,
+        server->ls_top, server->ls_overlay, server->layer_overlay, server->layer_lock,
+    };
+    bool was[sizeof(off) / sizeof(off[0])];
+    for (size_t i = 0; i < sizeof(off) / sizeof(off[0]); i++) {
+        was[i] = off[i] && off[i]->node.enabled;
+        if (off[i]) wlr_scene_node_set_enabled(&off[i]->node, false);
+    }
+    bool ok = render_what_shows(server, out, dst, lx, ly);
+    for (size_t i = 0; i < sizeof(off) / sizeof(off[0]); i++)
+        if (off[i]) wlr_scene_node_set_enabled(&off[i]->node, was[i]);
+    return ok;
 }

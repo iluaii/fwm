@@ -1462,6 +1462,9 @@ typedef struct {
      * mass, and its desktop's mass_density, scale it as they scale its
      * weight. */
     double window_density;
+    /* What is behind the liquid is seen through it, bent at its surface:
+     * the desktop under it is drawn once more each time the liquid is. */
+    int    refraction;
 } LiquidsConfig;
 
 /* The liquids ready to pick in the liquids menu beside water and the ones

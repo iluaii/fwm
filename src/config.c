@@ -1096,6 +1096,7 @@ static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
      * makes twice as heavy as normal hangs in the water as if it weighed
      * nothing — anything heavier sinks. */
     q->window_density = 0.5;
+    q->refraction = 1;
 
     if (!root) return;
     toml_table_t *tbl = toml_table_in(root, "liquids");
@@ -1109,6 +1110,8 @@ static void load_liquids(toml_table_t *root, FwmConfig *cfg) {
     LOAD_DOUBLE(tbl, "viscosity", q->viscosity);
     LOAD_DOUBLE(tbl, "tension",   q->tension);
     LOAD_DOUBLE(tbl, "window_density", q->window_density);
+    toml_datum_t rf = toml_bool_in(tbl, "refraction");
+    if (rf.ok) q->refraction = rf.u.b ? 1 : 0;
     toml_datum_t th = toml_int_in(tbl, "threads");
     if (th.ok) q->threads = (int)th.u.i;
 

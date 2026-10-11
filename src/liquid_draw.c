@@ -55,6 +55,14 @@
  * drop rather than dropping it. */
 #define SURFACE_LEVEL 0.22f
 
+/* The nearer ring the shader looks round a point on for how deep in it is,
+ * px; the farther is DEPTH_FAR_TIMES (in the shader) as far. */
+#define DEPTH_NEAR 14.0f
+
+/* How far, px, what is behind the liquid is pushed aside where it is seen
+ * through the slant of its surface. */
+#define BEND_PX 9.0f
+
 /* How far in from the edge the light rim reaches, in the same units. */
 #define RIM_DEPTH 0.18f
 
@@ -64,16 +72,19 @@
 static const char splat_vert_src[] =
     "attribute vec2 a_pos;\n"
     "attribute float a_kind;\n"
+    "attribute float a_foam;\n"
     "uniform vec2 u_scale;\n"
     "uniform float u_size;\n"
     "uniform vec4 u_mirror;\n"
     "uniform vec4 u_palette[8];\n"
     "varying vec4 v_col;\n"
+    "varying float v_foam;\n"
     "void main() {\n"
     "    vec2 p = a_pos * u_mirror.xz + u_mirror.yw;\n"
     "    gl_Position = vec4(p * u_scale - 1.0, 0.0, 1.0);\n"
     "    gl_PointSize = u_size;\n"
     "    v_col = u_palette[int(a_kind + 0.5)];\n"
+    "    v_foam = a_foam;\n"
     "}\n";
 
 /* A smooth bump that is exactly zero at its rim, so adjacent splats join
@@ -81,14 +92,16 @@ static const char splat_vert_src[] =
 static const char splat_frag_src[] =
     "precision mediump float;\n"
     "uniform float u_gain;\n"
-    "uniform float u_alpha;\n"   /* 0: colour and amount; 1: how opaque */
+    "uniform float u_alpha;\n"   /* 0: colour and amount; 1: how opaque, and foam */
     "varying vec4 v_col;\n"
+    "varying float v_foam;\n"
     "void main() {\n"
     "    vec2 d = gl_PointCoord * 2.0 - 1.0;\n"
     "    float k = 1.0 - dot(d, d);\n"
     "    if (k <= 0.0) discard;\n"
     "    float w = k * k * k * u_gain;\n"
-    "    gl_FragColor = u_alpha > 0.5 ? vec4(v_col.a * w) : vec4(v_col.rgb * w, w);\n"
+    "    gl_FragColor = u_alpha > 0.5 ? vec4(v_col.a * w, v_foam * w, 0.0, 0.0)\n"
+    "                                 : vec4(v_col.rgb * w, w);\n"
     "}\n";
 
 static const char shade_vert_src[] =
@@ -102,35 +115,95 @@ static const char shade_vert_src[] =
 /* Cut the field at the surface. The edge is softened over a band as wide as
  * the field changes across a pixel, which is what keeps it from stair-
  * stepping; the body is the colour of the liquids there, as much of each as
- * there is of it, and a band just inside the edge is lifted toward white —
- * the bright line where a surface turns away from you, which is most of what
- * makes a flat fill read as a liquid. How opaque is the same mix, read off a
- * field of its own when the liquids are not all equally so, and otherwise
- * u_opaque. */
+ * there is of it.
+ *
+ * Then what makes a fill read as a liquid. Light goes into it and is taken
+ * up on the way (Beer and Lambert): where it is shallow, just under the
+ * surface, it is thin and see-through, and the deeper the point the more of
+ * the liquid it is seen through, darker and more solid — how deep is how
+ * much of two rings around the point, DEPTH_NEAR px out and DEPTH_FAR_TIMES
+ * as far, is liquid: half at the surface, all of it a ring's width in.
+ * Looked for straight up instead, it drew a seam down from every cliff of a
+ * wave. A
+ * band just inside the edge is lifted toward white, and lit hardest where
+ * the surface faces up and to the left, where the light comes from (the
+ * field's slope is the surface's normal). And foam, where the liquid has air
+ * torn into it, is white and opaque. How opaque the liquid is and how much
+ * foam there is are a second field, read when u_two says it is there;
+ * otherwise u_opaque says how opaque and there is no foam.
+ *
+ * Every floor under a division is one mediump holds: inside the body the
+ * field is flat, its slope exactly nothing, and a floor too small for a half
+ * float is nothing as well — 0 / 0 there drew a black pixel here and there
+ * all through the liquid.
+ *
+ * And what is behind it, bent: given a picture of it (u_bent), the liquid
+ * shows it through itself, pushed along the surface's slope near the
+ * surface — where light crosses a surface at a slant — and straight on in
+ * the depth, where it does not. */
 static const char shade_frag_src[] =
     "precision mediump float;\n"
+    "#define DEPTH_FAR_TIMES 2.6\n"
     "varying vec2 v_uv;\n"
     "uniform sampler2D u_field;\n"
-    "uniform sampler2D u_opacity;\n"
-    "uniform float u_opaque;\n"   /* < 0: read u_opacity */
+    "uniform sampler2D u_second;\n"
+    "uniform float u_opaque;\n"
+    "uniform float u_two;\n"
     "uniform float u_level;\n"
     "uniform float u_soft;\n"
     "uniform float u_rim;\n"
+    "uniform vec2 u_step;\n"     /* uv of one field texel, across and down */
+    "uniform vec2 u_ring;\n"     /* uv of DEPTH_NEAR px, across and down */
+    "uniform sampler2D u_behind;\n"
+    "uniform float u_bent;\n"    /* 1: u_behind holds what is behind, to bend */
+    "uniform vec2 u_bend;\n"     /* uv of BEND_PX, across and down */
+    "float inside(vec2 uv) {\n"
+    "    return smoothstep(u_level - u_soft, u_level + u_soft, texture2D(u_field, uv).a);\n"
+    "}\n"
     "void main() {\n"
     "    vec4 fc = texture2D(u_field, v_uv);\n"
     "    float f = fc.a;\n"
     "    float a = smoothstep(u_level - u_soft, u_level + u_soft, f);\n"
     "    if (a <= 0.0) { gl_FragColor = vec4(0.0); return; }\n"
     "    vec3 body = fc.rgb / max(f, 1e-4);\n"
-    "    float op = u_opaque >= 0.0 ? u_opaque\n"
-    "             : clamp(texture2D(u_opacity, v_uv).r / max(f, 1e-4), 0.0, 1.0);\n"
+    "    float op = u_opaque, foam = 0.0;\n"
+    "    if (u_two > 0.5) {\n"
+    "        vec2 sec = texture2D(u_second, v_uv).rg / max(f, 1e-4);\n"
+    "        op = clamp(sec.r, 0.0, 1.0);\n"
+    "        foam = clamp(sec.g, 0.0, 1.0);\n"
+    "    }\n"
+    "    float m = 0.0;\n"
+    "    for (int i = 0; i < 6; i++) {\n"
+    "        float t = float(i) * 1.0472;\n"
+    "        m += inside(v_uv + vec2(cos(t), sin(t)) * u_ring)\n"
+    "           + inside(v_uv + vec2(cos(t + 0.5236), sin(t + 0.5236)) * u_ring * DEPTH_FAR_TIMES);\n"
+    "    }\n"
+    "    float depth = clamp((m / 12.0 - 0.5) * 2.0, 0.0, 1.0);\n"
     "    float inner = smoothstep(u_level, u_level + u_rim, f);\n"
-    "    vec3 c = mix(mix(body, vec3(1.0), 0.45), body, inner);\n"
-    "    float alpha = a * mix(min(op + 0.25, 1.0), op, inner);\n"
+    "    vec2 g = vec2(texture2D(u_field, v_uv + vec2(u_step.x, 0.0)).a\n"
+    "                - texture2D(u_field, v_uv - vec2(u_step.x, 0.0)).a,\n"
+    "                  texture2D(u_field, v_uv + vec2(0.0, u_step.y)).a\n"
+    "                - texture2D(u_field, v_uv - vec2(0.0, u_step.y)).a);\n"
+    "    vec2 n = -g / max(length(g), 1e-3);\n"
+    "    float lit = pow(max(dot(n, normalize(vec2(-0.45, -1.0))), 0.0), 6.0) * (1.0 - inner);\n"
+    "    vec3 c = mix(body, body * 0.6, depth);\n"
+    "    c = mix(mix(c, vec3(1.0), 0.45), c, inner);\n"
+    "    c = mix(c, vec3(1.0), 0.5 * lit);\n"
+    "    float o = mix(op * 0.5, min(op + 0.15, 1.0), depth);\n"
+    "    float alpha = a * mix(min(op + 0.25, 1.0), o, inner);\n"
+    "    float froth = smoothstep(0.04, 0.4, foam);\n"
+    "    c = mix(c, vec3(0.97), 0.9 * froth);\n"
+    "    alpha = max(alpha, a * 0.92 * froth);\n"
+    "    if (u_bent > 0.5) {\n"
+    "        vec3 seen = texture2D(u_behind, v_uv + n * u_bend * (1.0 - depth)).rgb;\n"
+    "        float own = alpha / a;\n"
+    "        gl_FragColor = vec4(mix(seen, c, own) * a, a);\n"
+    "        return;\n"
+    "    }\n"
     "    gl_FragColor = vec4(c * alpha, alpha);\n"
     "}\n";
 
-#define UNIFORMS 8
+#define UNIFORMS 12
 
 struct program {
     GLuint id;
@@ -156,6 +229,9 @@ struct FwmLiquidPaint {
      * share the box. */
     struct wlr_buffer *opacity;
     struct wlr_texture *opacity_tex;
+    /* What is behind the liquid, for it to bend: made when asked for. */
+    struct wlr_buffer *behind;
+    struct wlr_texture *behind_tex;
     struct wlr_buffer *out[2];
     int next;              /* which of `out` the next picture goes into */
     struct wlr_buffer *current;
@@ -197,6 +273,7 @@ static bool link(struct program *p, const char *vsrc, const char *fsrc,
     glAttachShader(id, fs);
     glBindAttribLocation(id, 0, "a_pos");
     glBindAttribLocation(id, 1, "a_kind");
+    glBindAttribLocation(id, 2, "a_foam");
     glLinkProgram(id);
     glDetachShader(id, vs);
     glDetachShader(id, fs);
@@ -229,9 +306,11 @@ static bool programs_ready(struct wlr_renderer *renderer) {
     gl.tried = true;
 
     static const char *const splat_u[UNIFORMS] = {
-        "u_scale", "u_size", "u_gain", "u_mirror", "u_palette", "u_alpha", NULL, NULL };
+        "u_scale", "u_size", "u_gain", "u_mirror", "u_palette", "u_alpha",
+        NULL, NULL, NULL, NULL, NULL, NULL };
     static const char *const shade_u[UNIFORMS] = {
-        "u_field", "u_opacity", "u_opaque", "u_level", "u_soft", "u_rim", NULL, NULL };
+        "u_field", "u_second", "u_opaque", "u_level", "u_soft", "u_rim", "u_two", "u_step",
+        "u_ring", "u_behind", "u_bent", "u_bend" };
     if (!link(&gl.splat, splat_vert_src, splat_frag_src, splat_u)) return false;
     if (!link(&gl.shade, shade_vert_src, shade_frag_src, shade_u)) return false;
 
@@ -308,6 +387,8 @@ void liquid_paint_destroy(FwmLiquidPaint *p) {
     if (p->field) wlr_buffer_drop(p->field);
     if (p->opacity_tex) wlr_texture_destroy(p->opacity_tex);
     if (p->opacity) wlr_buffer_drop(p->opacity);
+    if (p->behind_tex) wlr_texture_destroy(p->behind_tex);
+    if (p->behind) wlr_buffer_drop(p->behind);
     for (int i = 0; i < 2; i++)
         if (p->out[i]) wlr_buffer_drop(p->out[i]);
     free(p);
@@ -316,6 +397,12 @@ void liquid_paint_destroy(FwmLiquidPaint *p) {
 int liquid_paint_width(const FwmLiquidPaint *p) { return p ? p->w : 0; }
 int liquid_paint_height(const FwmLiquidPaint *p) { return p ? p->h : 0; }
 struct wlr_buffer *liquid_paint_current(const FwmLiquidPaint *p) { return p ? p->current : NULL; }
+
+struct wlr_buffer *liquid_paint_behind(FwmLiquidPaint *p) {
+    if (!p) return NULL;
+    if (!p->behind) p->behind = snapshot_alloc(p->server, p->w, p->h);
+    return p->behind;
+}
 
 void liquid_paint_finish(void) {
     gl.splat.id = gl.shade.id = 0;
@@ -335,8 +422,9 @@ static void box_union(struct wlr_box *a, const struct wlr_box *b) {
 
 /* The splats of every particle, into the framebuffer bound: nine times, the
  * last eight reflected in the walls (see below). */
-static void splat_all(FwmLiquidPaint *p, const float *xy, const float *kinds, int count,
-                      double reach, double spacing, float alpha_pass) {
+static void splat_all(FwmLiquidPaint *p, const float *xy, const float *kinds,
+                      const float *foam, int count, double reach, double spacing,
+                      float alpha_pass) {
     double r_field = reach * FIELD_SCALE;
     float size = (float)(2.0 * r_field);
     if (size > gl.max_point) size = gl.max_point;
@@ -352,6 +440,8 @@ static void splat_all(FwmLiquidPaint *p, const float *xy, const float *kinds, in
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 0, kinds);
     glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 0, foam);
+    glEnableVertexAttribArray(2);
     /* Nine times: where it is, and reflected in each wall and in each
      * corner. Liquid against a wall is liquid right up to it, but a splat
      * there has half its reach in the wall where no particle can be, so the
@@ -370,12 +460,13 @@ static void splat_all(FwmLiquidPaint *p, const float *xy, const float *kinds, in
         glUniform4fv(gl.splat.u[3], 1, mirror);
         glDrawArrays(GL_POINTS, 0, count);
     }
+    glDisableVertexAttribArray(2);
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(0);
 }
 
 struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, const float *kinds,
-                                     int count, double spacing,
+                                     const float *foam, int count, double spacing, bool bent,
                                      const float palette[LIQUID_PAINT_KINDS][4],
                                      struct wlr_box *damage) {
     if (!p || !palette || spacing <= 0.0) return NULL;
@@ -419,8 +510,8 @@ struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, const f
     if (!programs_ready(renderer)) goto out;
 
     /* The palette straight, as the shaders mix it; and whether the liquids
-     * in it are all as opaque as each other, in which case one number says
-     * how opaque and the second field is not drawn. */
+     * in it are all as opaque as each other and none of it is foam, in which
+     * case one number says how opaque and the second field is not drawn. */
     float straight[LIQUID_PAINT_KINDS][4];
     bool one_opacity = true;
     for (int k = 0; k < LIQUID_PAINT_KINDS; k++) {
@@ -437,6 +528,8 @@ struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, const f
             if (opaque < 0.0f) opaque = straight[k][3];
             else if (fabsf(straight[k][3] - opaque) > 1e-3f) one_opacity = false;
         }
+        for (int i = 0; i < count && one_opacity; i++)
+            if (foam[i] > 0.02f) one_opacity = false;
     }
     if (!one_opacity && !p->opacity) {
         p->opacity = snapshot_alloc(p->server, p->fw, p->fh);
@@ -467,11 +560,11 @@ struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, const f
         glBlendFunc(GL_ONE, GL_ONE);
         glUseProgram(gl.splat.id);
         glUniform4fv(gl.splat.u[4], LIQUID_PAINT_KINDS, &straight[0][0]);
-        splat_all(p, xy, kinds, count, reach, spacing, 0.0f);
+        splat_all(p, xy, kinds, foam, count, reach, spacing, 0.0f);
         if (!one_opacity) {
             glBindFramebuffer(GL_FRAMEBUFFER, opacity_fbo);
             glClear(GL_COLOR_BUFFER_BIT);
-            splat_all(p, xy, kinds, count, reach, spacing, 1.0f);
+            splat_all(p, xy, kinds, foam, count, reach, spacing, 1.0f);
         }
         glDisable(GL_BLEND);
     }
@@ -501,7 +594,32 @@ struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, const f
             glActiveTexture(GL_TEXTURE0);
         }
         glUniform1i(gl.shade.u[1], 1);
-        glUniform1f(gl.shade.u[2], one_opacity ? (opaque < 0.0f ? 1.0f : opaque) : -1.0f);
+        glUniform1f(gl.shade.u[2], opaque < 0.0f ? 1.0f : opaque);
+        glUniform1f(gl.shade.u[6], one_opacity ? 0.0f : 1.0f);
+        glUniform2f(gl.shade.u[7], 1.0f / (float)p->fw, 1.0f / (float)p->fh);
+        glUniform2f(gl.shade.u[8], DEPTH_NEAR / (float)p->w, DEPTH_NEAR / (float)p->h);
+        /* The picture of what is behind: its buffer is drawn into anew
+         * before each picture, and the texture over it, made once, reads
+         * whatever is in it — the field's arrangement. */
+        bool have_behind = false;
+        if (bent && p->behind) {
+            if (!p->behind_tex) p->behind_tex = wlr_texture_from_buffer(renderer, p->behind);
+            if (p->behind_tex) {
+                struct wlr_gles2_texture_attribs bt = {0};
+                wlr_gles2_texture_get_attribs(p->behind_tex, &bt);
+                glActiveTexture(GL_TEXTURE2);
+                glBindTexture(GL_TEXTURE_2D, bt.tex);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glActiveTexture(GL_TEXTURE0);
+                have_behind = true;
+            }
+        }
+        glUniform1i(gl.shade.u[9], 2);
+        glUniform1f(gl.shade.u[10], have_behind ? 1.0f : 0.0f);
+        glUniform2f(gl.shade.u[11], BEND_PX / (float)p->w, BEND_PX / (float)p->h);
         float level = SURFACE_LEVEL * FIELD_INSIDE;
         glUniform1f(gl.shade.u[3], level);
         /* At a flat surface the field falls from about half the inside to
@@ -517,6 +635,11 @@ struct wlr_buffer *liquid_paint_draw(FwmLiquidPaint *p, const float *xy, const f
         glBindTexture(GL_TEXTURE_2D, 0);
         if (!one_opacity) {
             glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glActiveTexture(GL_TEXTURE0);
+        }
+        if (have_behind) {
+            glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, 0);
             glActiveTexture(GL_TEXTURE0);
         }

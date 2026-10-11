@@ -1317,6 +1317,7 @@ tension   = 30.0      # px: drops under this stay round; 0 is no surface
 color     = "#3a8be0cc"
 threads   = 0         # a step split across this many; 0 = one per core
 window_density = 0.5  # a normal window against water: under 1 it floats
+refraction = true     # what is behind shows through it, bent at its surface
 ```
 
 It is laws and nothing else: inertia, gravity, an incompressible pressure,
@@ -1329,7 +1330,15 @@ feels — the `[physics.<name>]` profile and the switch.
 
 Particles are how it is computed; on screen it is one body, cut from a smooth
 field the particles are blurred into, so close particles melt together and a
-lone one is a drop.
+lone one is a drop. It is thin and clear just under its surface and deeper,
+darker and more solid further in, with a bright edge lit from above and to
+the left. Where it is torn apart fast — a splash landing, a wave breaking, a
+sheet thrown off a window — it takes air in and comes up white, and the foam
+fades over a second or so; it is only a picture and moves nothing. With
+`refraction` on, what stands behind it — the wallpaper and the windows in the
+back plane — shows through the thin water at its surface, pushed aside by its
+slant; that draws the desktop under it once more every time the liquid is
+drawn.
 
 Up to eight liquids share a desktop, each particle staying the liquid it was
 poured as. Nothing tells them to lie in layers: the pressure is solved with
@@ -1403,8 +1412,8 @@ A desktop holds no more than its own area of liquid, whatever `particles` says:
 it cannot be squeezed, so a full desktop refuses more, and a monitor swapped
 for a smaller one spills what no longer fits over the top.
 
-Live: `viscosity`, `tension`, `color`, `particles`, `threads`, `window_density`
-and `enabled` are all `fwmctl set liquids.*`; switching it off empties it. Picking up a bucket switches
+Live: `viscosity`, `tension`, `color`, `particles`, `threads`, `window_density`,
+`refraction` and `enabled` are all `fwmctl set liquids.*`; switching it off empties it. Picking up a bucket switches
 it on for the session. A bucket pours a fifth of `particles` a second. `spacing` is reload-only,
 because particles of one size do not become particles of another, and a new one
 empties the liquid. `FWM_DEBUG_LIQUID=1` logs what a step costs, once a second.
