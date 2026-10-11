@@ -392,7 +392,7 @@ have to be reachable some other way. `dev.sh` wraps most of them in flags.
 ## Tests
 
 ```sh
-cmake -S . -B build-test -DFWM_TESTS=ON -DCMAKE_C_FLAGS=-O2
+cmake -S . -B build-test -DFWM_TESTS=ON
 cmake --build build-test
 ctest --test-dir build-test --output-on-failure
 ```

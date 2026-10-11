@@ -17,6 +17,20 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 project(fwm VERSION ${FWM_VERSION} LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
+
+# A build that names no type gets an optimised one. CMake's own default is no
+# flags at all, -O0, and the liquid is too heavy to run that way: in the
+# compositor it costs frames, in the tests twelve minutes. The tests get -O2
+# by hand instead of Release, which would define NDEBUG and take out the
+# asserts in physics.c and toml.c they lean on. Debug and sanitizer builds name
+# their type and are left alone.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    if(FWM_TESTS)
+        add_compile_options(-O2)
+    else()
+        set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    endif()
+endif()
 add_compile_definitions(FWM_VERSION="${FWM_VERSION}")
 
 # A compositor cannot report its own memory corruption: it IS the display
