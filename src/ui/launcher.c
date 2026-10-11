@@ -200,9 +200,14 @@ static void scan_desktop_file(Launcher *l, const LsLocale *loc, const char *path
             kw_prec = prec;
             snprintf(keywords, sizeof(keywords), "%s", v);
         } else if (!app.exec[0] && strncmp(line, "Exec=", 5) == 0) {
-            snprintf(app.exec, sizeof(app.exec), "%s", line + 5);
+            /* A command too long to keep whole is not listed: the cut-off
+             * half would run as something else. */
+            if (strlen(line + 5) >= sizeof(app.exec)) hidden = 1;
+            else snprintf(app.exec, sizeof(app.exec), "%.*s", (int)sizeof(app.exec) - 1, line + 5);
         } else if (!app.icon[0] && strncmp(line, "Icon=", 5) == 0) {
-            snprintf(app.icon, sizeof(app.icon), "%s", line + 5);
+            /* Same for the icon: half a path finds no file, or the wrong one. */
+            if (strlen(line + 5) < sizeof(app.icon))
+                snprintf(app.icon, sizeof(app.icon), "%.*s", (int)sizeof(app.icon) - 1, line + 5);
         } else if (strncmp(line, "Terminal=", 9) == 0) {
             app.terminal = strcmp(line + 9, "true") == 0;
         } else if (strncmp(line, "NoDisplay=", 10) == 0) {
