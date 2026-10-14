@@ -331,10 +331,12 @@ static void load_physics(toml_table_t *root, FwmConfig *cfg) {
  *   default = ["physics", "tiling"]    desktop by desktop
  *
  * The array names desktops from the first one up and stops where it stops: a
- * desktop it does not reach keeps the built-in answer, physics. That is the
- * predictable reading of a short list, and it is the one that lets `["physics"]`
- * mean what it looks like it means rather than quietly re-tiling the other
- * nine. */
+ * desktop it does not reach keeps the built-in answer, tiling. That is the
+ * predictable reading of a short list — `["physics"]` makes the first desktop
+ * the physics one and leaves the other nine as they would have been.
+ *
+ * The built-in answer is tiling rather than physics so that a first start, with
+ * no config at all, is a desktop to work on; physics is a Super+T away. */
 static int mode_from_name(const char *s, int *out) {
     if      (strcmp(s, "physics")  == 0) *out = 0;
     else if (strcmp(s, "tiling")   == 0) *out = 1;
@@ -381,7 +383,7 @@ static void load_tiling(toml_table_t *root, TilingConfig *t, FwmConfig *cfg) {
     t->anim_speed = 12.0; /* ~250 ms glide */
     t->pickup     = 0.28; /* big enough to still be the window you picked up */
     t->spawn_cursor = 1;
-    for (int d = 0; d < FWM_DESKTOPS; d++) t->default_mode[d] = 0;  /* physics */
+    for (int d = 0; d < FWM_DESKTOPS; d++) t->default_mode[d] = 1;  /* tiling */
     t->remember     = 0;
     t->split_ratio  = 0.5;
     t->force_split  = -1;   /* the longer side of the slot */

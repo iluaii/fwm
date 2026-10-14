@@ -80,11 +80,11 @@ you want to change something.
 | Do this | To see |
 |---|---|
 | `Super+Return` | a terminal (whatever `$TERMINAL` says, else the first one installed) |
-| Drag a window with `Super` held, and let go while moving | it flies, hits a wall, bounces, glides to a stop |
-| `Super+G` | gravity: zero-g → a lick of it → earth. Windows fall and stack |
 | `Super+L`, `Super+H` | pan across the strip of desktops |
 | `Super+A` | the desktop strip; then `z` for the wider view, drag windows between cards |
-| `Super+T` | tiling on this desktop. `Super+T` again and the same windows are physical objects |
+| `Super+T` | this desktop leaves tiling, and the same windows are physical objects. `Super+T` again tiles them back |
+| On a physics desktop, drag a window with `Super` held, and let go while moving | it flies, hits a wall, bounces, glides to a stop |
+| `Super+G` | gravity: zero-g → a lick of it → earth. Windows fall and stack |
 | `Super+Space` | the launcher |
 | `Super+Shift+?` | the key hints |
 | Click the pill left of the clock | the modes menu: layout, gravity, mass, sound, visualiser, ring |

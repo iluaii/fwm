@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Desktops start tiled
+
+With nothing said in `[tiling] default`, the ten desktops now come up tiled
+rather than under physics, so a first start — including one with no config at
+all — is a desktop to work on. `Super+T` takes any desktop into physics as
+before. A short `default` array now leaves the desktops it does not reach
+tiled, too. To have the old start back, write `default = false`.
+
 ### A time view in the desktop strip
 
 The strip has a **time** button in its bottom-left corner, and `t` does the

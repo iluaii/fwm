@@ -353,15 +353,14 @@ color          = "#000000"
 # desktop, or in the gaps between windows, the focused window answers either
 # way.
 #
-# default says what the ten desktops come up as, instead of starting them all
-# under physics and reaching for super+t on each in turn. Three spellings, all
-# meaning the same array:
+# default says what the ten desktops come up as. Left out, every desktop starts
+# tiled. Three spellings, all meaning the same array:
 #
-#   default = true                       every desktop tiled
+#   default = false                      every desktop under physics
 #   default = "floating"                 every desktop in that mode
 #   default = ["physics", "tiling"]      desktop by desktop, from the first up;
 #                                        a desktop the list does not reach stays
-#                                        physics
+#                                        tiled
 #
 # It is a STARTING mode and not a lock: toggle_tiling still takes a desktop out
 # of the layout, and a config reload leaves it out — only the next start reads
@@ -389,7 +388,7 @@ gaps_out   = 14
 anim_speed = 12.0
 pickup     = 0.28
 spawn_cursor = true
-#default     = true
+#default     = ["tiling", "tiling", "tiling", "tiling", "tiling", "tiling", "tiling", "tiling", "tiling", "physics"]
 #remember    = true
 #split_ratio = 0.5
 #force_split = "auto"

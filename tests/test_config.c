@@ -1625,10 +1625,10 @@ static void test_tiling_defaults(void) {
     CASE("[tiling] default: bool, string and per-desktop array");
     FwmConfig cfg;
 
-    /* Nothing said: physics everywhere, and the split is the even one. */
+    /* Nothing said: tiling everywhere, and the split is the even one. */
     const char *p = write_config("[tiling]\ngaps_in = 4\n");
     config_load(&cfg, p);
-    for (int d = 0; d < FWM_DESKTOPS; d++) CHECK_INT(cfg.tiling.default_mode[d], 0);
+    for (int d = 0; d < FWM_DESKTOPS; d++) CHECK_INT(cfg.tiling.default_mode[d], 1);
     CHECK_INT(cfg.tiling.remember, 0);
     CHECK_INT(cfg.tiling.smart_gaps, 0);
     CHECK_INT(cfg.tiling.force_split, -1);
@@ -1653,18 +1653,18 @@ static void test_tiling_defaults(void) {
     CHECK_INT(cfg.tiling.default_mode[0], 0);
     CHECK_INT(cfg.tiling.default_mode[1], 1);
     CHECK_INT(cfg.tiling.default_mode[2], 2);
-    /* Past the end of the list: untouched, not re-tiled. */
-    for (int d = 3; d < FWM_DESKTOPS; d++) CHECK_INT(cfg.tiling.default_mode[d], 0);
+    /* Past the end of the list: untouched, still the built-in tiling. */
+    for (int d = 3; d < FWM_DESKTOPS; d++) CHECK_INT(cfg.tiling.default_mode[d], 1);
     config_free(&cfg);
     drop_config();
 
     /* A misspelt mode is reported and the desktop keeps the built-in answer;
      * the entries either side of it still land. */
-    p = write_config("[tiling]\ndefault = [\"tiling\", \"tilling\", \"tiling\"]\n");
+    p = write_config("[tiling]\ndefault = [\"physics\", \"phisics\", \"physics\"]\n");
     config_load(&cfg, p);
-    CHECK_INT(cfg.tiling.default_mode[0], 1);
-    CHECK_INT(cfg.tiling.default_mode[1], 0);
-    CHECK_INT(cfg.tiling.default_mode[2], 1);
+    CHECK_INT(cfg.tiling.default_mode[0], 0);
+    CHECK_INT(cfg.tiling.default_mode[1], 1);
+    CHECK_INT(cfg.tiling.default_mode[2], 0);
     CHECK(cfg.error_count > 0);
     config_free(&cfg);
     drop_config();

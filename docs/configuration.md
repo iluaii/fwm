@@ -285,7 +285,7 @@ default = ["physics", "tiling"]   # desktop by desktop, from the first up
 ```
 
 The array names desktops from the first one up and stops where it stops; a
-desktop it does not reach stays in physics. It says where a desktop *starts*,
+desktop it does not reach stays tiled. It says where a desktop *starts*,
 not where it stays: `toggle_tiling` moves one out of the layout as always, and a
 reload does not pull it back in — the line is read once, at start.
 
