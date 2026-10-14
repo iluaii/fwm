@@ -14,13 +14,13 @@
 
 # fwm — a Wayland compositor
 
-The name is *physics window manager*, with the `ph` spelled the short way. It has outgrown the second half of that — fwm is a compositor now, and not only a physics one — and kept the first.
+A compositor you do not have to assemble. fwm is written in C (wlroots) and has its own shell built in: the launcher, screenshots, the wallpaper picker, the sound panel, the spectrum visualiser, the keybind cheat-sheet and session restore are part of it, so there is no `rofi`, `grim`, `slurp` or `cava` to install alongside — each with its own config language and its own idea of how things should look. All of it is one TOML file. `fwmctl` reads the state, changes any setting live without touching that file, and streams events a script can react to — and where a keybind belongs to an external shell rather than to fwm, it can have it. Multiple monitors, layer-shell and session lock work the way you already expect, and so does XWayland.
 
-A compositor written in C (wlroots) with its own built-in shell, ten desktops laid out on one continuous strip, and windows that are physical objects — **mass, momentum, inertia and velocity**, simulated by a real rigid-body engine ([Box2D](https://box2d.org/) v3). Drag a window and throw it: it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
+I built it because I was tired of gluing a desktop together from ten tools in ten config languages, and of living with the choices of whoever wrote the dotfiles. fwm is my daily driver for everyday work, gaming, and developing fwm itself from inside fwm — because the fastest way to make a compositor stable is to have to rely on it.
 
-Physics is the first thing you see, not the whole of it. The strip is scrolled across rather than switched between, and each desktop on it chooses for itself whether it is a physics desktop, a BSP tiling one, or plain floating. The launcher, the desktop strip, screenshots, the wallpaper picker, the sound panel and the spectrum visualiser are built in, so there is no `rofi`, `grim`, `slurp` or `cava` to install alongside. Multiple monitors, layer-shell and session lock work the way you already expect, and so does XWayland. `fwmctl` reads the state, changes any setting live without touching your config file, and streams events a script can react to — and where a keybind belongs to an external shell rather than to fwm, it can have it.
+Ten desktops sit on one continuous strip that is scrolled across rather than switched between, and each desktop chooses for itself whether it is BSP tiling, plain floating, or physics — where windows are physical objects with **mass, momentum, inertia and velocity**, simulated by a real rigid-body engine ([Box2D](https://box2d.org/) v3). Drag a window and throw it: it slides, bounces off walls, stacks under gravity, and comes to rest like a real object.
 
-It looks like a playground, but it is built to be lived in. fwm is my daily driver for everyday work, gaming, and developing fwm itself from inside fwm — because the fastest way to make a compositor stable is to have to rely on it.
+The name is *physics window manager*, with the `ph` spelled the short way. fwm started as a physics experiment and has outgrown it — physics is now one of the three things a desktop can be — but kept the name.
 
 This is the primary, actively developed version. The legacy X11 version lives on the [`x11`](https://github.com/iluaii/fwm/tree/x11) branch and is no longer supported.
 
@@ -50,25 +50,9 @@ Eight clips of about fifteen seconds each, one per idea. They play here on GitHu
 <tr>
 <td width="50%">
 
-https://github.com/user-attachments/assets/1b9550eb-0b91-417c-811c-852cc5f01381
-
-**[Physics, gravity and free rotation](assets/demo/physics-gravity-rotate.mp4)** — windows thrown, stacked under gravity, and one handed to the simulation with `Super+R` so it tumbles off the walls corner-first.
-
-</td>
-<td width="50%">
-
 https://github.com/user-attachments/assets/e7921713-8b8e-4d47-baed-73d5c3c0f891
 
 **[Tiling](assets/demo/tiling.mp4)** — the BSP layout, splits, and windows springing into place, then a tile carried out of it: it rounds off into a drop on the way out and spreads back to the edges of a slot when it is put down. Tiling here is a property of the desktop, so the same windows go back to being physical objects when it is switched off.
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-https://github.com/user-attachments/assets/0e50334e-264a-4588-b52c-8fe880958ee5
-
-**[The desktop strip in 3D](assets/demo/3d-mode.mp4)** — `expo`, then `z` for the wider view: the desktops become cards on a ring you can fly around, click into, and drag windows between.
 
 </td>
 <td width="50%">
@@ -92,6 +76,22 @@ https://github.com/user-attachments/assets/7480adff-5140-47df-93c5-f48452a3690f
 https://github.com/user-attachments/assets/110f6607-13c5-41a7-aaf3-b653759b326c
 
 **[Status strip, desktops and modes](assets/demo/tray-desktops-modes.mp4)** — the strip each monitor gets, the desktop dots, and the two menus behind it: the stats pill, where each readout is switched on or off, and the modes menu, where tiling, floating, gravity, sound, the visualiser, the grass and the rest are toggled from one place.
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+https://github.com/user-attachments/assets/0e50334e-264a-4588-b52c-8fe880958ee5
+
+**[The desktop strip in 3D](assets/demo/3d-mode.mp4)** — `expo`, then `z` for the wider view: the desktops become cards on a ring you can fly around, click into, and drag windows between.
+
+</td>
+<td width="50%">
+
+https://github.com/user-attachments/assets/1b9550eb-0b91-417c-811c-852cc5f01381
+
+**[Physics, gravity and free rotation](assets/demo/physics-gravity-rotate.mp4)** — windows thrown, stacked under gravity, and one handed to the simulation with `Super+R` so it tumbles off the walls corner-first.
 
 </td>
 </tr>
@@ -191,7 +191,7 @@ which is why a thrown window crosses one under its own momentum, and why what
 it finds on the other side can be a different gravity.
 
 - **10 virtual desktops** on one continuous strip — the world is 10 screens wide, windows keep absolute positions.
-- **Three modes per desktop** — physics (default), BSP tiling (`Super+T`), and floating (`Super+Alt+Space`), where windows stay exactly where you drop them and overlap freely, like an ordinary desktop environment. Each desktop picks its own.
+- **Three modes per desktop** — BSP tiling (default), physics (`Super+T`), and floating (`Super+Alt+Space`), where windows stay exactly where you drop them and overlap freely, like an ordinary desktop environment. Each desktop picks its own.
 - **Smooth camera** — scroll with `Super+H`/`Super+L` (hold to repeat), jump with `Super+1`…`0`.
 - **A window opens where you asked for it** — not where you happen to be standing when it finally appears. The desktop is taken at the moment of the launch and kept against the process, so Steam started on desktop 2 and read about on desktop 1 while it loads still arrives on 2. Any descendant of the launch counts, since everything worth starting is a script that starts something else, and the claim expires after two minutes so a window opened by hand much later follows the camera like anything else. A `[[rule]] desktop` still outranks it.
 - **Send windows across** — `Super+Shift+1`…`0`. Under physics and floating you can also just drag a window past the screen edge; a tiled window's geometry belongs to the layout, so this is the way out of tiling.
