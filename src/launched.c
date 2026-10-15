@@ -34,6 +34,7 @@ struct LaunchEntry {
     int desktop;
     double at;      /* CLOCK_MONOTONIC seconds */
     char cmd[LAUNCHED_CMD_MAX];   /* "" when not known */
+    int written;    /* desktop the session last wrote it down on, or -1 */
 };
 
 struct FwmLaunched {
@@ -123,11 +124,16 @@ void launched_note(struct FwmServer *server, pid_t pid, int desktop, const char 
     expire(t, now);
     /* Full: drop the oldest, which is the one least likely to still be waiting
      * for a window — and of those, first one only kept for its command, since
-     * a young one still has a window to place. */
+     * a young one still has a window to place, and last one the session has
+     * written down, since that is an application which is still open. */
     if (t->count == LAUNCHED_MAX) {
-        int drop = 0;
-        for (int i = 0; i < t->count; i++)
-            if (!launch_young(&t->e[i], now)) { drop = i; break; }
+        int drop = 0, old = -1;
+        for (int i = 0; i < t->count; i++) {
+            if (launch_young(&t->e[i], now)) continue;
+            if (old < 0) old = i;
+            if (t->e[i].written < 0) { drop = i; old = -1; break; }
+        }
+        if (old >= 0) drop = old;
         memmove(&t->e[drop], &t->e[drop + 1],
                 (size_t)(LAUNCHED_MAX - 1 - drop) * sizeof(t->e[0]));
         t->count--;
@@ -137,6 +143,7 @@ void launched_note(struct FwmServer *server, pid_t pid, int desktop, const char 
     proc_stat(pid, NULL, &t->e[t->count].start);
     t->e[t->count].desktop = desktop;
     t->e[t->count].at = now;
+    t->e[t->count].written = -1;
     /* Too long to keep whole is not kept at all: half a command relaunches
      * something else. */
     if (cmd && strlen(cmd) < sizeof(t->e[0].cmd))
@@ -193,6 +200,34 @@ bool launched_command(struct FwmServer *server, struct FwmView *view,
     snprintf(out, cap, "%s", e->cmd);
     *pid = e->pid;
     return true;
+}
+
+void launched_written(struct FwmServer *server, pid_t pid, int desktop) {
+    struct FwmLaunched *t = server ? server->launched : NULL;
+    if (!t) return;
+    for (int i = t->count - 1; i >= 0; i--)
+        if (t->e[i].pid == pid) {
+            struct LaunchEntry *e = &t->e[i];
+            if (desktop >= 0)         e->written = desktop;
+            else if (e->written < 0)  e->written = e->desktop;
+            return;
+        }
+}
+
+int launched_running(struct FwmServer *server, struct LaunchedApp *out, int cap) {
+    struct FwmLaunched *t = server ? server->launched : NULL;
+    if (!t) return 0;
+    expire(t, now_sec());
+    int n = 0;
+    for (int i = 0; i < t->count && n < cap; i++) {
+        const struct LaunchEntry *e = &t->e[i];
+        if (e->written < 0 || !e->cmd[0] || !launch_alive(e)) continue;
+        out[n].pid = e->pid;
+        out[n].desktop = e->written;
+        out[n].cmd = e->cmd;
+        n++;
+    }
+    return n;
 }
 
 void launched_finish(struct FwmServer *server) {

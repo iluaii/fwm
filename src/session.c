@@ -188,12 +188,25 @@ static int is_game(pid_t pid) {
  * matched back on: the command fwm started its application with when there is
  * one (launched.h says why that is the one to keep), otherwise its process's
  * own argv. `ident` is the process the line stands for, which is what
- * duplicates are judged by. */
+ * duplicates are judged by.
+ *
+ * The command is looked for here too, not only when the window maps: Steam
+ * keeps a dozen X windows that never map at all, and they have to be known
+ * for its launch as well (build_snapshot says why). */
 static int view_session_key(struct FwmView *view, char *out, size_t cap, pid_t *ident) {
     pid_t pid = view_pid(view);
     if (!pid_argv_key(pid, out, cap)) return 0;
     if (is_ourselves(out) || is_game(pid)) return 0;
     *ident = pid;
+
+    if (!view->launch_cmd) {
+        char cmd[LAUNCHED_CMD_MAX];
+        pid_t lpid;
+        if (launched_command(view->server, view, &lpid, cmd, sizeof(cmd))) {
+            view->launch_cmd = strdup(cmd);
+            view->launch_pid = lpid;
+        }
+    }
 
     const char *cmd = view->launch_cmd;
     if (cmd && !strchr(cmd, '\t') && !strchr(cmd, '\n')) {
@@ -208,7 +221,17 @@ static int view_session_key(struct FwmView *view, char *out, size_t cap, pid_t *
  * windows of one process (a browser, a terminal with two windows) must not
  * relaunch it several times, so entries are deduplicated by the process each
  * line stands for — for Steam, whose two windows come from two processes of
- * one launch, that is the launch. */
+ * one launch, that is the launch.
+ *
+ * Only windows on screen are written. A window that was never shown is no
+ * evidence of anything a person opened, and Steam's were worse than that: each
+ * wrote down its own process, ./steamwebhelper and the client binary that only
+ * runs under steam.sh. After a crash that binary started first, took Steam's
+ * one-instance lock and died without its runtime, and the real Steam, started
+ * after it, handed itself over to it and quit. A hidden window that came from
+ * a launch still counts for the launch, though: it means the application is
+ * running, only out of sight — in the tray, where Steam and Discord spend most
+ * of their time. Those go after the windows, from the launches. */
 static void build_snapshot(struct FwmServer *server, char *out, size_t cap) {
     out[0] = '\0';
     size_t used = 0;
@@ -222,6 +245,13 @@ static void build_snapshot(struct FwmServer *server, char *out, size_t cap) {
         pid_t pid;
         if (!view_session_key(view, key, sizeof(key), &pid)) continue;
 
+        bool launched = view->launch_cmd && pid == view->launch_pid;
+        struct wlr_surface *surface = view_surface(view);
+        if (!surface || !surface->mapped) {
+            if (launched) launched_written(server, pid, -1);
+            continue;
+        }
+
         int dup = 0;
         for (int i = 0; i < seen_count; i++) if (seen[i] == pid) { dup = 1; break; }
         if (dup) continue;
@@ -233,8 +263,23 @@ static void build_snapshot(struct FwmServer *server, char *out, size_t cap) {
                         : (server->screen_width > 0 ? view->x / server->screen_width : 0);
         if (desktop < 0) desktop = 0;
         if (desktop > FWM_DESKTOPS - 1) desktop = FWM_DESKTOPS - 1;
+        if (launched) launched_written(server, pid, desktop);
 
         int w = snprintf(out + used, cap - used, "%d\t%s\n", desktop, key);
+        if (w < 0 || (size_t)w >= cap - used) break;
+        used += (size_t)w;
+    }
+
+    struct LaunchedApp apps[SESSION_MAX_ENTRIES];
+    int n = launched_running(server, apps, SESSION_MAX_ENTRIES);
+    for (int i = 0; i < n && seen_count < SESSION_MAX_ENTRIES; i++) {
+        int dup = 0;
+        for (int j = 0; j < seen_count; j++) if (seen[j] == apps[i].pid) { dup = 1; break; }
+        if (dup || strchr(apps[i].cmd, '\t') || strchr(apps[i].cmd, '\n')) continue;
+        seen[seen_count++] = apps[i].pid;
+
+        int w = snprintf(out + used, cap - used, "%d\t%s\t-c\t%s\n",
+                         apps[i].desktop, SESSION_SHELL, apps[i].cmd);
         if (w < 0 || (size_t)w >= cap - used) break;
         used += (size_t)w;
     }

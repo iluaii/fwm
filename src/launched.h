@@ -85,6 +85,30 @@ int launched_desktop(struct FwmServer *server, struct FwmView *view);
 bool launched_command(struct FwmServer *server, struct FwmView *view,
                       pid_t *pid, char *out, size_t cap);
 
+/* The session wrote the launch `pid` down on `desktop`, by one of its windows.
+ * From then on it stays written down while its process runs, window or not:
+ * see launched_running. `desktop` -1: by a window that is not on screen, which
+ * keeps the desktop it was last written on, or else the one it was launched
+ * from. */
+void launched_written(struct FwmServer *server, pid_t pid, int desktop);
+
+struct LaunchedApp {
+    pid_t pid;
+    int desktop;
+    const char *cmd;   /* valid until the next call into this file */
+};
+
+/* Every launch the session has written down whose process is still running,
+ * up to `cap` of them; returns how many.
+ *
+ * An application closed to the tray has no window, and a session made of
+ * windows had nothing to write for it: Steam and Discord both sit there most
+ * of the time, so a crash then left them out, and they did not come back. Its
+ * process running is what says it is still open. Only a launch that has had a
+ * window written down, though — what fwm started to run in the background and
+ * never had a window is not an application in the session. */
+int launched_running(struct FwmServer *server, struct LaunchedApp *out, int cap);
+
 /* Drop the table. */
 void launched_finish(struct FwmServer *server);
 
