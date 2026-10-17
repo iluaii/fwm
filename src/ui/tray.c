@@ -420,7 +420,9 @@ static void draw_tray_content(cairo_t *cr, int w, int h, void *user_data) {
      *
      * Dropped, like the modes pill, when what is left between the two will not
      * hold it — the same reasoning, and the same silent overdraw avoided. */
-    {
+    if (data->stats_hidden) {
+        strip->stats.valid = 0;
+    } else {
         const char *text = (data->stats_text && data->stats_text[0])
                            ? data->stats_text : NULL;
         /* An island with nothing in it is still drawn, with a dimmed label: the
@@ -552,6 +554,7 @@ void tray_redraw(struct wlr_scene_buffer *tray_buf, const TrayData *data,
     if (data->stats_text)
         snprintf(sig.sig_stats, sizeof(sig.sig_stats), "%s", data->stats_text);
     sig.sig_stats_open = data->stats_open;
+    sig.sig_stats_hidden = data->stats_hidden;
     sig.sig_theme_gen = theme_generation();
 
     /* Compare the signature fields only: the rects below them are an OUTPUT of

@@ -1239,6 +1239,7 @@ static int stats_is_builtin(const char *name) {
 static void load_stats(toml_table_t *root, FwmConfig *cfg) {
     StatsConfig *s = &cfg->stats;
     memset(s, 0, sizeof(*s));
+    s->enabled  = 1;
     s->interval = 2.0;
 
     /* The default is the pill everybody would have written anyway. It is not
@@ -1261,6 +1262,11 @@ static void load_stats(toml_table_t *root, FwmConfig *cfg) {
     toml_table_t *tbl = toml_table_in(root, "stats");
     if (!tbl) return;
 
+    /* Off is the pill gone, not emptied: the readouts can live somewhere else
+     * ([sidebar]), and a "○ stats" placeholder left behind is clutter. */
+    toml_datum_t en = toml_bool_in(tbl, "enabled");
+    if (en.ok) s->enabled = en.u.b ? 1 : 0;
+
     LOAD_DOUBLE(tbl, "interval", s->interval);
     /* A command every tenth of a second is a fork bomb with a nice UI. The
      * floor is generous rather than tight: sensors are read, not watched. */
@@ -1272,7 +1278,8 @@ static void load_stats(toml_table_t *root, FwmConfig *cfg) {
     for (int i = 0; ; i++) {
         const char *key = toml_key_in(tbl, i);
         if (!key) break;
-        if (strcmp(key, "items") == 0 || strcmp(key, "interval") == 0) continue;
+        if (strcmp(key, "items") == 0 || strcmp(key, "interval") == 0 ||
+            strcmp(key, "enabled") == 0) continue;
 
         toml_datum_t d = toml_string_in(tbl, key);
         if (!d.ok) continue;   /* not a string: not a command, so not ours */

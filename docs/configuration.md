@@ -1349,6 +1349,8 @@ grows and does not shrink back while the font and margin stay, or a readout
 losing a digit would shift every line; only what will not fit in half the
 screen wraps.
 
+Pairs with `[stats] enabled = false`, which takes the tray's pill away.
+
 ## liquids
 
 Experimental. A liquid on the desktop, poured from a bucket: the modes menu's

@@ -567,6 +567,7 @@ void server_request_tray_redraw(FwmServer *server) {
     stats_format(server->stats, stats_line, sizeof(stats_line));
     data.stats_text = stats_line;
     data.stats_open = server->stats_buffer != NULL;
+    data.stats_hidden = !server->config.stats.enabled;
     if (server->focused_view) {
         PhysicsBody *b = physics_find_body(&server->physics, server->focused_view->id);
         if (b) {

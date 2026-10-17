@@ -1136,6 +1136,7 @@ typedef struct {
 } StatsCustom;
 
 typedef struct {
+    int         enabled;    /* the pill is drawn and its sensors sampled */
     /* Names in draw order, as written. Held as text rather than resolved here
      * because config.c cannot know which sensors the machine can actually
      * answer — that is stats.c's business, and it needs the name to say so. */

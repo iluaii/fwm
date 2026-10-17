@@ -79,6 +79,9 @@ typedef struct {
      * back on. */
     const char *stats_text;
     int stats_open;      /* its menu is showing — the pill renders as pressed */
+    /* [stats] enabled = false: no pill at all, placeholder included. Said in
+     * the file, so the way back is the file too, not a menu. */
+    int stats_hidden;
 } TrayData;
 
 /* Everything the strip drew, in tray-buffer-local coordinates: where the
@@ -105,7 +108,7 @@ typedef struct {
     int  sig_errors, sig_err_expanded;
     int  sig_m_tiling, sig_m_floating, sig_m_gravity, sig_m_cava, sig_m_open;
     char sig_stats[160];
-    int  sig_stats_open;
+    int  sig_stats_open, sig_stats_hidden;
     unsigned sig_theme_gen;
     int  have_sig;
 

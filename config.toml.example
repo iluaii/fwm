@@ -173,7 +173,11 @@ tick_rate             = 60.0
 # its own process group and killed if it has not answered in five seconds, and
 # only one run of it exists at a time, so a slow sensor reports less often
 # instead of piling up processes.
+#
+# `enabled = false` removes the pill altogether, for when the readouts live in
+# the [sidebar] below instead.
 #[stats]
+#enabled  = true
 #items    = ["cpu", "ram", "gpu", "bat", "net", "vol", "mic"]
 #interval = 2.0
 #vol = "pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1"

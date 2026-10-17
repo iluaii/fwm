@@ -1731,7 +1731,7 @@ static int physics_tick_cb(void *data) {
      * only a value that CHANGED asks for a repaint — a tray redrawn at the
      * frame rate to show the same number is the whole thing the strip's
      * signature exists to prevent. */
-    if (stats_tick(server->stats, elapsed)) {
+    if (server->config.stats.enabled && stats_tick(server->stats, elapsed)) {
         server_request_tray_redraw(server);
         /* The open menu shows each sensor's live value beside its switch, so it
          * is as stale as the pill would be. */

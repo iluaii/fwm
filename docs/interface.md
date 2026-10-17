@@ -222,6 +222,10 @@ The compositor never blocks on a sensor: a command is started on one frame and
 collected on a later one, through a pipe that is only read when it has something
 to say.
 
+`enabled = false` removes the pill altogether — placeholder too — and stops its
+sensors. For when the readouts live in the [sidebar](configuration.md#sidebar)
+instead.
+
 ## The launcher
 
 `Super+Space`. Type to filter, `↑`/`↓` (or `Tab`) to move, `Return` to run,
