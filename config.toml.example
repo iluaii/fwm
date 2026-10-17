@@ -188,7 +188,8 @@ tick_rate             = 60.0
 # `{name}` in it is a readout — cpu, ram, gpu, bat, net, or any other key here,
 # which is a shell command whose WHOLE output stands in for it. `{{` is a
 # literal brace. Pango markup works within a line (<b>, <span color="...">).
-# `color` unset follows the wallpaper's palette.
+# `color` unset follows the wallpaper's palette. `font` is a Pango description:
+# "JetBrains Mono Bold 11".
 #[sidebar]
 #enabled  = true
 #width    = 0.10           # share of the screen's width at least; a longer line widens it
@@ -196,6 +197,9 @@ tick_rate             = 60.0
 #align    = "left"         # or "right"
 #margin   = 16
 #shadow   = true
+#shadow_color   = "#00000099"
+#line_spacing   = 1.2      # x the font's height
+#letter_spacing = 1        # px between letters
 #interval = 2.0
 #lines = [
 #  "<b>ilu@void</b>",

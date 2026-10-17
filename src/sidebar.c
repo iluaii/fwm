@@ -192,6 +192,8 @@ const char *sidebar_feed_markup(const FwmSidebarFeed *f) {
 typedef struct {
     char     font[SIDEBAR_FONT_MAX];
     double   rgba[4];   /* straight, resolved from the config or the palette */
+    double   shadow_rgba[4];
+    double   line_spacing, letter_spacing;
     double   margin;
     int      align;
     int      shadow;
@@ -210,6 +212,13 @@ struct FwmSidebar {
     char  *drawn;       /* the markup on screen, NULL before the first paint */
     Look   drawn_look;
 };
+
+/* parse_hex_color premultiplies; cairo wants it straight. */
+static void straight(const float pm[4], double out[4]) {
+    double a = pm[3];
+    for (int i = 0; i < 3; i++) out[i] = a > 0.0 ? pm[i] / a : 0.0;
+    out[3] = a;
+}
 
 static int column_width(const SidebarConfig *cfg, int screen_w) {
     int w = (int)(screen_w * cfg->width + 0.5);
@@ -257,6 +266,18 @@ static PangoLayout *make_layout(cairo_t *cr, const Look *lk, const char *markup)
     pango_layout_set_alignment(layout, lk->align ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
     /* Always valid: compose() escaped every line that was not. */
     pango_layout_set_markup(layout, markup, -1);
+    if (lk->line_spacing > 0.0)
+        pango_layout_set_line_spacing(layout, (float)lk->line_spacing);
+    if (lk->letter_spacing != 0.0) {
+        /* Under the markup's own attributes, not over them: a line that says
+         * <span letter_spacing=...> for itself keeps what it said. */
+        PangoAttrList *attrs = pango_layout_get_attributes(layout);
+        attrs = attrs ? pango_attr_list_copy(attrs) : pango_attr_list_new();
+        pango_attr_list_insert_before(attrs, pango_attr_letter_spacing_new(
+                                                 (int)(lk->letter_spacing * PANGO_SCALE)));
+        pango_layout_set_attributes(layout, attrs);
+        pango_attr_list_unref(attrs);
+    }
     return layout;
 }
 
@@ -310,7 +331,8 @@ static void sidebar_paint(cairo_t *cr, int w, int h, void *data) {
          * paint its shadow in its own colour. */
         cairo_move_to(cr, x + 1.0, y + 1.0);
         pango_cairo_layout_path(cr, layout);
-        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, SHADOW_ALPHA * lk->rgba[3]);
+        cairo_set_source_rgba(cr, lk->shadow_rgba[0], lk->shadow_rgba[1],
+                              lk->shadow_rgba[2], lk->shadow_rgba[3]);
         cairo_fill(cr);
     }
 
@@ -330,11 +352,10 @@ void sidebar_draw(FwmSidebar *sb, const SidebarConfig *cfg,
     lk.margin = cfg->margin;
     lk.align  = cfg->align;
     lk.shadow = cfg->shadow;
+    lk.line_spacing   = cfg->line_spacing;
+    lk.letter_spacing = cfg->letter_spacing;
     if (cfg->has_color) {
-        /* parse_hex_color premultiplies; cairo wants it straight. */
-        double a = cfg->color[3];
-        for (int i = 0; i < 3; i++) lk.rgba[i] = a > 0.0 ? cfg->color[i] / a : 0.0;
-        lk.rgba[3] = a;
+        straight(cfg->color, lk.rgba);
     } else {
         /* The palette's own text colour follows the wallpaper, so it is
          * folded in by generation: a new palette is a repaint. */
@@ -342,6 +363,11 @@ void sidebar_draw(FwmSidebar *sb, const SidebarConfig *cfg,
         for (int i = 0; i < 3; i++) lk.rgba[i] = thm->text[i];
         lk.rgba[3] = 1.0;
         lk.theme_gen = theme_generation();
+    }
+    if (cfg->has_shadow_color) {
+        straight(cfg->shadow_color, lk.shadow_rgba);
+    } else {
+        lk.shadow_rgba[3] = SHADOW_ALPHA * lk.rgba[3];
     }
 
     const char *markup = sidebar_feed_markup(feed);

@@ -1345,7 +1345,7 @@ static void load_stats(toml_table_t *root, FwmConfig *cfg) {
 static int sidebar_own_key(const char *key) {
     static const char *const own[] = {
         "enabled", "width", "margin", "interval", "align", "shadow", "font",
-        "color", "lines",
+        "color", "lines", "shadow_color", "line_spacing", "letter_spacing",
     };
     for (size_t i = 0; i < sizeof(own) / sizeof(own[0]); i++)
         if (strcmp(key, own[i]) == 0) return 1;
@@ -1423,12 +1423,20 @@ static void load_sidebar(toml_table_t *root, FwmConfig *cfg) {
     LOAD_DOUBLE(tbl, "width",    sb->width);
     LOAD_DOUBLE(tbl, "margin",   sb->margin);
     LOAD_DOUBLE(tbl, "interval", sb->interval);
+    LOAD_DOUBLE(tbl, "line_spacing",   sb->line_spacing);
+    LOAD_DOUBLE(tbl, "letter_spacing", sb->letter_spacing);
     if (sb->width < 0.03)    sb->width = 0.03;
     if (sb->width > 0.5)     sb->width = 0.5;
     if (sb->margin < 0.0)    sb->margin = 0.0;
     if (sb->margin > 200.0)  sb->margin = 200.0;
     /* The [stats] floor, for the [stats] reason. */
     if (sb->interval < 0.5)  sb->interval = 0.5;
+    /* 0 is "what the font says"; anything set is a multiple of the font's
+     * own height, and past 3 the lines stop reading as one column. */
+    if (sb->line_spacing < 0.0)    sb->line_spacing = 0.0;
+    if (sb->line_spacing > 3.0)    sb->line_spacing = 3.0;
+    if (sb->letter_spacing < -5.0) sb->letter_spacing = -5.0;
+    if (sb->letter_spacing > 20.0) sb->letter_spacing = 20.0;
 
     toml_datum_t f = toml_string_in(tbl, "font");
     if (f.ok) {
@@ -1449,6 +1457,14 @@ static void load_sidebar(toml_table_t *root, FwmConfig *cfg) {
         if (parse_hex_color(c.u.s, sb->color)) sb->has_color = 1;
         else config_report_error(cfg, "[sidebar] color: \"%s\" is not #RRGGBB[AA]", c.u.s);
         free(c.u.s);
+    }
+
+    toml_datum_t scol = toml_string_in(tbl, "shadow_color");
+    if (scol.ok) {
+        if (parse_hex_color(scol.u.s, sb->shadow_color)) sb->has_shadow_color = 1;
+        else config_report_error(cfg, "[sidebar] shadow_color: \"%s\" is not #RRGGBB[AA]",
+                                 scol.u.s);
+        free(scol.u.s);
     }
 
     /* Commands first, so `lines` can be checked against them whichever order

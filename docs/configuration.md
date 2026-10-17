@@ -1308,6 +1308,9 @@ color    = "#e0e0e0"       # unset: the palette's text colour, which follows the
 align    = "left"          # or "right", within the column
 margin   = 16              # px between the text and the column's edges
 shadow   = true            # a dark copy under the letters, for a light wallpaper
+shadow_color   = "#00000099"   # unset: black at 0.6 of the text's opacity
+line_spacing   = 1.2           # x the font's height; unset = the font's own
+letter_spacing = 1             # px between letters, may be negative
 interval = 2.0             # seconds between runs of the commands, floor 0.5
 lines = [
   "<b>ilu@void</b>",
@@ -1332,8 +1335,14 @@ shell command, and **everything** it prints stands in for it, every line. `{{`
 and `}}` are a literal brace. A name that is neither is reported as a config
 problem.
 
+`font` is a Pango font description: family, then any of the style words, then
+the size — `"JetBrains Mono Bold 11"`, `"Iosevka Light Italic 10"`; `fc-list`
+lists the families. `color` takes `#RRGGBBAA` for see-through text.
+
 Pango markup works within a line — `<b>`, `<i>`, `<span color="#ff8800">`,
-`<span size="large">`. A command's output is always taken as plain text, so an
+`<span size="large">`, `<u>`, `<s>`, `<span alpha="60%">`, `<span
+letter_spacing="2048">`. What a line says for itself beats the table's own
+setting. A command's output is always taken as plain text, so an
 `&` or a `<` in it never breaks the line; a line whose own markup does not parse
 is shown exactly as written.
 

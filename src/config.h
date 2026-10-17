@@ -1191,6 +1191,11 @@ typedef struct {
      * RGBA as parse_hex_color leaves it, premultiplied. */
     int    has_color;
     float  color[4];
+    /* Unset: black at 0.6 of the text's opacity. Premultiplied, like color. */
+    int    has_shadow_color;
+    float  shadow_color[4];
+    double line_spacing;    /* x the font's height; 0 = the font's own */
+    double letter_spacing;  /* px added between letters, may be negative */
     char   lines[SIDEBAR_MAX_LINES][SIDEBAR_LINE_MAX];
     int    line_count;
     StatsCustom custom[STATS_MAX_ITEMS];
