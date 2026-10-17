@@ -1257,9 +1257,32 @@ void view_map(FwmView *view) {
     /* Publish to external panels BEFORE focusing, so the activation state that
      * server_focus_view pushes lands on an existing handle. */
     foreign_view_map(view);
-    server_focus_view(view->server, view);
 
+    /* Only a window opening where the user is working takes the keyboard.
+     * Where that is comes from the focused window rather than the cursor: on
+     * two monitors the hand may rest on one screen while the keys go into a
+     * terminal on the other, and a debug build started from that terminal used
+     * to carry the focus off to whichever screen it appeared on. And something
+     * started on desktop 2 and walked away from used to pull the keyboard
+     * after it when it finally opened — onto a desktop nobody was looking at.
+     * The same line xdg-activation draws (server_seat.c), minus the camera:
+     * opening is not a request to be shown. */
     int desktop = body ? body->desktop_id : current_desktop;
+    FwmView *focused = view->server->focused_view;
+    PhysicsBody *focused_body = focused
+        ? physics_find_body(&view->server->physics, focused->id) : NULL;
+    int working = focused_body ? focused_body->desktop_id
+                               : server_active_desktop(view->server);
+    if (desktop == working) {
+        server_focus_view(view->server, view);
+    } else {
+        /* Still on top of its own desktop, as the focus would have put it —
+         * otherwise a window opening behind the others is found by nobody. */
+        wlr_scene_node_raise_to_top(&view->scene_tree->node);
+        server_restack_children(view->server, view);
+        server_restack_fullscreen(view->server);
+    }
+
     if (parent_body) {
         /* Already placed, over its parent: no layout slot, and nothing to push
          * it out of the way of. See the body block above. */
