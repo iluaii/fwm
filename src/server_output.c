@@ -37,6 +37,7 @@
 #include "ui/cairo_overlay.h"
 #include "wallpaper.h"
 #include "grass.h"
+#include "sidebar.h"
 #include "glass.h"
 #include "star_draw.h"
 #include "expo.h"
@@ -517,6 +518,7 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
     if (output->wallpaper_prev) wallpaper_destroy(output->wallpaper_prev);
     if (output->wallpaper) wallpaper_destroy(output->wallpaper);
     if (output->grass) grass_destroy(output->grass);
+    sidebar_destroy(output->sidebar);
     star_draw_destroy(output->star_draw);
     output->star_draw = NULL;
     server_liquid_output_gone(output->server, output);
@@ -1333,6 +1335,41 @@ void server_grass_sync(FwmServer *server) {
     }
 }
 
+void server_sidebar_sync(FwmServer *server, double dt) {
+    const SidebarConfig *cfg = &server->config.sidebar;
+    bool want = cfg->enabled != 0;
+
+    /* The feed lives exactly as long as the sidebar is on: off, no command
+     * of its runs and no sensor of its is read. */
+    if (want && !server->sidebar_feed)
+        server->sidebar_feed = sidebar_feed_create(cfg);
+    else if (!want && server->sidebar_feed) {
+        sidebar_feed_destroy(server->sidebar_feed);
+        server->sidebar_feed = NULL;
+    }
+    sidebar_feed_tick(server->sidebar_feed, dt);
+
+    FwmOutput *o;
+    wl_list_for_each(o, &server->outputs, link) {
+        bool here = want && server->sidebar_feed && o->enabled &&
+                    o->box.width > 0 && o->box.height > 0;
+        if (o->sidebar && (!here || sidebar_stale(o->sidebar, cfg, o->box.width,
+                                                  o->box.height))) {
+            sidebar_destroy(o->sidebar);
+            o->sidebar = NULL;
+        }
+        if (!here) continue;
+        if (!o->sidebar)
+            o->sidebar = sidebar_create(server->layer_sidebar, cfg,
+                                        o->box.width, o->box.height);
+        if (!o->sidebar) continue;
+        /* Every tick rather than on the layout change: a screen moved by
+         * `fwmctl output position=` keeps its size, so nothing above notices. */
+        sidebar_set_origin(o->sidebar, o->box.x, o->box.y);
+        sidebar_draw(o->sidebar, cfg, server->sidebar_feed, o->wlr_output->name);
+    }
+}
+
 /* This monitor's status strip, at the top of it. */
 static void output_build_tray(FwmOutput *out) {
     FwmServer *server = out->server;
@@ -1545,6 +1582,8 @@ static void output_leave_layout(FwmServer *server, FwmOutput *out) {
         grass_destroy(out->grass);
         out->grass = NULL;
     }
+    sidebar_destroy(out->sidebar);
+    out->sidebar = NULL;
     if (out->tray_buffer) {
         cairo_overlay_destroy(out->tray_buffer);
         out->tray_buffer = NULL;

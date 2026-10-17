@@ -39,6 +39,7 @@
 #include "wallpaper.h"
 #include "wpgen.h"
 #include "grass.h"
+#include "sidebar.h"
 #include "group.h"
 #include "glass.h"
 
@@ -991,6 +992,9 @@ void server_reload_config(FwmServer *server) {
      * their value and their on/off, so a reload does not blank the pill for an
      * interval nor undo what the menu was used to choose. */
     stats_reconfigure(server->stats, &server->config.stats);
+    /* And the sidebar's: whether it is on at all is server_sidebar_sync's
+     * business, on the next tick. */
+    sidebar_feed_reconfigure(server->sidebar_feed, &server->config.sidebar);
 
     /* An open menu is a list of the OLD sensors, and the click that would arrive
      * next is indexed into it. */

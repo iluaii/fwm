@@ -147,6 +147,7 @@ set(SOURCES
     src/audio.c
     src/cava.c
     src/grass.c
+    src/sidebar.c
     src/sound.c
     src/wav.c
     src/ram.c

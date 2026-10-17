@@ -37,6 +37,11 @@
 
 typedef struct FwmStats FwmStats;
 
+/* Room for a whole command's output, not a tray line's: the sidebar shows
+ * what a command printed in full (see stats_keep_lines), and the pill simply
+ * never fills it. */
+#define STATS_VALUE_MAX 2048
+
 /* How a value comes to be. Built-ins are read in-process; a custom item is
  * whatever its command printed on its first line. */
 enum {
@@ -50,7 +55,7 @@ enum {
 
 typedef struct {
     char name[STATS_NAME_MAX];   /* the key in [stats]; also the menu's label */
-    char value[32];              /* rendered text ("12%", "7.4G"), "" if unknown */
+    char value[STATS_VALUE_MAX]; /* rendered text ("12%", "7.4G"), "" if unknown */
     int  source;                 /* STATS_SRC_* */
     int  enabled;                /* drawn in the pill; toggled from the menu */
     int  available;              /* the machine can answer this at all */
@@ -61,6 +66,12 @@ typedef struct {
  * blank the pill for an interval. */
 FwmStats *stats_create(const StatsConfig *cfg);
 void stats_reconfigure(FwmStats *s, const StatsConfig *cfg);
+
+/* Keep EVERY line a command prints instead of the first one. The tray is one
+ * line high and wants the first; the sidebar is a column and wants all of it
+ * (`sensors`, `df -h`). Call before the first tick; it holds across
+ * reconfigures. */
+void stats_keep_lines(FwmStats *s);
 void stats_destroy(FwmStats *s);
 
 /* Sample whatever is due. Cheap on the ticks where nothing is (a clock compare

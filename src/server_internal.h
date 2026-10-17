@@ -296,6 +296,10 @@ void server_outputs_apply_config(FwmServer *server);
  * regrow it for knobs that changed. Called from the tick, like the cava sync,
  * so `fwmctl set grass.*` and a config reload both land through one path. */
 void server_grass_sync(FwmServer *server);
+/* The same for [sidebar]: start or stop the feed, build, rebuild or drop each
+ * monitor's column, sample the readouts for `dt` seconds and repaint whatever
+ * changed. Called from the tick. */
+void server_sidebar_sync(FwmServer *server, double dt);
 
 /* ── server_liquid.c ──────────────────────────────────────────────────── */
 /* Once a tick, after the windows are placed: hand the worker its next step if

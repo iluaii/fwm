@@ -1752,6 +1752,7 @@ static int physics_tick_cb(void *data) {
      * strip. Sync first — a patch regrown this tick should feel the same gust
      * as the rest. */
     server_grass_sync(server);
+    server_sidebar_sync(server, elapsed);
     FwmOutput *go;
     wl_list_for_each(go, &server->outputs, link) {
         if (!go->grass) continue;

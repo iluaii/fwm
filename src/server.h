@@ -133,6 +133,10 @@ typedef struct FwmOutput {
      * its own bottom edge, which is where the floor of the desktop it shows
      * is. NULL whenever [grass] is off. */
     struct FwmGrass *grass;
+    /* The text column down its right edge ([sidebar]); NULL while that is
+     * off. The text itself is the server's sidebar_feed, one for every
+     * screen. */
+    struct FwmSidebar *sidebar;
     struct FwmStarDraw *star_draw;
     /* This monitor's view of the liquid, when it can see the desktop the
      * liquid stands on (server_liquid.c). One picture, shared: the node is
@@ -379,6 +383,9 @@ typedef struct FwmServer {
     bool renderer_recovering;   /* guards re-entry while the swap is under way */
     struct wlr_scene *scene;
     struct wlr_scene_tree *layer_background;
+    /* The [sidebar] text, over the wallpaper and the grass. A tree of its own
+     * so a wallpaper rebuilt into layer_background can never bury it. */
+    struct wlr_scene_tree *layer_sidebar;
     /* The windows, one tree a plane from the back (server_plane.c), with the
      * liquid's picture on each monitor between the back plane and the
      * middle one (server_liquid.c). A window is raised within its plane. */
@@ -388,7 +395,7 @@ typedef struct FwmServer {
     struct wlr_scene_tree *layer_front;
     struct wlr_scene_tree *layer_overlay;
     /* wlr-layer-shell trees, interleaved with ours (bottom to top):
-     * wallpaper < ls_background < ls_bottom < back < liquid < windows
+     * wallpaper < ls_background < sidebar < ls_bottom < back < liquid < windows
      * < front < ls_top < our overlays < ls_overlay. See src/layer.h. */
     struct wlr_scene_tree *ls_background;
     struct wlr_scene_tree *ls_bottom;
@@ -426,6 +433,9 @@ typedef struct FwmServer {
      * an empty [stats] is a live handle with no sensors in it, because the
      * menu still has to open and say so. */
     struct FwmStats *stats;
+    /* What the [sidebar] column says: its commands and sensors, sampled once
+     * for every monitor. NULL while the sidebar is off. */
+    struct FwmSidebarFeed *sidebar_feed;
 
     /* [physics] mass = "ram": the mode server_mass_sync last acted on, and when
      * it may next walk /proc. Zero-initialised to PHYSICS_MASS_SIZE, which is

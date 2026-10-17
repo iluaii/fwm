@@ -39,6 +39,7 @@
 #endif
 #include "ui/tray.h"
 #include "ui/stats_menu.h"
+#include "sidebar.h"
 #include "stats.h"
 #include "ui/hints.h"
 #include "ui/errors.h"
@@ -583,6 +584,7 @@ bool server_init(FwmServer *server, bool debug) {
     // windows, and the tray/hints/welcome overlays sit above them so a raised
     // window can never cover them.
     server->layer_background = wlr_scene_tree_create(&server->scene->tree);
+    server->layer_sidebar = wlr_scene_tree_create(&server->scene->tree);
     server->layer_back = wlr_scene_tree_create(&server->scene->tree);
     server->layer_liquid = wlr_scene_tree_create(&server->scene->tree);
     server->layer_windows = wlr_scene_tree_create(&server->scene->tree);
@@ -594,7 +596,7 @@ bool server_init(FwmServer *server, bool debug) {
 
     // Layer-shell trees are woven between ours. Creation order alone cannot
     // express this (new trees always land on top), so place them explicitly:
-    // wallpaper < ls_background < ls_bottom < windows < ls_top < our overlays
+    // wallpaper < ls_background < sidebar < ls_bottom < windows < ls_top < our overlays
     // < ls_overlay. A layer-shell overlay therefore outranks even the tray,
     // which is what clients like a screen locker or a menu expect. The windows
     // are three trees, one a plane, and the liquid is drawn between the back
@@ -605,7 +607,10 @@ bool server_init(FwmServer *server, bool debug) {
     server->ls_top = wlr_scene_tree_create(&server->scene->tree);
     server->ls_overlay = wlr_scene_tree_create(&server->scene->tree);
     wlr_scene_node_place_above(&server->ls_background->node, &server->layer_background->node);
-    wlr_scene_node_place_above(&server->ls_bottom->node, &server->ls_background->node);
+    /* The sidebar's text over a wallpaper client too (swaybg): it is part of
+     * the wallpaper, not a panel standing on it. */
+    wlr_scene_node_place_above(&server->layer_sidebar->node, &server->ls_background->node);
+    wlr_scene_node_place_above(&server->ls_bottom->node, &server->layer_sidebar->node);
     wlr_scene_node_place_above(&server->layer_back->node, &server->ls_bottom->node);
     wlr_scene_node_place_above(&server->layer_liquid->node, &server->layer_back->node);
     wlr_scene_node_place_above(&server->layer_windows->node, &server->layer_liquid->node);
@@ -901,6 +906,8 @@ void server_destroy(FwmServer *server) {
      * output again. */
     stats_destroy(server->stats);
     server->stats = NULL;
+    sidebar_feed_destroy(server->sidebar_feed);
+    server->sidebar_feed = NULL;
     screenshot_cleanup(server);
     clipboard_destroy(server->clipboard);
     server->clipboard = NULL;

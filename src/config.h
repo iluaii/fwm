@@ -1124,7 +1124,9 @@ typedef struct {
  * a silent omission: a typo in a sensor name is otherwise indistinguishable
  * from a sensor that has nothing to report yet.
  */
-#define STATS_MAX_ITEMS   12
+/* 24, not the dozen a tray pill could ever hold: the [sidebar] reads through
+ * the same engine, and a wall of readouts runs past twelve easily. */
+#define STATS_MAX_ITEMS   24
 #define STATS_NAME_MAX    16
 #define STATS_CMD_MAX    512
 
@@ -1143,6 +1145,56 @@ typedef struct {
     StatsCustom custom[STATS_MAX_ITEMS];
     int         custom_count;
 } StatsConfig;
+
+/* ── sidebar ─────────────────────────────────────────────────────────── */
+
+/*
+ * A column of text down the right edge of every monitor, on the wallpaper:
+ * under the windows, without a panel behind it.
+ *
+ *   [sidebar]
+ *   enabled = true
+ *   width   = 0.10                 # share of the screen's width, at least
+ *   font    = "monospace 10"
+ *   lines   = [
+ *     "ilu@void",
+ *     "",
+ *     "CPU   {cpu}",
+ *     "TEMP  {temp}",
+ *     "{disks}",
+ *   ]
+ *   temp  = "sensors | awk '/Tctl/ {print $2}'"
+ *   disks = "df -h / /home | tail -n +2"
+ *
+ * The same shape as [stats], for the same reason: one line per readout. A
+ * line is plain text, and `{name}` in it is replaced by a readout — the five
+ * built-ins (cpu, ram, gpu, bat, net) or any OTHER key in the table, which is
+ * a shell command whose whole output stands in for it, every line of it.
+ * `{{` and `}}` are a literal brace. Pango markup works within a line (<b>,
+ * <span color=...>); a line it cannot parse is shown as it is written.
+ */
+#define SIDEBAR_MAX_LINES 64
+#define SIDEBAR_LINE_MAX  256
+#define SIDEBAR_FONT_MAX  64
+
+typedef struct {
+    int    enabled;
+    double width;     /* share of the monitor's width, 0.03..0.5: the floor —
+                       * a longer line widens the column (sidebar.c) */
+    double margin;    /* px between the text and the column's edges */
+    double interval;  /* seconds between runs of the commands */
+    int    align;     /* 0 left, 1 right, within the column */
+    int    shadow;    /* a soft dark copy under the text, for a light wallpaper */
+    char   font[SIDEBAR_FONT_MAX];
+    /* Unset: the palette's text colour, which follows the wallpaper. Set:
+     * RGBA as parse_hex_color leaves it, premultiplied. */
+    int    has_color;
+    float  color[4];
+    char   lines[SIDEBAR_MAX_LINES][SIDEBAR_LINE_MAX];
+    int    line_count;
+    StatsCustom custom[STATS_MAX_ITEMS];
+    int    custom_count;
+} SidebarConfig;
 
 /* ── wallpaper / parallax ────────────────────────────────────────────── */
 
@@ -1517,6 +1569,7 @@ typedef struct {
     VolumeConfig    volume;
     MixerConfig     mixer;
     StatsConfig     stats;
+    SidebarConfig   sidebar;
     KeyBind        *keys;
     int             key_count;
     ConfigMode      modes[CONFIG_MAX_MODES];

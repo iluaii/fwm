@@ -52,6 +52,10 @@
  * otherwise stack up a process per interval for the rest of the session. */
 #define STATS_CMD_TIMEOUT_S 5.0
 
+/* Bytes of a command's first line the pill shows — what the value itself held
+ * before it grew room for the sidebar. */
+#define STATS_PILL_MAX 31
+
 #define GPU_BUSY_GLOB "/sys/class/drm/card%d/device/gpu_busy_percent"
 #define NET_DEV_PATH     "/proc/net/dev"
 
@@ -73,7 +77,8 @@ typedef struct {
     pid_t     pid;
     int       fd;                  /* read end of the child's stdout */
     double    age;                 /* how long the child has been running */
-    char      buf[128];
+    int       lines;               /* keep every line, not just the first */
+    char      buf[STATS_VALUE_MAX];
     size_t    len;
 } Item;
 
@@ -81,6 +86,7 @@ struct FwmStats {
     Item   items[STATS_MAX_ITEMS];
     int    count;
     double interval;
+    int    keep_lines;   /* see stats_keep_lines */
 
     /* /proc/stat's previous totals, for the difference that IS the load. */
     unsigned long long cpu_busy, cpu_total;
@@ -347,20 +353,32 @@ static int reap(Item *it) {
     }
 
     /* First line only, whitespace off both ends: `pactl` and friends answer
-     * with a trailing newline, and a tray is one line high. */
-    char *nl = memchr(it->buf, '\n', it->len);
+     * with a trailing newline, and a tray is one line high. Kept whole, only
+     * the trailing newlines go — a column of `sensors` output is laid out
+     * with its leading spaces. */
+    char *nl = it->lines ? NULL : memchr(it->buf, '\n', it->len);
     size_t n = nl ? (size_t)(nl - it->buf) : it->len;
     while (n > 0 && (it->buf[n - 1] == ' ' || it->buf[n - 1] == '\t' ||
-                     it->buf[n - 1] == '\r')) n--;
+                     it->buf[n - 1] == '\r' || it->buf[n - 1] == '\n')) n--;
     size_t start = 0;
-    while (start < n && (it->buf[start] == ' ' || it->buf[start] == '\t')) start++;
+    while (!it->lines && start < n && (it->buf[start] == ' ' || it->buf[start] == '\t'))
+        start++;
 
-    char value[sizeof(it->pub.value)];
-    snprintf(value, sizeof(value), "%.*s", (int)(n - start), it->buf + start);
+    /* A pill reading is held to what it always was, a short one: the value
+     * has room for a sidebar's column, and a tray command that prints a
+     * paragraph on one line would otherwise push every island off the strip. */
+    size_t keep = n - start;
+    if (!it->lines && keep > STATS_PILL_MAX) {
+        keep = STATS_PILL_MAX;
+        /* Not through the middle of a letter. */
+        while (keep > 0 && ((unsigned char)it->buf[start + keep] & 0xC0) == 0x80) keep--;
+    }
     it->len = 0;
 
-    if (strcmp(value, it->pub.value) == 0) return 0;
-    snprintf(it->pub.value, sizeof(it->pub.value), "%s", value);
+    if (strlen(it->pub.value) == keep &&
+        memcmp(it->pub.value, it->buf + start, keep) == 0) return 0;
+    memcpy(it->pub.value, it->buf + start, keep);
+    it->pub.value[keep] = '\0';
     return 1;
 }
 
@@ -415,9 +433,9 @@ static int poll_command(Item *it, double dt) {
 
     for (;;) {
         if (it->len >= sizeof(it->buf) - 1) {
-            /* More than a tray line's worth. Everything after the first line is
-             * discarded anyway, so stop reading and take what we have — reap
-             * kills the group, so a command still printing is not left to it. */
+            /* More than a value can hold. Stop reading and take what we
+             * have — reap kills the group, so a command still printing is not
+             * left to it. */
             return reap(it);
         }
         ssize_t n = read(it->fd, it->buf + it->len, sizeof(it->buf) - 1 - it->len);
@@ -460,9 +478,12 @@ static void item_stop(Item *it) {
 void stats_reconfigure(FwmStats *s, const StatsConfig *cfg) {
     if (!s || !cfg) return;
 
-    Item old[STATS_MAX_ITEMS];
+    /* On the heap: an item carries a whole command's output twice over, and
+     * a dozen of them is too much to put on the stack for a reload. */
+    Item *old = malloc(sizeof(s->items));
+    if (!old) return;
     int old_count = s->count;
-    memcpy(old, s->items, sizeof(old));
+    memcpy(old, s->items, sizeof(s->items));
 
     memset(s->items, 0, sizeof(s->items));
     s->count = 0;
@@ -476,6 +497,7 @@ void stats_reconfigure(FwmStats *s, const StatsConfig *cfg) {
         it->pub.enabled = 1;
         it->pub.available = 1;
         it->fd = -1;
+        it->lines = s->keep_lines;
         /* Spread the first samples out rather than firing every command on the
          * same frame the config loaded: a reload is already the busiest moment
          * in the session. */
@@ -518,6 +540,7 @@ void stats_reconfigure(FwmStats *s, const StatsConfig *cfg) {
     /* Children belonging to sensors that are gone (or whose command changed)
      * are not left running: nothing would ever read their output. */
     for (int o = 0; o < old_count; o++) item_stop(&old[o]);
+    free(old);
 }
 
 FwmStats *stats_create(const StatsConfig *cfg) {
@@ -526,6 +549,12 @@ FwmStats *stats_create(const StatsConfig *cfg) {
     find_gpu(s);
     stats_reconfigure(s, cfg);
     return s;
+}
+
+void stats_keep_lines(FwmStats *s) {
+    if (!s) return;
+    s->keep_lines = 1;
+    for (int i = 0; i < s->count; i++) s->items[i].lines = 1;
 }
 
 void stats_destroy(FwmStats *s) {

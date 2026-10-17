@@ -1293,6 +1293,62 @@ Everything but `color` is live: `fwmctl set grass.wind 0.9`. The knobs that
 decide the blades themselves — `height`, `density`, `width` — re-grow the patch,
 so the lawn is reshuffled; the rest are applied to the patch already there.
 
+## sidebar
+
+A column of text down the right edge of every monitor, written straight onto the
+wallpaper: no panel behind it, the windows above it. What it says is up to you —
+the machine's readouts, a command's output, or just words.
+
+```toml
+[sidebar]
+enabled  = true
+width    = 0.10            # share of the screen's width at least, 0.03..0.5
+font     = "monospace 10"
+color    = "#e0e0e0"       # unset: the palette's text colour, which follows the wallpaper
+align    = "left"          # or "right", within the column
+margin   = 16              # px between the text and the column's edges
+shadow   = true            # a dark copy under the letters, for a light wallpaper
+interval = 2.0             # seconds between runs of the commands, floor 0.5
+lines = [
+  "<b>ilu@void</b>",
+  "",
+  "CPU   {cpu}",
+  "RAM   {ram}",
+  "GPU   {gpu}",
+  "TEMP  {temp}",
+  "NET   {net}",
+  "",
+  "<b>disks</b>",
+  "{disks}",
+]
+temp  = "sensors | awk '/Tctl/ {print $2}'"
+disks = "df -h / /home | tail -n +2"
+```
+
+Each entry of `lines` is one line of the column. `{name}` in it is replaced by a
+readout: one of the five built-ins of [`[stats]`](interface.md#the-stats-menu) —
+`cpu`, `ram`, `gpu`, `bat`, `net` — or any other key in the table, which is a
+shell command, and **everything** it prints stands in for it, every line. `{{`
+and `}}` are a literal brace. A name that is neither is reported as a config
+problem.
+
+Pango markup works within a line — `<b>`, `<i>`, `<span color="#ff8800">`,
+`<span size="large">`. A command's output is always taken as plain text, so an
+`&` or a `<` in it never breaks the line; a line whose own markup does not parse
+is shown exactly as written.
+
+Commands are run the way the stats pill runs them: one at a time each, in their
+own process group, killed after five seconds without an answer, never blocking
+the compositor. Only what the lines mention is sampled, and nothing at all while
+the sidebar is off. The column starts below the tray. A reload applies
+everything.
+
+`width` is the column's floor, not its size: a line longer than that widens it,
+so the same config reads the same on a 1920 screen and a 1366 one. The column
+grows and does not shrink back while the font and margin stay, or a readout
+losing a digit would shift every line; only what will not fit in half the
+screen wraps.
+
 ## liquids
 
 Experimental. A liquid on the desktop, poured from a bucket: the modes menu's

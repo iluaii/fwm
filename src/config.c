@@ -1332,6 +1332,174 @@ static void load_stats(toml_table_t *root, FwmConfig *cfg) {
     }
 }
 
+/* ── sidebar section ─────────────────────────────────────────────────── */
+
+/* The keys [sidebar] spends on itself. Every other string key is a command. */
+static int sidebar_own_key(const char *key) {
+    static const char *const own[] = {
+        "enabled", "width", "margin", "interval", "align", "shadow", "font",
+        "color", "lines",
+    };
+    for (size_t i = 0; i < sizeof(own) / sizeof(own[0]); i++)
+        if (strcmp(key, own[i]) == 0) return 1;
+    return 0;
+}
+
+/* Every `{name}` in a line names something the sidebar can answer. Checked
+ * here rather than left blank on screen, like a misspelt [stats] item: a typo
+ * and a command with nothing to say look the same in the column. */
+static void sidebar_check_line(FwmConfig *cfg, const char *line,
+                               char seen[][STATS_NAME_MAX], int *seen_count) {
+    const SidebarConfig *sb = &cfg->sidebar;
+    for (const char *p = line; *p; p++) {
+        if (p[0] == '{' && p[1] == '{') { p++; continue; }
+        if (*p != '{') continue;
+        const char *end = strchr(p + 1, '}');
+        if (!end) return;
+        char name[STATS_NAME_MAX];
+        size_t n = (size_t)(end - p - 1);
+        int known = 0;
+        if (n < sizeof(name)) {
+            memcpy(name, p + 1, n);
+            name[n] = '\0';
+            known = stats_is_builtin(name);
+            for (int c = 0; !known && c < sb->custom_count; c++)
+                known = strcmp(sb->custom[c].name, name) == 0;
+        }
+        if (!known)
+            config_report_error(cfg, "[sidebar] lines: no readout called \"%.*s\" — "
+                                     "built-ins are cpu, ram, gpu, bat, net; anything "
+                                     "else needs a command of its own in [sidebar]",
+                                (int)n, p + 1);
+        /* The engine samples so many readouts and no more; past that a line
+         * would sit empty for no visible reason, so it is said here. */
+        int dup = 0;
+        for (int i = 0; known && !dup && i < *seen_count; i++)
+            dup = strcmp(seen[i], name) == 0;
+        if (known && !dup) {
+            if (*seen_count < STATS_MAX_ITEMS)
+                snprintf(seen[(*seen_count)++], STATS_NAME_MAX, "%s", name);
+            else
+                config_report_error(cfg, "[sidebar] lines: more than %d different "
+                                         "readouts — \"%s\" stays empty",
+                                    STATS_MAX_ITEMS, name);
+        }
+        p = end;
+    }
+}
+
+static void load_sidebar(toml_table_t *root, FwmConfig *cfg) {
+    SidebarConfig *sb = &cfg->sidebar;
+    memset(sb, 0, sizeof(*sb));
+    sb->enabled  = 0;   /* a decoration, off until asked for, like the grass */
+    sb->width    = 0.10;
+    sb->margin   = 16.0;
+    sb->interval = 2.0;
+    sb->shadow   = 1;
+    snprintf(sb->font, sizeof(sb->font), "monospace 10");
+
+    /* Switched on with nothing else said, it shows the machine — the thing it
+     * was asked for — rather than an empty column. */
+    static const char *const def[] = { "CPU  {cpu}", "RAM  {ram}", "GPU  {gpu}", "NET  {net}" };
+    for (size_t i = 0; i < sizeof(def) / sizeof(def[0]); i++)
+        snprintf(sb->lines[sb->line_count++], SIDEBAR_LINE_MAX, "%s", def[i]);
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "sidebar");
+    if (!tbl) return;
+
+    toml_datum_t e = toml_bool_in(tbl, "enabled");
+    if (e.ok) sb->enabled = e.u.b ? 1 : 0;
+    toml_datum_t sh = toml_bool_in(tbl, "shadow");
+    if (sh.ok) sb->shadow = sh.u.b ? 1 : 0;
+
+    LOAD_DOUBLE(tbl, "width",    sb->width);
+    LOAD_DOUBLE(tbl, "margin",   sb->margin);
+    LOAD_DOUBLE(tbl, "interval", sb->interval);
+    if (sb->width < 0.03)    sb->width = 0.03;
+    if (sb->width > 0.5)     sb->width = 0.5;
+    if (sb->margin < 0.0)    sb->margin = 0.0;
+    if (sb->margin > 200.0)  sb->margin = 200.0;
+    /* The [stats] floor, for the [stats] reason. */
+    if (sb->interval < 0.5)  sb->interval = 0.5;
+
+    toml_datum_t f = toml_string_in(tbl, "font");
+    if (f.ok) {
+        snprintf(sb->font, sizeof(sb->font), "%s", f.u.s);
+        free(f.u.s);
+    }
+
+    toml_datum_t a = toml_string_in(tbl, "align");
+    if (a.ok) {
+        if      (strcmp(a.u.s, "left")  == 0) sb->align = 0;
+        else if (strcmp(a.u.s, "right") == 0) sb->align = 1;
+        else config_report_error(cfg, "[sidebar] align: \"%s\" is not left or right", a.u.s);
+        free(a.u.s);
+    }
+
+    toml_datum_t c = toml_string_in(tbl, "color");
+    if (c.ok) {
+        if (parse_hex_color(c.u.s, sb->color)) sb->has_color = 1;
+        else config_report_error(cfg, "[sidebar] color: \"%s\" is not #RRGGBB[AA]", c.u.s);
+        free(c.u.s);
+    }
+
+    /* Commands first, so `lines` can be checked against them whichever order
+     * the two are written in. */
+    for (int i = 0; ; i++) {
+        const char *key = toml_key_in(tbl, i);
+        if (!key) break;
+        if (sidebar_own_key(key)) continue;
+
+        toml_datum_t d = toml_string_in(tbl, key);
+        if (!d.ok) continue;
+
+        if (stats_is_builtin(key)) {
+            config_report_error(cfg, "[sidebar] %s is a built-in readout and cannot be "
+                                     "given a command", key);
+        } else if (strlen(key) >= STATS_NAME_MAX) {
+            config_report_error(cfg, "[sidebar] readout name \"%s\" is too long (max %d)",
+                                key, STATS_NAME_MAX - 1);
+        } else if (sb->custom_count >= STATS_MAX_ITEMS) {
+            config_report_error(cfg, "[sidebar] more than %d commands — \"%s\" ignored",
+                                STATS_MAX_ITEMS, key);
+        } else {
+            StatsCustom *cu = &sb->custom[sb->custom_count++];
+            snprintf(cu->name, sizeof(cu->name), "%s", key);
+            snprintf(cu->cmd, sizeof(cu->cmd), "%s", d.u.s);
+        }
+        free(d.u.s);
+    }
+
+    toml_array_t *arr = toml_array_in(tbl, "lines");
+    if (!arr) return;
+
+    sb->line_count = 0;
+    int n = toml_array_nelem(arr);
+    for (int i = 0; i < n; i++) {
+        toml_datum_t d = toml_string_at(arr, i);
+        if (!d.ok) {
+            config_report_error(cfg, "[sidebar] lines: entry %d is not a string", i + 1);
+            continue;
+        }
+        if (sb->line_count >= SIDEBAR_MAX_LINES) {
+            config_report_error(cfg, "[sidebar] lines: more than %d — the rest dropped",
+                                SIDEBAR_MAX_LINES);
+            free(d.u.s);
+            break;
+        }
+        if (strlen(d.u.s) >= SIDEBAR_LINE_MAX)
+            config_report_error(cfg, "[sidebar] lines: entry %d is longer than %d bytes "
+                                     "and was cut", i + 1, SIDEBAR_LINE_MAX - 1);
+        snprintf(sb->lines[sb->line_count++], SIDEBAR_LINE_MAX, "%s", d.u.s);
+        free(d.u.s);
+    }
+    char seen[STATS_MAX_ITEMS][STATS_NAME_MAX];
+    int seen_count = 0;
+    for (int i = 0; i < sb->line_count; i++)
+        sidebar_check_line(cfg, sb->lines[i], seen, &seen_count);
+}
+
 /* ── volume section ──────────────────────────────────────────────────── */
 
 /* Is `name` an executable on PATH? Used to pick between wpctl and pactl, which
@@ -2357,6 +2525,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_battery(NULL, cfg);
     load_mixer(NULL, cfg);
     load_stats(NULL, cfg);
+    load_sidebar(NULL, cfg);
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
     load_sun(NULL, cfg);     /* likewise: a sun in the sky before anything is read */
     load_star(NULL, &cfg->star, cfg);
@@ -2414,6 +2583,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_volume(root, cfg);
     load_mixer(root, cfg);
     load_stats(root, cfg);
+    load_sidebar(root, cfg);
     load_wallpaper(root, cfg);
     load_wallpaper_picker(root, cfg);
     load_liquids_ready(root, cfg);

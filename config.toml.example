@@ -179,6 +179,32 @@ tick_rate             = 60.0
 #vol = "pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1"
 #mic = "pactl get-source-mute @DEFAULT_SOURCE@ | grep -q yes && echo off || echo on"
 
+# A column of text down the right edge of every screen, on the wallpaper: no
+# panel behind it, the windows above it. Each entry of `lines` is a line;
+# `{name}` in it is a readout — cpu, ram, gpu, bat, net, or any other key here,
+# which is a shell command whose WHOLE output stands in for it. `{{` is a
+# literal brace. Pango markup works within a line (<b>, <span color="...">).
+# `color` unset follows the wallpaper's palette.
+#[sidebar]
+#enabled  = true
+#width    = 0.10           # share of the screen's width at least; a longer line widens it
+#font     = "monospace 10"
+#align    = "left"         # or "right"
+#margin   = 16
+#shadow   = true
+#interval = 2.0
+#lines = [
+#  "<b>ilu@void</b>",
+#  "",
+#  "CPU   {cpu}",
+#  "RAM   {ram}",
+#  "TEMP  {temp}",
+#  "",
+#  "{disks}",
+#]
+#temp  = "sensors | awk '/Tctl/ {print $2}'"
+#disks = "df -h / /home | tail -n +2"
+
 # Window decorations: focus border colors ("#RRGGBB" or "#RRGGBBAA"),
 # border width (0 disables) and map fade-in duration (0 disables).
 [decor]
