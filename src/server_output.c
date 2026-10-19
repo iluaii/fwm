@@ -40,6 +40,7 @@
 #include "sidebar.h"
 #include "glass.h"
 #include "star_draw.h"
+#include "space_draw.h"
 #include "expo.h"
 #include "group.h"
 #include "shadow.h"
@@ -521,6 +522,7 @@ static void handle_output_destroy(struct wl_listener *listener, void *data) {
     sidebar_destroy(output->sidebar);
     star_draw_destroy(output->star_draw);
     output->star_draw = NULL;
+    server_space_output_gone(output->server, output);
     server_liquid_output_gone(output->server, output);
     if (output->tray_buffer) cairo_overlay_destroy(output->tray_buffer);
     wl_list_remove(&output->frame.link);
@@ -1298,7 +1300,9 @@ static void output_build_wallpaper(FwmOutput *out) {
     wallpaper_set_origin(out->wallpaper, out->box.x, out->box.y);
     wallpaper_update(out->wallpaper, out->camera_x);
     /* Grass stands in the same tree and must stay above the wallpaper, which
-     * has just been added on top of it. */
+     * has just been added on top of it; the solar system goes back over the
+     * wallpaper first. */
+    if (out->space_draw) space_draw_raise(out->space_draw);
     if (out->grass) grass_raise(out->grass);
     if (out->star_draw) star_draw_raise(out->star_draw);
 }
@@ -1582,6 +1586,7 @@ static void output_leave_layout(FwmServer *server, FwmOutput *out) {
         grass_destroy(out->grass);
         out->grass = NULL;
     }
+    server_space_output_gone(server, out);
     sidebar_destroy(out->sidebar);
     out->sidebar = NULL;
     if (out->tray_buffer) {

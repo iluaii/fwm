@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### A solar system for a wallpaper
+
+The wallpaper picker has a new first row, **Solar system**, marked with a
+ringed planet. Pick it and each desktop is a planet and each window a moon of
+it: switching desktop flies the camera to that planet, focusing a window flies
+it to its moon, opening one condenses a new moon out of light and closing one
+blows it up. Ten kinds of planet and six of star, set in `[space]` — change
+them and reload, and they swap where they stand. It sleeps under a fullscreen
+window; see
+[space](docs/configuration.md#space).
+
 ### Desktops start tiled
 
 With nothing said in `[tiling] default`, the ten desktops now come up tiled

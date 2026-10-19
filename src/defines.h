@@ -38,6 +38,13 @@
  * The ceiling IS the compositor's: the tray packs one urgent flag per desktop
  * into an int (sig_urgent, ui/tray.h). */
 #define FWM_DESKTOPS            10
+
+/* What the wallpaper picker hands over, and the wallpaper state file keeps,
+ * for the solar-system wallpaper in place of an image path (server_space.c).
+ * Not a path anything could be called, so it cannot shadow a real file. */
+#define FWM_SPACE_PICK          "fwm:space"
+/* Monitors it can be picked for by name at once. */
+#define FWM_SPACE_OUTPUTS       8
 _Static_assert(FWM_DESKTOPS >= 4,  "FWM_DESKTOPS below 4 is untestable, not unbuildable");
 _Static_assert(FWM_DESKTOPS <= 31, "FWM_DESKTOPS must fit the tray's urgent bitmask");
 #define DRAG_MARGIN             5

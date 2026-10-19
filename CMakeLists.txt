@@ -137,6 +137,10 @@ set(SOURCES
     src/star.c
     src/star_draw.c
     src/star_gl.c
+    src/space.c
+    src/space_gl.c
+    src/space_draw.c
+    src/server_space.c
     src/sun.c
     src/shadow.c
     src/blur.c
@@ -452,6 +456,14 @@ if(FWM_TESTS)
     target_include_directories(test_sun PRIVATE src tests ${XKBCOMMON_INCLUDE_DIRS})
     target_link_libraries(test_sun PRIVATE m)
 
+    # The solar-system wallpaper's world and camera: a window becoming a moon,
+    # an explosion, a focus flight, a camera that never ends up inside a
+    # planet. space.c, like star.c, reaches no further than config.h's types,
+    # so it is all walked in a loop rather than watched in a session.
+    add_executable(test_space tests/test_space.c src/space.c)
+    target_include_directories(test_space PRIVATE src tests ${XKBCOMMON_INCLUDE_DIRS})
+    target_link_libraries(test_space PRIVATE m)
+
     # Application memory footprints come out of /proc, which cannot be faked
     # and is easy to misparse. The suite forks its own child to check the tree
     # walk, so it needs nothing of the machine but a working /proc.
@@ -517,6 +529,7 @@ if(FWM_TESTS)
     add_test(NAME seam       COMMAND test_seam)
     add_test(NAME rubber     COMMAND test_rubber)
     add_test(NAME sun        COMMAND test_sun)
+    add_test(NAME space      COMMAND test_space)
     add_test(NAME star       COMMAND test_star)
     add_test(NAME ram        COMMAND test_ram)
     add_test(NAME wav        COMMAND test_wav)

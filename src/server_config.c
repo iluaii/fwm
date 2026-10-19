@@ -85,6 +85,8 @@
 #include <xkbcommon/xkbcommon.h>
 #include <linux/input-event-codes.h>
 #include "server_internal.h"
+#include "space_draw.h"
+#include "space_gl.h"
 
 void server_config_path(char *buf, size_t cap) {
     const char *home = getenv("HOME");
@@ -606,7 +608,10 @@ static void state_apply_wallpaper_file(FwmServer *server, const char *output,
     char line[512];
     if (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = '\0';
-        if (line[0] && access(line, R_OK) == 0) {
+        if (strcmp(line, FWM_SPACE_PICK) == 0) {
+            /* The solar system was picked for this monitor last time. */
+            server_space_pick(server, output, true);
+        } else if (line[0] && access(line, R_OK) == 0) {
             WallpaperLayer *w = config_wallpaper_set_path(&server->config, output, line);
             /* Remembered picks are picker choices, so honour the picker's base
              * fps here too — a restart must not revert to source rate. */
@@ -686,7 +691,9 @@ static void wallpaper_rebuild_showing(FwmServer *server, const WallpaperLayer *l
             }
         }
         /* The new set went in above everything already in the background
-         * layer, grass included. */
+         * layer, grass included — and the solar system, which is drawn over
+         * the wallpaper and has to be put back on top of it. */
+        if (out->space_draw) space_draw_raise(out->space_draw);
         if (out->grass) grass_raise(out->grass);
     }
 }
@@ -712,14 +719,37 @@ static const char *wallpaper_pick_target(FwmServer *server) {
     return wl_list_length(&server->outputs) < 2 ? "" : name;
 }
 
+/* The solar system, picked in place of an image. It is drawn over whatever
+ * wallpaper the monitor has, which stays underneath, untouched, for the day an
+ * image is picked again — and for a renderer that cannot draw the shader. */
+static void server_set_space(FwmServer *server) {
+    const char *output = wallpaper_pick_target(server);
+    if (!space_gl_supported(server->wlr_renderer)) {
+        wlr_log(WLR_ERROR, "wallpaper: the solar system needs the GLES2 renderer");
+        return;
+    }
+    server_space_pick(server, output, true);
+    server_state_save_wallpaper(output, FWM_SPACE_PICK);
+    server_space_sync(server);
+    if (output[0]) wlr_log(WLR_INFO, "wallpaper on %s set to the solar system", output);
+    else           wlr_log(WLR_INFO, "wallpaper set to the solar system");
+}
+
 void server_set_wallpaper(FwmServer *server, const char *path) {
     if (!path || !path[0]) return;
+    if (strcmp(path, FWM_SPACE_PICK) == 0) {
+        server_set_space(server);
+        return;
+    }
     if (access(path, R_OK) != 0) {
         wlr_log(WLR_ERROR, "wallpaper '%s' is not readable", path);
         return;
     }
 
     const char *output = wallpaper_pick_target(server);
+    /* An image picked where the solar system was takes its place. */
+    server_space_pick(server, output, false);
+    server_space_sync(server);
 
     /* Only the path changes: fit and zoom stay as configured, so a "pan" setup
      * keeps panning with the new image. A monitor with no layer of its own
@@ -941,6 +971,10 @@ void server_apply_config(FwmServer *server, int rebuild_wallpaper) {
                         (size_t)(server->config.clipboard.max_kb * 1024.0));
 
     server_request_tray_redraw(server);
+
+    /* The solar system's planets and star, swapped to what [space] says now —
+     * a wave across each planet that changed, a flash for a new star. */
+    server_space_config(server);
 
     /* Last: whatever this changed, the subscribers hear about it here and
      * nowhere else. */

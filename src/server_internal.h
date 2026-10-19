@@ -301,6 +301,23 @@ void server_grass_sync(FwmServer *server);
  * changed. Called from the tick. */
 void server_sidebar_sync(FwmServer *server, double dt);
 
+/* ── server_space.c ───────────────────────────────────────────────────── */
+/* The solar-system wallpaper. Picked like an image (FWM_SPACE_PICK through
+ * server_set_wallpaper) for one monitor or the un-named set; drawn on its own
+ * timer at [space] fps, not on the physics tick. */
+bool server_space_on_output(FwmServer *server, FwmOutput *out);
+/* A pick for `output` ("" = the un-named set): on for the solar system, off
+ * when an image was picked instead. Only records; the timer does the rest. */
+void server_space_pick(FwmServer *server, const char *output, bool on);
+/* Once a tick: (dis)arm the timer for what is on screen now. Cheap. */
+void server_space_sync(FwmServer *server);
+/* After a config reload: planets and star swap to what [space] now says. */
+void server_space_config(FwmServer *server);
+/* GPU reset: drop the pictures and the program; the next frame builds both. */
+void server_space_gpu_release(FwmServer *server);
+void server_space_output_gone(FwmServer *server, FwmOutput *out);
+void server_space_finish(FwmServer *server);
+
 /* ── server_liquid.c ──────────────────────────────────────────────────── */
 /* Once a tick, after the windows are placed: hand the worker its next step if
  * the last one is done, and put the newest picture on every screen that can

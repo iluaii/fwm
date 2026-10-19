@@ -1966,7 +1966,8 @@ static int physics_tick_cb(void *data) {
         /* Either kind fully hides the wallpaper (fake fills the work area and
          * the tray covers the strip above it), so pause a video behind it: the
          * decode thread then blocks on its full queue and stops burning CPU. */
-        wallpaper_set_paused(fo->wallpaper, wp_covered);
+        /* And under the solar system, which hides it just as completely. */
+        wallpaper_set_paused(fo->wallpaper, wp_covered || server_space_on_output(server, fo));
         /* The grass is behind the same window, and swaying where nobody can see
          * it is the one cost of the feature worth refusing to pay. */
         grass_set_paused(fo->grass, wp_covered);
@@ -1993,6 +1994,7 @@ static int physics_tick_cb(void *data) {
     }
 
     server_video_sync(server); /* (dis)arm the video-frame timer for the new state */
+    server_space_sync(server); /* and the solar system's, for what is on screen now */
 
     // Redraw tray if data changed
     server_request_tray_redraw(server);

@@ -855,6 +855,28 @@ length     = 18.0      # px at 45 degrees, the reference length
 length_max = 90.0      # px it may never exceed
 opacity    = 0.5
 
+# The solar-system wallpaper: each desktop a planet, each window a moon of it.
+# Switching desktop flies the camera to that planet; focusing a window flies it
+# to its moon; opening one condenses a new moon out of light, closing one blows
+# it up. It is CHOSEN in the wallpaper picker (Super+Shift+P, "Solar system",
+# at the top) — this only says what it is made of. Asleep under a fullscreen
+# window, like a video wallpaper. Needs the GLES2 renderer.
+[space]
+# What is in the middle: sun, red_giant, blue_giant, white_dwarf, pulsar,
+# black_hole. Changing it and reloading collapses the old one into a flash and
+# grows the new one out of it.
+star = "sun"
+# The planet on each desktop, in desktop order: terra, ochre, saturn, ice, lava,
+# ocean, neptune, titan, selva, jupiter. A shorter list leaves the rest as they
+# are. A planet changed here is swapped by a wave running pole to pole.
+planets = ["terra", "ochre", "saturn", "ice", "lava",
+           "ocean", "neptune", "titan", "selva", "jupiter"]
+fps      = 30.0   # frames a second while something happens: a flight, a birth, a swap
+calm_fps = 30.0   # and while nothing does but the planets turning; lower saves GPU, but steps
+scale    = 1.0    # resolution it is drawn at, a fraction of the screen's; lower is cheaper and softer
+exposure = 1.0    # brightness
+speed    = 1.0    # how fast the system turns
+
 [grass]
 enabled = false
 # The size knob. Everything else scales against it, so raising this grows the

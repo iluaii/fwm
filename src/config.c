@@ -1159,6 +1159,98 @@ static void load_session(toml_table_t *root, SessionConfig *s, FwmConfig *cfg) {
     free(d.u.s);
 }
 
+/* ── space section ───────────────────────────────────────────────────── */
+
+const char *const config_space_kinds[SPACE_KIND_COUNT] = {
+    "terra", "ochre", "saturn", "ice", "lava", "ocean", "neptune", "titan", "selva", "jupiter",
+};
+const char *const config_space_stars[SPACE_STAR_COUNT] = {
+    "sun", "red_giant", "blue_giant", "white_dwarf", "pulsar", "black_hole",
+};
+
+static int space_name_index(const char *const *names, int n, const char *name) {
+    for (int i = 0; i < n; i++)
+        if (strcmp(names[i], name) == 0) return i;
+    return -1;
+}
+
+static void load_space(toml_table_t *root, SpaceConfig *c, FwmConfig *cfg) {
+    /* Out of the box every kind is on some desktop, in the order the stand
+     * that designed them listed them — hot near the star, cold far out is
+     * the orbits' business, not this list's. */
+    c->star = 0;
+    for (int d = 0; d < FWM_DESKTOPS; d++) c->planets[d] = d % SPACE_KIND_COUNT;
+    c->fps      = 30.0;
+    /* The same as fps out of the box. Half was tried: the slow turning of the
+     * planets visibly stepped at 15, at once. It stays a knob for whoever
+     * would rather have the GPU back. */
+    c->calm_fps = 30.0;
+    /* Full resolution. Half was the first default and looked it: stars
+     * smeared into blots and every limb gone soft. */
+    c->scale    = 1.0;
+    c->exposure = 1.0;
+    c->speed    = 1.0;
+
+    if (!root) return;
+    toml_table_t *tbl = toml_table_in(root, "space");
+    if (!tbl) return;
+
+    toml_datum_t st = toml_string_in(tbl, "star");
+    if (st.ok) {
+        int i = space_name_index(config_space_stars, SPACE_STAR_COUNT, st.u.s);
+        if (i < 0)
+            config_report_error(cfg, "[space] star \"%s\" is not one of sun, red_giant, "
+                                "blue_giant, white_dwarf, pulsar, black_hole — ignored", st.u.s);
+        else
+            c->star = i;
+        free(st.u.s);
+    }
+
+    /* One name per desktop, in desktop order. Shorter than the strip is fine —
+     * the rest keep their defaults; longer is reported, because the extra
+     * names were meant for desktops that do not exist. */
+    toml_array_t *arr = toml_array_in(tbl, "planets");
+    if (arr) {
+        int n = toml_array_nelem(arr);
+        if (n > FWM_DESKTOPS)
+            config_report_error(cfg, "[space] planets has %d names for %d desktops — "
+                                "the extra ones are ignored", n, FWM_DESKTOPS);
+        for (int i = 0; i < n && i < FWM_DESKTOPS; i++) {
+            toml_datum_t d = toml_string_at(arr, i);
+            if (!d.ok) {
+                config_report_error(cfg, "[space] planets[%d] is not a string — ignored", i);
+                continue;
+            }
+            int k = space_name_index(config_space_kinds, SPACE_KIND_COUNT, d.u.s);
+            if (k < 0)
+                config_report_error(cfg, "[space] planets[%d] \"%s\" is not one of terra, ochre, "
+                                    "saturn, ice, lava, ocean, neptune, titan, selva, jupiter — "
+                                    "ignored", i, d.u.s);
+            else
+                c->planets[i] = k;
+            free(d.u.s);
+        }
+    }
+
+    LOAD_DOUBLE(tbl, "fps", c->fps);
+    LOAD_DOUBLE(tbl, "calm_fps", c->calm_fps);
+    LOAD_DOUBLE(tbl, "scale", c->scale);
+    LOAD_DOUBLE(tbl, "exposure", c->exposure);
+    LOAD_DOUBLE(tbl, "speed", c->speed);
+    /* Clamped, not rejected: each of these has a range past which it is not a
+     * setting any more but a broken picture or a pinned GPU. */
+    if (c->fps < 5.0)       c->fps = 5.0;
+    if (c->fps > 120.0)     c->fps = 120.0;
+    if (c->calm_fps < 1.0)  c->calm_fps = 1.0;
+    if (c->calm_fps > c->fps) c->calm_fps = c->fps;
+    if (c->scale < 0.2)     c->scale = 0.2;
+    if (c->scale > 1.0)     c->scale = 1.0;
+    if (c->exposure < 0.2)  c->exposure = 0.2;
+    if (c->exposure > 4.0)  c->exposure = 4.0;
+    if (c->speed < 0.0)     c->speed = 0.0;
+    if (c->speed > 100.0)   c->speed = 100.0;
+}
+
 static void load_startup(toml_table_t *root, StartupConfig *s, FwmConfig *cfg) {
     s->count = 0;
     if (!root) return;
@@ -2552,6 +2644,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_mouse(NULL, cfg);   /* the built-in drag verbs, for every early-out below */
     load_sun(NULL, cfg);     /* likewise: a sun in the sky before anything is read */
     load_star(NULL, &cfg->star, cfg);
+    load_space(NULL, &cfg->space, cfg);
     load_wallpaper(NULL, cfg); /* and a wallpaper under them, for the same reason */
 
     FILE *f = fopen(path, "r");
@@ -2585,6 +2678,7 @@ void config_load(FwmConfig *cfg, const char *path) {
     load_decor(root, cfg);
     load_sun(root, cfg);
     load_star(root, &cfg->star, cfg);
+    load_space(root, &cfg->space, cfg);
     load_input(root, cfg);
     load_focus(root, &cfg->focus, cfg);
     load_idle(root, cfg);

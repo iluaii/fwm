@@ -373,6 +373,9 @@ static void gpu_release_caches(FwmServer *server) {
         wallpaper_gpu_release(out->wallpaper_prev);
         star_draw_gpu_release(out->star_draw);
     }
+    /* The solar system's pictures and program; the next frame builds both
+     * against the new renderer. */
+    server_space_gpu_release(server);
     /* The liquid's picture, and its shaders; the liquid itself is the CPU's
      * and carries on. */
     server_liquid_gpu_release(server);
@@ -942,6 +945,8 @@ void server_destroy(FwmServer *server) {
     /* The liquid's worker is stopped and its picture dropped here, for the
      * same reason: its buffers came from the renderer. */
     server_liquid_finish(server);
+    /* And the solar system's pictures, timer and world. */
+    server_space_finish(server);
 
     /* The one image every window's shadow was cut from. The windows are gone
      * by now, so nothing is left holding a lock on it. */

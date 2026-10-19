@@ -1210,6 +1210,65 @@ so the other screen keeps its image, and a screen that is currently dark still
 gets its own back when it returns. Deleting the file forgets the pick and the
 `[[wallpaper]]` layers stand again.
 
+The first row is not a file: **Solar system** — see [space](#space). It is
+remembered the same way, as `fwm:space` in place of a path.
+
+## space
+
+```toml
+[space]
+star     = "sun"      # sun red_giant blue_giant white_dwarf pulsar black_hole
+planets  = ["terra", "ochre", "saturn", "ice", "lava",
+            "ocean", "neptune", "titan", "selva", "jupiter"]
+fps      = 30.0       # 5..120, while something happens
+calm_fps = 30.0       # while nothing does; at most fps
+scale    = 1.0        # 0.2..1, of the screen's resolution
+exposure = 1.0
+speed    = 1.0        # 0 stops the orbits; births, flights and explosions keep their time
+```
+
+A wallpaper that is a living solar system. Each desktop is a planet on its own
+orbit round a star, each window a moon of the planet its desktop is — the same
+count as the desktop pill shows.
+
+- **Switching desktop** flies the camera off one planet, over the plane of the
+  orbits, to the next.
+- **Focusing a window** flies it to that window's moon, close up, with its
+  planet behind. The angle is picked fresh every time, with the star to one
+  side; the camera then rides the moon round its orbit.
+- **Opening a window** condenses a moon out of a contracting shell of light, in
+  view; the camera flies to it once it is born.
+- **Closing the focused window** backs the camera off to the planet, the moon
+  goes up — fireball, shockwave, glowing debris, smoke that thins away — and a
+  few seconds later the camera follows the focus on. An unfocused window's moon
+  just explodes where it is.
+- **Changing `planets` or `star`** and reloading swaps them where they stand: a
+  planet by a glowing wave running pole to pole, the star by collapsing into a
+  flash and growing the new one out of it.
+
+It is chosen in the [wallpaper picker](#wallpaper_picker) — **Solar system**,
+the first row, marked with a ringed planet — for the screen you are on, and
+drawn over that screen's wallpaper, which stays underneath untouched for the
+day an image is picked again.
+
+Under a fullscreen window it sleeps: nothing is drawn or computed. Whatever
+happened meanwhile — windows opened, closed, moved — is simply there when it
+wakes, with no explosions replayed.
+
+It is the most expensive thing fwm draws: at full resolution, 1080p, about 9 ms
+a frame on a mid-range GPU (an RX 570). `calm_fps` is the rate while nothing
+happens but the planets turning, `fps` while the camera flies, a moon is born or
+explodes, or a planet or the star swaps. They are the same out of the box: at
+15 the turning visibly steps.
+`scale` below 1 draws it at a fraction of the resolution and stretches it back
+up — at `0.5` a quarter of the cost, and visibly softer: stars blur into dots. The first time it is
+drawn — and after Mesa or fwm is updated — the shader takes a few seconds to
+build; that happens on a thread of its own, and the wallpaper under it shows
+until it is ready.
+
+Needs the GLES2 renderer; on Vulkan or pixman the row is not offered.
+`tools/space-render.c` draws it to a PNG without a compositor.
+
 ## cava
 
 The audio visualiser: a row of spectrum bars fed by loopback capture of whatever

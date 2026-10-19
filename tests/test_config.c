@@ -1923,6 +1923,49 @@ static void test_caps_hold(void) {
     drop_config();
 }
 
+static void test_space(void) {
+    CASE("[space] defaults: every kind on some desktop, the sun, a cheap picture");
+    const char *p = write_config("[binds]\n\"super+q\" = \"killclient\"\n");
+    FwmConfig cfg;
+    config_load(&cfg, p);
+    CHECK_INT(cfg.space.star, 0);
+    CHECK_INT(cfg.space.planets[0], 0);
+    CHECK_INT(cfg.space.planets[FWM_DESKTOPS - 1], (FWM_DESKTOPS - 1) % SPACE_KIND_COUNT);
+    CHECK_DBL(cfg.space.fps, 30.0, 1e-9);
+    CHECK_DBL(cfg.space.scale, 1.0, 1e-9);
+    CHECK_DBL(cfg.space.calm_fps, 30.0, 1e-9);
+    config_free(&cfg);
+
+    CASE("[space] names, in desktop order; a short list leaves the rest alone");
+    p = write_config("[space]\nstar = \"black_hole\"\nplanets = [\"jupiter\", \"lava\"]\n"
+                     "[binds]\n\"super+q\" = \"killclient\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 0);
+    CHECK_INT(cfg.space.star, 5);
+    CHECK_INT(cfg.space.planets[0], 9);
+    CHECK_INT(cfg.space.planets[1], 4);
+    CHECK_INT(cfg.space.planets[2], 2);   /* untouched default */
+    config_free(&cfg);
+
+    CASE("[space] a name it does not know is reported, not guessed");
+    p = write_config("[space]\nstar = \"quasar\"\nplanets = [\"terra\", \"mars\", 7]\n"
+                     "[binds]\n\"super+q\" = \"killclient\"\n");
+    config_load(&cfg, p);
+    CHECK_INT(cfg.error_count, 3);
+    CHECK_INT(cfg.space.star, 0);
+    CHECK_INT(cfg.space.planets[1], 1);   /* default kept */
+    config_free(&cfg);
+
+    CASE("[space] costs are clamped to what still draws");
+    p = write_config("[space]\nfps = 1000.0\nscale = 0.01\nexposure = -3.0\n");
+    config_load(&cfg, p);
+    CHECK_DBL(cfg.space.fps, 120.0, 1e-9);
+    CHECK_DBL(cfg.space.scale, 0.2, 1e-9);
+    CHECK_DBL(cfg.space.exposure, 0.2, 1e-9);
+    config_free(&cfg);
+    drop_config();
+}
+
 int main(void) {
     test_missing_file();
     test_values_parse();
@@ -1955,6 +1998,7 @@ int main(void) {
     test_clipboard();
     test_battery();
     test_startup();
+    test_space();
     test_tiling_defaults();
     test_tiling_splits();
     test_camera_back_and_forth();

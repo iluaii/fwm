@@ -35,6 +35,7 @@
 #include "config.h"
 #include "battery.h"
 #include "star.h"
+#include "space.h"
 #include "liquid_kinds.h"
 #include "sun.h"
 #include "gestures.h"
@@ -138,6 +139,11 @@ typedef struct FwmOutput {
      * screen. */
     struct FwmSidebar *sidebar;
     struct FwmStarDraw *star_draw;
+    /* The solar-system wallpaper on this monitor, when it was picked for it
+     * (server_space.c). The camera is this screen's own; the world is shared. */
+    struct FwmSpaceDraw *space_draw;
+    SpaceCam space_cam;
+    bool space_asleep;       /* covered last frame: wake without replaying what happened */
     /* This monitor's view of the liquid, when it can see the desktop the
      * liquid stands on (server_liquid.c). One picture, shared: the node is
      * only where on this screen it goes and how much of it fits. */
@@ -821,6 +827,16 @@ typedef struct FwmServer {
      * not covered; see server_video_sync. */
     struct wl_event_source *video_timer;
     int video_timer_on;
+    /* The solar-system wallpaper (server_space.c): the one world every monitor
+     * showing it looks into, the timer it is drawn on, and the monitors it was
+     * picked for, by name — "" for the un-named set, as the wallpaper's own
+     * state files have it. */
+    Space *space;
+    double space_last;
+    struct wl_event_source *space_timer;
+    bool space_timer_on;
+    char space_outputs[FWM_SPACE_OUTPUTS][64];
+    int space_output_count;
     struct timespec last_anim; /* frame-time clock for visual animations */
     
     /* UI scene nodes */

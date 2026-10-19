@@ -435,6 +435,32 @@ typedef struct {
     double opacity;        /* 0..1 at full strength */
 } StarConfig;
 
+/* [space]: the wallpaper as a living solar system (space.h). Each desktop is a
+ * planet, each window a moon of it; switching desktop flies the camera to the
+ * planet, focusing a window flies it to that moon. It is CHOSEN in the
+ * wallpaper picker, like an image — this section only says what it is made of
+ * and what it may cost. */
+#define SPACE_KIND_COUNT 10   /* planet kinds: terra ochre saturn ice lava ocean neptune titan selva jupiter */
+#define SPACE_STAR_COUNT 6    /* sun red_giant blue_giant white_dwarf pulsar black_hole */
+typedef struct {
+    int star;                   /* what is in the middle, 0..SPACE_STAR_COUNT-1 */
+    int planets[FWM_DESKTOPS];  /* the planet on each desktop, 0..SPACE_KIND_COUNT-1 */
+    /* What it may cost. It is the busiest thing fwm draws, so it is drawn at
+     * its own rate, not the monitor's — and a slower one while nothing but the
+     * planets turning is going on — and `scale` can draw it at a fraction of
+     * the screen's resolution, stretched back up, at the price of a softer
+     * picture. */
+    double fps;                 /* while something happens: a flight, a birth, a swap */
+    double calm_fps;            /* while nothing does: the slow turning of it all */
+    double scale;
+    double exposure;            /* brightness, 1 = as designed */
+    double speed;               /* how fast the system turns, 1 = as designed */
+} SpaceConfig;
+
+/* The names [space] takes for its planets and stars, in index order. */
+extern const char *const config_space_kinds[SPACE_KIND_COUNT];
+extern const char *const config_space_stars[SPACE_STAR_COUNT];
+
 /* ── input ───────────────────────────────────────────────────────────── */
 
 /*
@@ -1557,6 +1583,7 @@ typedef struct {
     DecorConfig     decor;
     SunConfig       sun;
     StarConfig      star;
+    SpaceConfig     space;
     InputConfig     input;
     FocusConfig     focus;
     IdleConfig      idle;

@@ -21,6 +21,7 @@
 #include "../video.h"
 #include "../launched.h"
 #include "../glass.h"
+#include "../space_gl.h"
 
 #include <box2d/box2d.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
@@ -81,6 +82,7 @@ typedef struct {
     cairo_surface_t *icon_surf; /* lazily resolved+loaded; NULL if none */
     int  icon_tried;
     int  is_video;              /* wallpaper row backed by a video file */
+    int  is_space;              /* the solar system, not a file (FWM_SPACE_PICK) */
     /* Everything the search side needs, prepared once at scan time: the name
      * case-folded, and the text you might type that is not the name (generic
      * name, keywords, binary) folded into one string. Folding here rather
@@ -424,6 +426,71 @@ static int wall_name_cmp(const void *va, const void *vb) {
     return strcasecmp(((const LApp *)va)->name, ((const LApp *)vb)->name);
 }
 
+/* The solar system's preview, painted rather than decoded — there is no file.
+ * A sliver of the real thing: black sky with a few stars, the star's glow at
+ * one edge, and a ringed planet lit from that side. */
+static cairo_surface_t *space_thumb(int w, int h) {
+    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) { cairo_surface_destroy(s); return NULL; }
+    cairo_t *cr = cairo_create(s);
+    cairo_set_source_rgb(cr, 0.012, 0.014, 0.03);
+    cairo_paint(cr);
+
+    static const double stars[][3] = {
+        { 0.08, 0.20, 0.7 }, { 0.22, 0.75, 0.5 }, { 0.45, 0.12, 0.8 }, { 0.58, 0.85, 0.4 },
+        { 0.88, 0.18, 0.6 }, { 0.93, 0.70, 0.5 }, { 0.33, 0.45, 0.35 }, { 0.70, 0.40, 0.3 },
+    };
+    for (size_t i = 0; i < sizeof(stars) / sizeof(stars[0]); i++) {
+        cairo_set_source_rgba(cr, 1.0, 0.97, 0.9, stars[i][2]);
+        cairo_rectangle(cr, stars[i][0] * w, stars[i][1] * h, 1.0, 1.0);
+        cairo_fill(cr);
+    }
+
+    /* The star, just off the left edge. */
+    cairo_pattern_t *glow = cairo_pattern_create_radial(-2.0, h * 0.3, 0.0, -2.0, h * 0.3, w * 0.55);
+    cairo_pattern_add_color_stop_rgba(glow, 0.0, 1.0, 0.95, 0.85, 1.0);
+    cairo_pattern_add_color_stop_rgba(glow, 0.12, 1.0, 0.85, 0.6, 0.6);
+    cairo_pattern_add_color_stop_rgba(glow, 1.0, 1.0, 0.7, 0.4, 0.0);
+    cairo_set_source(cr, glow);
+    cairo_paint(cr);
+    cairo_pattern_destroy(glow);
+
+    /* The planet, lit from the star's side, and its ring across it: the far
+     * half of the ring behind the disc, the near half over it. */
+    double cx = w * 0.64, cy = h * 0.56, r = h * 0.34;
+    cairo_save(cr);
+    cairo_translate(cr, cx, cy);
+    cairo_rotate(cr, -0.32);
+    cairo_scale(cr, 1.0, 0.28);
+    cairo_set_line_width(cr, 2.2);
+    cairo_set_source_rgba(cr, 0.85, 0.78, 0.62, 0.75);
+    cairo_arc(cr, 0, 0, r * 1.75, M_PI, 2.0 * M_PI);
+    cairo_stroke(cr);
+    cairo_restore(cr);
+
+    cairo_pattern_t *body = cairo_pattern_create_radial(cx - r * 0.55, cy - r * 0.35, r * 0.1, cx, cy, r);
+    cairo_pattern_add_color_stop_rgb(body, 0.0, 0.62, 0.78, 0.95);
+    cairo_pattern_add_color_stop_rgb(body, 0.55, 0.18, 0.36, 0.66);
+    cairo_pattern_add_color_stop_rgb(body, 1.0, 0.02, 0.04, 0.10);
+    cairo_set_source(cr, body);
+    cairo_arc(cr, cx, cy, r, 0, 2.0 * M_PI);
+    cairo_fill(cr);
+    cairo_pattern_destroy(body);
+
+    cairo_save(cr);
+    cairo_translate(cr, cx, cy);
+    cairo_rotate(cr, -0.32);
+    cairo_scale(cr, 1.0, 0.28);
+    cairo_set_line_width(cr, 2.2);
+    cairo_set_source_rgba(cr, 0.92, 0.85, 0.70, 0.9);
+    cairo_arc(cr, 0, 0, r * 1.75, 0.0, M_PI);
+    cairo_stroke(cr);
+    cairo_restore(cr);
+
+    cairo_destroy(cr);
+    return s;
+}
+
 /* One flat scan of the configured directory — no recursion: a wallpaper folder
  * is a wallpaper folder, and descending into it risks walking a whole Pictures
  * tree on every open. */
@@ -438,6 +505,24 @@ static void scan_wallpapers(Launcher *l) {
     l->wall_count = 0;
     l->walls = calloc(MAX_APPS, sizeof(LApp));
     if (!l->walls) { l->walls = old; l->wall_count = old_count; return; }
+
+    /* First, ahead of every file: the solar system. It is not in the folder
+     * and never could be, and it is the one choice that is the same on every
+     * machine — so it stands at the top, where it is found without a search.
+     * Only where it can be drawn at all. */
+    if (space_gl_supported(l->server->wlr_renderer)) {
+        LApp *it = &l->walls[l->wall_count++];
+        memset(it, 0, sizeof(*it));
+        it->is_space = 1;
+        snprintf(it->name, sizeof(it->name), "Solar system");
+        snprintf(it->exec, sizeof(it->exec), "%s", FWM_SPACE_PICK);
+        ls_fold(it->fold, sizeof(it->fold), it->name);
+        ls_fold(it->alias, sizeof(it->alias),
+                "space live planets orbit cosmos космос живые обои планеты солнечная система");
+        it->icon_surf = space_thumb((int)THUMB_W, (int)THUMB_H);
+        it->icon_tried = 1;
+    }
+    int files_from = l->wall_count;
 
     const char *dir = l->server->config.wallpaper_dir;
     DIR *d = opendir(dir);
@@ -496,7 +581,7 @@ static void scan_wallpapers(Launcher *l) {
     }
     free(old);
 
-    qsort(l->walls, l->wall_count, sizeof(LApp), wall_name_cmp);
+    qsort(l->walls + files_from, (size_t)(l->wall_count - files_from), sizeof(LApp), wall_name_cmp);
 }
 
 /* ── filtering ───────────────────────────────────────────────────────── */
@@ -515,6 +600,12 @@ static int match_cmp(const void *va, const void *vb) {
      * typing would stop steering the list — the row you use most would sit on
      * top no matter what letters were in the bar. */
     if (g_sort_tier[ia] != g_sort_tier[ib]) return g_sort_tier[ia] - g_sort_tier[ib];
+
+    /* The solar system heads the wallpapers wherever it ties: on an empty
+     * query that is always, so the picker opens on it — it is not in the
+     * folder, so there is no file name for the list to file it under. */
+    if (g_sort_apps[ia].is_space != g_sort_apps[ib].is_space)
+        return g_sort_apps[ib].is_space - g_sort_apps[ia].is_space;
 
     /* Then what you actually run. This is the whole of what frecency buys:
      * among matches that are equally good, the one you reach for wins, and on
@@ -743,7 +834,19 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
             } else {
                 cairo_set_source_rgb(cr, thm->muted[0], thm->muted[1], thm->muted[2]);
             }
-            if (app->is_video) {
+            if (app->is_space) {
+                /* Ringed planet: the solar system, live and not a file */
+                cairo_set_line_width(cr, 1.2);
+                cairo_arc(cr, bx, by, 2.8, 0, 2.0 * M_PI);
+                cairo_fill(cr);
+                cairo_save(cr);
+                cairo_translate(cr, bx, by);
+                cairo_rotate(cr, -0.4);
+                cairo_scale(cr, 1.0, 0.35);
+                cairo_arc(cr, 0, 0, 6.0, 0, 2.0 * M_PI);
+                cairo_restore(cr);
+                cairo_stroke(cr);
+            } else if (app->is_video) {
                 /* Play triangle (▶): motion video */
                 cairo_new_path(cr);
                 cairo_move_to(cr, bx - 3.5, by - 4.5);
