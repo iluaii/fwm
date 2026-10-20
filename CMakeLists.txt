@@ -116,6 +116,12 @@ if(NOT PULSE_FOUND)
     message(STATUS "no libpulse-simple — [sound] collision audio disabled")
 endif()
 find_package(box2d REQUIRED)
+# Box2D 3.2 renamed a handful of the calls physics.c makes; it picks the
+# spelling from this. Set on the imported target so every user of it agrees.
+if(box2d_VERSION VERSION_GREATER_EQUAL 3.2)
+    set_property(TARGET box2d::box2d APPEND PROPERTY
+        INTERFACE_COMPILE_DEFINITIONS FWM_BOX2D_3_2)
+endif()
 # The video decode runs on its own pthread; the compositor stays single-threaded.
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)

@@ -23,7 +23,7 @@
 #include "../glass.h"
 #include "../space_gl.h"
 
-#include <box2d/box2d.h>
+#include "../box2d_compat.h"
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <dirent.h>
 #include <stdio.h>
@@ -656,7 +656,7 @@ static double slot_cy(int i) {
 static b2BodyId tile_body_create(Launcher *l, int rank) {
     b2BodyDef bd = b2DefaultBodyDef();
     bd.type = b2_dynamicBody;
-    bd.fixedRotation = true;
+    b2_lock_rotation(&bd, true);
     bd.position = (b2Vec2){px2m(tile_cx(l)),
                            px2m(slot_cy(rank) + SPAWN_DROP + rank * SPAWN_STEP)};
     b2BodyId body = b2CreateBody(l->world, &bd);

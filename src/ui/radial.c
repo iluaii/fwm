@@ -19,7 +19,7 @@
 #include "../server.h"
 #include "../glass.h"
 
-#include <box2d/box2d.h>
+#include "../box2d_compat.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -133,7 +133,7 @@ static void slot_pos(Radial *r, int i, double *x, double *y) {
 static b2BodyId petal_body_create(Radial *r) {
     b2BodyDef bd = b2DefaultBodyDef();
     bd.type = b2_dynamicBody;
-    bd.fixedRotation = true;
+    b2_lock_rotation(&bd, true);
     /* Every petal starts inside the hub and blooms out of it. */
     bd.position = (b2Vec2){ px2m(r->cx), px2m(r->cy) };
     b2BodyId body = b2CreateBody(r->world, &bd);

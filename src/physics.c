@@ -15,7 +15,7 @@
 #include "physics.h"
 #include "defines.h"
 
-#include <box2d/box2d.h>
+#include "box2d_compat.h"
 
 #include <assert.h>
 #include <math.h>
@@ -354,9 +354,9 @@ void physics_init(PhysicsWorld *world) {
      * doing the shoving simply arrived first. Scaled to the world's own top speed
      * instead — overlap is resolved as fast as anything in this world moves.
      * Kept in step with the live knob below. */
-    wd.maxContactPushSpeed = px2m(world->max_throw_speed);
+    wd.B2_CONTACT_SPEED = px2m(world->max_throw_speed);
     eng->world = b2CreateWorld(&wd);
-    eng->contact_push = wd.maxContactPushSpeed;
+    eng->contact_push = wd.B2_CONTACT_SPEED;
     eng->walls_built = false;
 
     eng->linear_damping = damping_from_friction(world->friction);
@@ -952,7 +952,7 @@ static void slot_create(struct Engine *eng, PhysicsWorld *world, int i, PhysicsB
     bd.linearVelocity = (b2Vec2){px2m(m->vx), px2m(m->vy)};
     bd.rotation = body_rot(m);
     bd.angularVelocity = (float)m->angvel;
-    bd.fixedRotation = !m->spin;         // windows never rotate unless spun
+    b2_lock_rotation(&bd, !m->spin);         // windows never rotate unless spun
     /* Left free a spin coasts for the better part of a minute, which reads as
      * the window being stuck rather than thrown. This bleeds it off over a few
      * seconds while still letting a hard kick get several turns in. */
@@ -1181,7 +1181,7 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
              * simply sits there. (A window resting in zero-g is asleep within a
              * second, which is to say: always, by the time the bind is pressed.) */
             b2Body_SetAwake(s->body, true);
-            b2Body_SetFixedRotation(s->body, !m->spin);
+            b2_set_rotation_locked(s->body, !m->spin);
             b2Body_SetTransform(s->body, body_center_m(m), body_rot(m));
             b2Body_SetAngularVelocity(s->body, (float)m->angvel);
             s->spin = m->spin;
@@ -1317,7 +1317,7 @@ void physics_step(PhysicsWorld *world, int screen_width, int screen_height,
 
         float want = (float)px2m(ceiling > 0.0 ? ceiling * 2.0 : 1.0e6);
         if (want != eng->engine_max_speed) {
-            b2World_SetMaximumLinearSpeed(eng->world, want);
+            b2_set_max_speed(eng->world, want);
             eng->engine_max_speed = want;
         }
 
