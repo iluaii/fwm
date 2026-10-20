@@ -50,7 +50,7 @@ add_compile_options(
 add_compile_options($<$<CONFIG:Debug>:-fno-omit-frame-pointer>)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(WAYLAND_SERVER REQUIRED wayland-server)
+pkg_check_modules(WAYLAND_SERVER REQUIRED wayland-server>=1.23)
 # wlroots is hard-pinned: the unstable API breaks between minor versions, so
 # fwm builds only against the 0.20 series (the .pc name itself is versioned;
 # a system upgrade to 0.21 fails configure loudly instead of breaking the

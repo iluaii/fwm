@@ -495,6 +495,12 @@ bool server_init(FwmServer *server, bool debug) {
         wlr_log(WLR_ERROR, "failed to create display");
         return false;
     }
+    /* libwayland's default is a 4 KiB buffer per client, and a client that
+     * stops reading for a moment (Xwayland while the disk hangs) overflows it;
+     * libwayland then disconnects that client. For Xwayland that kills every
+     * X11 app at once. Let the buffers grow to 1 MiB instead; set here so it
+     * covers every client, Xwayland included, which all connect later. */
+    wl_display_set_default_max_buffer_size(server->wl_display, 1 << 20);
     
     struct wl_event_loop *event_loop = wl_display_get_event_loop(server->wl_display);
 
