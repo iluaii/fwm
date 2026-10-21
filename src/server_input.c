@@ -624,6 +624,7 @@ static void handle_keyboard_key(struct wl_listener *listener, void *data) {
             // and typing keys ourselves (same delay/rate as bind repeat).
             bool repeatable = sym == XKB_KEY_Up || sym == XKB_KEY_Down
                 || sym == XKB_KEY_Tab || sym == XKB_KEY_BackSpace
+                || sym == XKB_KEY_Page_Up || sym == XKB_KEY_Page_Down
                 || (utf8[0] && (unsigned char)utf8[0] >= 0x20 && utf8[0] != 0x7f);
             if (repeatable && server->key_repeat_timer) {
                 server->repeat_l_active = 1;

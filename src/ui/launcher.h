@@ -42,6 +42,9 @@ void launcher_tick(Launcher *launcher, double dt);
  * press launches the tile under the cursor or closes on a click outside.
  * Both are no-ops when closed; handle_button returns true if consumed. */
 void launcher_handle_motion(Launcher *launcher, double lx, double ly);
+/* The wheel walks the selection through the whole list, scrolling the tiles
+ * after it. Returns true (consumed) whenever the launcher is open. */
+bool launcher_handle_axis(Launcher *launcher, double delta);
 bool launcher_handle_button(Launcher *launcher, double lx, double ly, bool pressed);
 
 #endif /* FWM_LAUNCHER_H */

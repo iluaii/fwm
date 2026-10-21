@@ -931,6 +931,11 @@ static void handle_cursor_axis(struct wl_listener *listener, void *data) {
      * underneath instead would be scrolling a page nobody is looking at. */
     if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL &&
         mixer_handle_axis(server->mixer, event->delta)) return;
+    /* The launcher's list likewise: it is what the wheel is for while it is
+     * up, and walking a folder of wallpapers by name alone is no way to look
+     * through them. */
+    if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL &&
+        launcher_handle_axis(server->launcher, event->delta)) return;
 
     // Scrolling over the desktop island steps between desktops. Consumed, so
     // it never also scrolls whatever window happens to be under the tray.

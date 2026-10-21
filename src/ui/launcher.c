@@ -120,7 +120,12 @@ struct Launcher {
     int *mtier;
     int *mscore;
     int  match_count;
-    int  sel;        /* selection among the first MAX_SHOW matches */
+    int  sel;        /* selection, an index into match */
+    /* First match the tiles show. The list on screen is a window of MAX_SHOW
+     * rows sliding over all the matches, so a folder of wallpapers can be
+     * walked end to end without knowing a single name to type. */
+    int  top;
+    double wheel;    /* scroll not yet worth a whole row */
 
     LsFrec *frec;              /* launch history, loaded per open */
     char    frec_path[512];
@@ -642,6 +647,14 @@ static void refilter(Launcher *l) {
     g_sort_score = l->mscore;
     qsort(l->match, l->match_count, sizeof(int), match_cmp);
     l->sel = 0;
+    l->top = 0;
+}
+
+/* How many tiles the window holds: MAX_SHOW, or fewer at the end of a short
+ * list. */
+static int shown_count(Launcher *l) {
+    int left = l->match_count - l->top;
+    return left < MAX_SHOW ? left : MAX_SHOW;
 }
 
 /* ── tile physics ────────────────────────────────────────────────────── */
@@ -653,12 +666,17 @@ static double slot_cy(int i) {
     return BAR_H + BAR_GAP + (i + 0.5) * (TILE_H + TILE_GAP);
 }
 
-static b2BodyId tile_body_create(Launcher *l, int rank) {
+/* `scroll` is how far the window just moved: a row that scrolls into view
+ * starts where it would have been a moment ago — just past the edge it comes
+ * in at — and glides in with the rest, instead of flying up from below as a
+ * fresh result does. */
+static b2BodyId tile_body_create(Launcher *l, int rank, int scroll) {
     b2BodyDef bd = b2DefaultBodyDef();
     bd.type = b2_dynamicBody;
     b2_lock_rotation(&bd, true);
-    bd.position = (b2Vec2){px2m(tile_cx(l)),
-                           px2m(slot_cy(rank) + SPAWN_DROP + rank * SPAWN_STEP)};
+    double y = scroll ? slot_cy(rank + scroll)
+                      : slot_cy(rank) + SPAWN_DROP + rank * SPAWN_STEP;
+    bd.position = (b2Vec2){px2m(tile_cx(l)), px2m(y)};
     b2BodyId body = b2CreateBody(l->world, &bd);
 
     b2ShapeDef sd = b2DefaultShapeDef();
@@ -675,15 +693,18 @@ static b2BodyId tile_body_create(Launcher *l, int rank) {
 
 /* Diff the shown matches against the current tiles: surviving apps keep their
  * body (the slot spring glides it to its new rank), departed bodies die, and
- * only genuinely new results fly in from below. */
-static void tiles_rebuild(Launcher *l) {
-    int shown = l->match_count < MAX_SHOW ? l->match_count : MAX_SHOW;
+ * only genuinely new results fly in from below. `scroll` as tile_body_create;
+ * a jump of a whole window or more has nothing to glide next to and flies in
+ * like a new query. */
+static void tiles_rebuild(Launcher *l, int scroll) {
+    int shown = shown_count(l);
     b2BodyId new_tiles[MAX_SHOW];
     int new_app[MAX_SHOW];
     bool reused[MAX_SHOW] = {0};
+    if (abs(scroll) >= MAX_SHOW) scroll = 0;
 
     for (int i = 0; i < shown; i++) {
-        int app = l->match[i];
+        int app = l->match[l->top + i];
         new_app[i] = app;
         new_tiles[i] = b2_nullBodyId;
         for (int j = 0; j < l->tile_count; j++) {
@@ -694,7 +715,7 @@ static void tiles_rebuild(Launcher *l) {
             }
         }
         if (B2_IS_NULL(new_tiles[i])) {
-            new_tiles[i] = tile_body_create(l, i);
+            new_tiles[i] = tile_body_create(l, i, scroll);
         }
     }
     for (int j = 0; j < l->tile_count; j++) {
@@ -804,6 +825,11 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
     }
 
     /* ── tiles ── */
+    /* A row scrolling in from above starts behind the bar; cut it off there
+     * rather than paint it over the query. */
+    cairo_save(cr);
+    cairo_rectangle(cr, 0, BAR_H + BAR_GAP / 2.0, l->panel_w, l->panel_h);
+    cairo_clip(cr);
     for (int i = 0; i < l->tile_count; i++) {
         b2Vec2 c = b2Body_GetPosition(l->tiles[i]);
         double cx = m2px(c.x), cy = m2px(c.y);
@@ -811,7 +837,7 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
         double y = cy - TILE_H / 2.0;
         if (y > l->panel_h) continue; /* still flying in from below */
 
-        int selected = (i == l->sel);
+        int selected = (l->top + i == l->sel);
         pill_path(cr, x, y, l->tile_w, TILE_H);
         if (selected) {
             double sa = alpha + 0.04 > 1.0 ? 1.0 : alpha + 0.04;
@@ -821,7 +847,7 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
         }
         cairo_fill(cr);
 
-        LApp *app = &items(l)[l->match[i]];
+        LApp *app = &items(l)[l->match[l->top + i]];
         double text_x = x + TILE_H / 2.0 + 4.0;
         double art_w = ICON_SZ;
         if (l->mode == LMODE_WALLPAPERS) {
@@ -902,6 +928,21 @@ static void draw_launcher(cairo_t *cr, int w, int h, void *data) {
         }
         cairo_move_to(cr, text_x, y + (TILE_H - th) / 2.0);
         pango_cairo_show_layout(cr, layout);
+    }
+    cairo_restore(cr);
+
+    /* Where the window is in a list longer than it: a thin bar in the margin
+     * right of the tiles, only when there is anything to scroll. */
+    if (l->match_count > MAX_SHOW) {
+        double track_y = BAR_H + BAR_GAP;
+        double track_h = MAX_SHOW * (TILE_H + TILE_GAP) - TILE_GAP;
+        double thumb_h = track_h * MAX_SHOW / l->match_count;
+        if (thumb_h < 16.0) thumb_h = 16.0;
+        double t = (double)l->top / (l->match_count - MAX_SHOW);
+        cairo_set_source_rgba(cr, thm->muted[0], thm->muted[1], thm->muted[2], 0.6);
+        cairo_rectangle(cr, l->bar_w - 6.0, track_y + t * (track_h - thumb_h),
+                        2.5, thumb_h);
+        cairo_fill(cr);
     }
 
     /* Undo the per-tile ellipsis before anything else uses this layout. */
@@ -1027,10 +1068,11 @@ static void launcher_open(Launcher *l) {
     }
 
     l->query[0] = '\0';
+    l->wheel = 0.0;
     refilter(l);
 
     world_create(l);
-    tiles_rebuild(l);
+    tiles_rebuild(l, 0);
 
     l->overlay = cairo_overlay_create(server->layer_overlay, l->panel_w, l->panel_h);
     if (!l->overlay) {
@@ -1165,8 +1207,7 @@ bool launcher_is_open(Launcher *l) {
 
 static void launch_selected(Launcher *l) {
     if (l->match_count == 0) return;
-    int shown = l->match_count < MAX_SHOW ? l->match_count : MAX_SHOW;
-    int sel = l->sel < shown ? l->sel : 0;
+    int sel = l->sel < l->match_count ? l->sel : 0;
     const LApp *app = &items(l)[l->match[sel]];
 
     if (l->mode == LMODE_WALLPAPERS) {
@@ -1204,9 +1245,31 @@ static void launch_selected(Launcher *l) {
     launched_note(l->server, server_spawn(cmd), server_active_desktop(l->server), cmd);
 }
 
+/* Put the selection on match `sel` and slide the window just far enough to
+ * keep it in view. `wrap` lets a step off either end come round to the other;
+ * a page step stops at the end instead, so holding it lands on the last row
+ * rather than cycling past it. */
+static void select_row(Launcher *l, int sel, bool wrap) {
+    int n = l->match_count;
+    if (n == 0) return;
+    if (wrap) sel = ((sel % n) + n) % n;
+    else if (sel < 0) sel = 0;
+    else if (sel >= n) sel = n - 1;
+    l->sel = sel;
+
+    int top = l->top;
+    if (sel < top) top = sel;
+    else if (sel >= top + MAX_SHOW) top = sel - MAX_SHOW + 1;
+    if (top != l->top) {
+        int scroll = top - l->top;
+        l->top = top;
+        tiles_rebuild(l, scroll);
+    }
+    l->dirty = true;
+}
+
 bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
     if (!l || !l->open) return false;
-    int shown = l->match_count < MAX_SHOW ? l->match_count : MAX_SHOW;
     l->dirty = true;
 
     switch (sym) {
@@ -1237,7 +1300,7 @@ bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
          * already a rate, and doubling it would run away. */
         int step = sym == XKB_KEY_XF86AudioLowerVolume
                  ? server_knob_step(l->server, -1) : 1;
-        if (shown > 0) l->sel = (l->sel + shown - step % shown) % shown;
+        select_row(l, l->sel - step, true);
         return true;
     }
     case XKB_KEY_Down:
@@ -1245,9 +1308,15 @@ bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
     case XKB_KEY_XF86AudioRaiseVolume: {
         int step = sym == XKB_KEY_XF86AudioRaiseVolume
                  ? server_knob_step(l->server, +1) : 1;
-        if (shown > 0) l->sel = (l->sel + step) % shown;
+        select_row(l, l->sel + step, true);
         return true;
     }
+    case XKB_KEY_Page_Up:
+        select_row(l, l->sel - MAX_SHOW, false);
+        return true;
+    case XKB_KEY_Page_Down:
+        select_row(l, l->sel + MAX_SHOW, false);
+        return true;
     case XKB_KEY_BackSpace: {
         size_t len = strlen(l->query);
         /* strip one UTF-8 codepoint: continuation bytes, then the lead */
@@ -1255,7 +1324,7 @@ bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
         if (len > 0) len--;
         l->query[len] = '\0';
         refilter(l);
-        tiles_rebuild(l);
+        tiles_rebuild(l, 0);
         return true;
     }
     default:
@@ -1266,7 +1335,7 @@ bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
         && strlen(l->query) + strlen(utf8) <= QUERY_MAX) {
         strcat(l->query, utf8);
         refilter(l);
-        tiles_rebuild(l);
+        tiles_rebuild(l, 0);
         return true;
     }
     return true; /* swallow everything else while open */
@@ -1275,6 +1344,7 @@ bool launcher_handle_key(Launcher *l, xkb_keysym_t sym, const char *utf8) {
 /* Tile index under panel-local point, or -1. Uses the live body positions so
  * hit-testing matches what is drawn, even mid-flight. */
 static int tile_at(Launcher *l, double x, double y) {
+    if (y < BAR_H + BAR_GAP / 2.0) return -1; /* clipped away under the bar */
     for (int i = 0; i < l->tile_count; i++) {
         b2Vec2 c = b2Body_GetPosition(l->tiles[i]);
         if (fabs(x - m2px(c.x)) <= l->tile_w / 2.0 &&
@@ -1288,10 +1358,23 @@ static int tile_at(Launcher *l, double x, double y) {
 void launcher_handle_motion(Launcher *l, double lx, double ly) {
     if (!l || !l->open) return;
     int hit = tile_at(l, lx - l->px, ly - l->py);
-    if (hit >= 0 && hit != l->sel) {
-        l->sel = hit;
+    if (hit >= 0 && l->top + hit != l->sel) {
+        l->sel = l->top + hit;
         l->dirty = true;
     }
+}
+
+bool launcher_handle_axis(Launcher *l, double delta) {
+    if (!l || !l->open) return false;
+    /* A wheel notch is 15; a touchpad sends the same distance in many small
+     * pieces, and taking each piece as a row would fling the list. */
+    l->wheel += delta;
+    int rows = (int)(l->wheel / 15.0);
+    if (rows != 0) {
+        l->wheel -= rows * 15.0;
+        select_row(l, l->sel + rows, true);
+    }
+    return true;
 }
 
 bool launcher_handle_button(Launcher *l, double lx, double ly, bool pressed) {
@@ -1301,7 +1384,7 @@ bool launcher_handle_button(Launcher *l, double lx, double ly, bool pressed) {
     double x = lx - l->px, y = ly - l->py;
     int hit = tile_at(l, x, y);
     if (hit >= 0) {
-        l->sel = hit;
+        l->sel = l->top + hit;
         launch_selected(l);
         launcher_close(l);
     } else if (!(x >= 0 && x <= l->bar_w && y >= 0 && y <= BAR_H)) {
@@ -1328,9 +1411,9 @@ void launcher_tick(Launcher *l, double dt) {
      * freeze ~600ms on its first frame). So the panel animates smoothly first,
      * then previews fill in. */
     if (!moving && l->mode == LMODE_WALLPAPERS) {
-        int shown = l->match_count < MAX_SHOW ? l->match_count : MAX_SHOW;
+        int shown = shown_count(l);
         for (int i = 0; i < shown; i++) {
-            LApp *it = &items(l)[l->match[i]];
+            LApp *it = &items(l)[l->match[l->top + i]];
             if (it->icon_tried) continue;
             ensure_thumb(l, it);
             l->dirty = true;   /* redraw to show it */

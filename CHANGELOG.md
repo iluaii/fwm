@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### The launcher and the wallpaper picker scroll
+
+Both used to show the first eight matches and nothing past them, so a
+wallpaper you did not know the name of could not be reached. Now the arrows,
+Tab, the knob and the mouse wheel walk the whole list — off the end and round
+to the start — with the rows gliding after the selection, PageUp/PageDown
+move a screen at a time, and a thin bar on the right shows where you are.
+
 ### A solar system for a wallpaper
 
 The wallpaper picker has a new first row, **Solar system**, marked with a
