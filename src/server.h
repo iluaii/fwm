@@ -896,6 +896,9 @@ typedef struct FwmServer {
     int debug;
 
     int running;
+    /* The RESTART action is on its way out: the teardown keeps the saved
+     * session, and main() execs the binary again once it is done. */
+    int restarting;
 } FwmServer;
 
 bool server_init(FwmServer *server, bool debug);

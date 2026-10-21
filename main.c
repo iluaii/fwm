@@ -40,6 +40,48 @@ static void crash_handler_install(void) {
         sigaction(fatal[i], &sa, NULL);
 }
 
+/* The variables fwm sets for its own clients, as they were before it set them.
+ * A restarted fwm must start from these, not from its predecessor's: with its
+ * own WAYLAND_DISPLAY in the environment, wlroots would take that for a parent
+ * compositor and try to open a window inside the one that just went away. */
+static const char *const own_env[] = { "WAYLAND_DISPLAY", "DISPLAY", "FWM_SOCKET" };
+static char *saved_env[sizeof(own_env) / sizeof(own_env[0])];
+
+static void env_save(void) {
+    for (size_t i = 0; i < sizeof(own_env) / sizeof(own_env[0]); i++) {
+        const char *v = getenv(own_env[i]);
+        saved_env[i] = v ? strdup(v) : NULL;
+    }
+}
+
+static void env_restore(void) {
+    for (size_t i = 0; i < sizeof(own_env) / sizeof(own_env[0]); i++) {
+        if (saved_env[i]) setenv(own_env[i], saved_env[i], 1);
+        else unsetenv(own_env[i]);
+    }
+}
+
+/* Run fwm again in this same process, so whatever started it — fish on a tty,
+ * fwm-session — is still waiting on the same pid and notices nothing. The
+ * binary is the one at the path this one was started from, not this one: a
+ * rebuild replaces the file, and the new build is the point of restarting. */
+static void restart_exec(char *argv[]) {
+    env_restore();
+    char path[4096];
+    ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (n > 0) {
+        path[n] = '\0';
+        /* What the link reads once the file under it has been replaced. */
+        static const char deleted[] = " (deleted)";
+        size_t dl = sizeof(deleted) - 1;
+        if ((size_t)n > dl && strcmp(path + n - dl, deleted) == 0)
+            path[n - dl] = '\0';
+        execv(path, argv);
+    }
+    execvp(argv[0], argv);
+    perror("fwm: restart");
+}
+
 int main(int argc, char *argv[]) {
     /* The only arguments fwm takes. Everything else it is told comes from the
      * config file or the control socket, so there is no option parser here and
@@ -95,6 +137,8 @@ int main(int argc, char *argv[]) {
     crash_handler_install();
 #endif
 
+    env_save();
+
     FwmServer server;
     if (!server_init(&server, debug)) {
         fprintf(stderr, "Failed to initialize fwm-Wayland server\n");
@@ -105,6 +149,8 @@ int main(int argc, char *argv[]) {
      * server holding the screen — is a failure, not a session the user ended:
      * fwm-session reads 0 as "leave" and would end the login over it. */
     bool ran = server_run(&server);
+    bool restart = ran && server.restarting;
     server_destroy(&server);
+    if (restart) restart_exec(argv); /* returns only if the exec failed */
     return ran ? 0 : 1;
 }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Restart without losing the session
+
+A new action, `RESTART`, brings fwm down and straight back up from the binary
+on disk — so a fresh build takes over in one press — and the applications
+that were open come back on their desktops, exactly as after a crash.
+`EXIT` still ends the session for good. They are relaunched, not resumed:
+whatever was unsaved inside them is gone, as after a crash.
+
 ### The launcher and the wallpaper picker scroll
 
 Both used to show the first eight matches and nothing past them, so a

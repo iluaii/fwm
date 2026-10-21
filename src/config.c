@@ -76,7 +76,7 @@ void config_report_error(FwmConfig *cfg, const char *fmt, ...) {
  * is reported at load time instead of silently doing nothing when pressed. */
 int action_is_known(const char *a) {
     static const char *exact[] = {
-        "killclient", "toggle_tiling", "toggle_split", "EXIT", "show_hints",
+        "killclient", "toggle_tiling", "toggle_split", "EXIT", "RESTART", "show_hints",
         "show_errors", "reload_config", "wallpaper_picker", "wallpaper_reroll",
         "group_toggle", "group_next",
         "group_prev", "group_add", "cycle_gravity", "pin_window",

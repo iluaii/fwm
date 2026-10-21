@@ -322,6 +322,12 @@ void session_maybe_save(struct FwmServer *server) {
     snprintf(st->last_written, sizeof(st->last_written), "%s", snapshot);
 }
 
+void session_save_now(struct FwmServer *server) {
+    struct FwmSessionState *st = state_of(server);
+    if (st) st->last_save_time = 0.0;
+    session_maybe_save(server);
+}
+
 /* ── restoring ───────────────────────────────────────────────────────── */
 
 /* Split a tab-joined argv key and exec it. No shell: the arguments came out of
@@ -506,6 +512,7 @@ void session_clear_on_clean_exit(struct FwmServer *server) {
      * file surviving IS the evidence that a run died, and a debug run exiting
      * cleanly is no evidence about the session next door. */
     if (server->debug) return;
+    if (server->restarting) return;
     if (server->config.session.restore == SESSION_RESTORE_ALWAYS) return;
 
     char sp[512];

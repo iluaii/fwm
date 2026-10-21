@@ -176,6 +176,7 @@ static const char *action_label(const char *a, char *buf, size_t cap) {
         { "star_off",         "put the star out" },
         { "star_collapse",    "collapse the star" },
         { "EXIT",             "exit fwm" },
+        { "RESTART",          "restart fwm" },
     };
     for (size_t i = 0; i < sizeof(map)/sizeof(map[0]); i++) {
         if (!strcmp(a, map[i].action)) return map[i].label;

@@ -1127,6 +1127,7 @@ fit  = "pan"
 | `toggle_internal_output` | the same for the built-in laptop panel (eDP/LVDS/DSI) whichever screen the pointer is on. Closing the lid does this by itself, as long as another monitor is plugged in |
 | `outputs_on` | every monitor back on — the way out when you turned off the screen you were looking at |
 | `EXIT` | quit the compositor |
+| `RESTART` | restart the compositor from the binary on disk and relaunch the saved session, as after a crash |
 
 ### Mouse
 

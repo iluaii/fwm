@@ -1089,7 +1089,7 @@ tap = true
 #                 plane:-|+, liquids_menu, liquid_bucket,
 #                 show_hints, show_errors, modes_menu, reload_config,
 #                 wallpaper_picker, wallpaper_reroll, launcher, expo,
-#                 toggle_wrap, EXIT
+#                 toggle_wrap, EXIT, RESTART
 # screenshots:    screenshot, screenshot_region
 # monitors:       output_off, toggle_internal_output, outputs_on,
 #                 focus_output:1 .. focus_output:9
@@ -1449,6 +1449,10 @@ tap = true
 #[[radial.item]]
 #label = "Power"
 #text  = "⏻"
+#
+#[[radial.item.item]]
+#label  = "Restart fwm"
+#action = "RESTART"
 #
 #[[radial.item.item]]
 #label  = "Shut down"

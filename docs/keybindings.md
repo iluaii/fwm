@@ -165,6 +165,7 @@ action is reported when the config loads rather than doing nothing when pressed.
 | `mode:<name>` | switch keymaps; `mode:default` returns to the root map |
 | `global:<app_id>:<name>` | hand the key to an external shell — see below |
 | `EXIT` | end the session |
+| `RESTART` | restart fwm from the binary on disk — a fresh build — and relaunch the saved session, as after a crash |
 
 ### Giving a key to an external shell
 

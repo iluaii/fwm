@@ -49,6 +49,10 @@ struct FwmView;
  * self-debouncing — call it freely from the frame path. */
 void session_maybe_save(struct FwmServer *server);
 
+/* Write the window set now, past the rate limit: the last moment before a
+ * restart is exactly when the debounce could have skipped a change. */
+void session_save_now(struct FwmServer *server);
+
 /* Read the state file and relaunch what it lists. Call once, after the
  * compositor is accepting clients. */
 void session_restore(struct FwmServer *server);
@@ -68,7 +72,8 @@ void session_debug_desktop(struct FwmServer *server);
 
 /* Delete the state file because we are shutting down on purpose. A crash never
  * gets here, so the file surviving is exactly the signal that the last run was
- * not a clean one. Skipped when restore = "always". */
+ * not a clean one. Skipped when restore = "always", and on a restart, which
+ * wants the session back exactly as a crash would. */
 void session_clear_on_clean_exit(struct FwmServer *server);
 
 /* Free the pending-restore list. */

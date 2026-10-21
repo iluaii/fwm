@@ -544,6 +544,15 @@ void server_dispatch_action(FwmServer *server, const char *action) {
         server_state_note_exit();
         server->running = 0;
         wl_display_terminate(server->wl_display);
+    } else if (strcmp(action, "RESTART") == 0) {
+        /* No exit mark: to fwm-session this is not leaving, and the process
+         * it waits on is still there once main() has exec'd over it. The
+         * session is written before anything goes, and then left on disk for
+         * the new binary to find, the same as after a crash. */
+        session_save_now(server);
+        server->restarting = 1;
+        server->running = 0;
+        wl_display_terminate(server->wl_display);
     } else if (strcmp(action, "show_hints") == 0) {
         if (server->hints_buffer) {
             cairo_overlay_destroy(server->hints_buffer);
